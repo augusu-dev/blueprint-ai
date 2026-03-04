@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import supabase from './lib/supabase';
+import { supabase } from './lib/supabase'
 import AuthScreen from './AuthScreen';
 import Editor from './Editor';
 import './index.css';
