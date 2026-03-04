@@ -47,7 +47,7 @@ export default function SequenceNode({ data, id }) {
                     <div className="response-box">
                         {data.response || "Waiting for prompt..."}
                     </div>
-                    <button className="btn-run-ai" onClick={() => data.onRunAI && data.onRunAI(id)}>
+                    <button className="btn-run-ai" onClick={() => data.onRunAI && data.onRunAI(id, data.prompt, data.selectedApiKey)}>
                         <Play size={12} /> Run
                     </button>
                 </div>
