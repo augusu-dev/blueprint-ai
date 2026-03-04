@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import {
     ReactFlow,
+    ReactFlowProvider,
     MiniMap,
     Controls,
     Background,
@@ -80,39 +81,54 @@ function EditorContent() {
         }
 
         const fetchSpace = async () => {
-            const { data, error } = await supabase
-                .from('spaces')
-                .select('*')
-                .eq('id', spaceId)
-                .single();
-
-            if (error) {
-                console.error("Error fetching space:", error);
-                // Fallback for missing spaces
+            if (!supabase) {
+                console.warn("No Supabase instance found. Falling back to default canvas.");
                 setNodes(initialNodes);
                 setEdges(initialEdges);
-                setSpaceTitle('Untitled Space');
+                setSpaceTitle('Untitled Space (Local Development)');
                 return;
             }
 
-            if (data) {
-                setSpaceTitle(data.title || 'Untitled Space');
+            try {
+                const { data, error } = await supabase
+                    .from('spaces')
+                    .select('*')
+                    .eq('id', spaceId)
+                    .single();
 
-                if (data.nodes && data.nodes.length > 0) {
-                    setNodes(data.nodes);
-                } else {
+                if (error) {
+                    console.error("Error fetching space:", error);
+                    // Fallback for missing spaces
                     setNodes(initialNodes);
-                }
-
-                if (data.edges && data.edges.length > 0) {
-                    setEdges(data.edges);
-                } else {
                     setEdges(initialEdges);
+                    setSpaceTitle('Untitled Space');
+                    return;
                 }
 
-                if (data.viewport && Object.keys(data.viewport).length > 0) {
-                    setViewport({ x: data.viewport.x, y: data.viewport.y, zoom: data.viewport.zoom });
+                if (data) {
+                    setSpaceTitle(data.title || 'Untitled Space');
+
+                    if (data.nodes && data.nodes.length > 0) {
+                        setNodes(data.nodes);
+                    } else {
+                        setNodes(initialNodes);
+                    }
+
+                    if (data.edges && data.edges.length > 0) {
+                        setEdges(data.edges);
+                    } else {
+                        setEdges(initialEdges);
+                    }
+
+                    if (data.viewport && Object.keys(data.viewport).length > 0) {
+                        setViewport({ x: data.viewport.x, y: data.viewport.y, zoom: data.viewport.zoom });
+                    }
                 }
+            } catch (globalErr) {
+                console.error("Global space fetch failed:", globalErr);
+                setNodes(initialNodes);
+                setEdges(initialEdges);
+                setSpaceTitle('Untitled Space (Error)');
             }
         };
 
@@ -122,7 +138,7 @@ function EditorContent() {
     // Auto-save logic
     const saveTimerRef = useRef(null);
     useEffect(() => {
-        if (!spaceId || nodes.length === 0) return;
+        if (!spaceId || nodes.length === 0 || !supabase) return;
 
         // Clear existing timer
         if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
