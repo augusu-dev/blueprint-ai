@@ -66,25 +66,52 @@ export default function Editor() {
         );
     }, [setNodes]);
 
-    const runAIForNode = useCallback((id) => {
-        setNodes((nds) =>
-            nds.map((node) => {
-                if (node.id === id) {
-                    const prompt = node.data.prompt || "No prompt provided.";
-                    const selectedKeyIndex = node.data.selectedApiKey || 0;
-                    const keyToUse = apiKeys[selectedKeyIndex];
-                    // Mock AI response for now
-                    return {
-                        ...node,
-                        data: {
-                            ...node.data,
-                            response: `[API Key ${selectedKeyIndex + 1}=${keyToUse ? 'Set' : 'None'}] 🤖 AI Response to: "${prompt}"... (Simulated long response: The quick brown fox jumps over the lazy dog. This text is meant to test the dynamic height adjustment of the node. It should expand vertically instead of hiding the content or breaking the layout. React Flow allows nodes to autosize if their internal content grows, as long as CSS doesn't restrict it.)`
-                        }
-                    };
-                }
-                return node;
+    const runAIForNode = useCallback(async (id) => {
+        // First set to loading...
+        setNodes(nds => nds.map(node => {
+            if (node.id === id) {
+                return { ...node, data: { ...node.data, response: "Loading AI Response..." } };
+            }
+            return node;
+        }));
+
+        setNodes((nds) => {
+            const tempNodes = [...nds];
+            const targetNode = tempNodes.find(n => n.id === id);
+            if (!targetNode) return tempNodes;
+
+            const prompt = targetNode.data.prompt || "No prompt provided.";
+            const selectedKeyIndex = targetNode.data.selectedApiKey || 0;
+            const keyToUse = apiKeys[selectedKeyIndex];
+
+            if (!keyToUse) {
+                return nds.map(n => n.id === id ? { ...n, data: { ...n.data, response: `Error: API Key ${selectedKeyIndex + 1} is not set in Settings.` } } : n);
+            }
+
+            // Async call out
+            fetch('https://api.openai.com/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${keyToUse}`
+                },
+                body: JSON.stringify({
+                    model: 'gpt-4o-mini',
+                    messages: [{ role: 'user', content: prompt }]
+                })
             })
-        );
+                .then(res => res.json())
+                .then(data => {
+                    if (data.error) throw new Error(data.error.message);
+                    const reply = data.choices && data.choices[0] && data.choices[0].message.content;
+                    setNodes(current => current.map(n => n.id === id ? { ...n, data: { ...n.data, response: reply } } : n));
+                })
+                .catch(err => {
+                    setNodes(current => current.map(n => n.id === id ? { ...n, data: { ...n.data, response: `Error: ${err.message}` } } : n));
+                });
+
+            return nds;
+        });
     }, [apiKeys, setNodes]);
 
     const onQuickAdd = useCallback((sourceId, type) => {
@@ -155,11 +182,11 @@ export default function Editor() {
                     onConnect={onConnect}
                     nodeTypes={nodeTypes}
                     fitView
-                    colorMode="dark"
+                    colorMode="system"
                 >
                     <Controls />
-                    <MiniMap nodeStrokeWidth={3} backgroundColor="rgba(0,0,0,0.5)" />
-                    <Background variant="dots" gap={20} size={1} color="#333" />
+                    <MiniMap nodeStrokeWidth={3} zoomable pannable />
+                    <Background variant="dots" gap={20} size={1} />
                 </ReactFlow>
             </div>
 
