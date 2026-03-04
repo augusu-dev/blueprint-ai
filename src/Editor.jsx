@@ -36,7 +36,7 @@ const nodeTypes = {
     branchNode: BranchNode,
 };
 
-export default function Editor() {
+function EditorContent() {
     const { id: spaceId } = useParams();
     const navigate = useNavigate();
     const { setViewport } = useReactFlow();
@@ -521,3 +521,12 @@ export default function Editor() {
         </div>
     );
 }
+
+export default function Editor() {
+    return (
+        <ReactFlowProvider>
+            <EditorContent />
+        </ReactFlowProvider>
+    );
+}
+

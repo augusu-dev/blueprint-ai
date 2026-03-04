@@ -96,7 +96,7 @@ export default function Home() {
                         onMouseEnter={(e) => e.currentTarget.style.color = '#fff'}
                         onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-muted)'}
                     >
-                        <LogOut size={16} /> Sign Out
+                        <LogOut size={16} /> ログアウト
                     </button>
                 </div>
             </header>
@@ -118,25 +118,25 @@ export default function Home() {
                     <h2 style={{
                         fontSize: '3.5rem',
                         fontWeight: 800,
-                        lineHeight: 1.1,
+                        lineHeight: 1.2,
                         marginBottom: '1.5rem',
                         background: 'linear-gradient(135deg, #ffffff 0%, #94a3b8 100%)',
                         WebkitBackgroundClip: 'text',
                         WebkitTextFillColor: 'transparent',
                     }}>
-                        Think clearly.<br />Build visually.
+                        思考を直感的に組み上げよう。
                     </h2>
 
                     <p style={{
                         fontSize: '1.25rem',
                         color: 'var(--text-muted)',
                         marginBottom: '3rem',
-                        maxWidth: '600px',
+                        maxWidth: '650px',
                         margin: '0 auto 3rem auto',
                         lineHeight: 1.6
                     }}>
-                        Blueprint is a node-based interface that replaces linear chat.
-                        Design complex flows, swap AI models instantly, and ground your reasoning dynamically.
+                        Blueprintは直線的なチャットUIを置き換える、新次元のAI連携エディター。
+                        無限のキャンバスで高度なプロンプトフローを設計し、多彩なAIモデルを動的に操ることができます。
                     </p>
 
                     <button
@@ -161,7 +161,7 @@ export default function Home() {
                             e.currentTarget.style.boxShadow = '0 10px 25px rgba(59, 130, 246, 0.4)';
                         }}
                     >
-                        Create New Space <ChevronRight size={20} />
+                        新規スペースを開く <ChevronRight size={20} />
                     </button>
                 </div>
             </main>
