@@ -9,7 +9,7 @@ import {
     addEdge,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Settings, X, LogOut } from 'lucide-react';
+import { Settings, X, LogOut, Columns, Rows } from 'lucide-react';
 import { supabase } from './lib/supabase';
 
 import SequenceNode from './nodes/SequenceNode';
@@ -114,7 +114,7 @@ export default function Editor() {
             let reply = "";
 
             if (provider === 'gemini') {
-                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${keyToUse}`, {
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${keyToUse}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -216,12 +216,12 @@ export default function Editor() {
         <div className="editor-layout">
             <div className="editor-header glass-panel">
                 <div className="editor-header-left">
-                    <h2>Blueprint Space</h2>
-                    <button className="btn btn-secondary btn-sm ml-4" onClick={toggleDirection}>
-                        Layout: {direction === 'LR' ? 'Left to Right →' : 'Top to Bottom ↓'}
-                    </button>
+                    <h2>スペース</h2>
                 </div>
                 <div className="editor-controls">
+                    <button className="btn btn-icon" onClick={toggleDirection} title="Toggle Layout Direction">
+                        {direction === 'LR' ? <Columns size={20} /> : <Rows size={20} />}
+                    </button>
                     <button className="btn btn-icon" onClick={() => setShowSettings(true)} title="Settings">
                         <Settings size={20} />
                     </button>
