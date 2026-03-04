@@ -9,7 +9,8 @@ import {
     addEdge,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Settings, X } from 'lucide-react';
+import { Settings, X, LogOut } from 'lucide-react';
+import { supabase } from './lib/supabase';
 
 import SequenceNode from './nodes/SequenceNode';
 import LoopNode from './nodes/LoopNode';
@@ -181,8 +182,11 @@ export default function Editor() {
                     </button>
                 </div>
                 <div className="editor-controls">
-                    <button className="btn btn-icon" onClick={() => setShowSettings(true)}>
+                    <button className="btn btn-icon" onClick={() => setShowSettings(true)} title="Settings">
                         <Settings size={20} />
+                    </button>
+                    <button className="btn btn-icon" onClick={() => supabase.auth.signOut()} title="Log Out">
+                        <LogOut size={20} />
                     </button>
                 </div>
             </div>
