@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import {
     ReactFlow,
     MiniMap,
@@ -37,7 +37,20 @@ export default function Editor() {
     const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
     const [direction, setDirection] = useState('LR'); // LR = Left-to-Right, TB = Top-to-Bottom
     const [showSettings, setShowSettings] = useState(false);
-    const [apiKeys, setApiKeys] = useState(['', '', '', '', '']);
+    const [apiKeys, setApiKeys] = useState(() => {
+        const saved = localStorage.getItem('blueprint_api_keys');
+        if (saved) {
+            try {
+                const parsed = JSON.parse(saved);
+                if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+            } catch (e) { }
+        }
+        return ['']; // Default to 1 empty key
+    });
+
+    useEffect(() => {
+        localStorage.setItem('blueprint_api_keys', JSON.stringify(apiKeys));
+    }, [apiKeys]);
 
     const idRef = useRef(2);
 
@@ -150,10 +163,11 @@ export default function Editor() {
                 onChange: updateNodeData,
                 onAddBranch: onAddBranch,
                 onRunAI: runAIForNode,
-                onQuickAdd: onQuickAdd
+                onQuickAdd: onQuickAdd,
+                apiKeys: apiKeys
             }
         }));
-    }, [nodes, direction, updateNodeData, onAddBranch, runAIForNode, onQuickAdd]);
+    }, [nodes, direction, updateNodeData, onAddBranch, runAIForNode, onQuickAdd, apiKeys]);
 
     const toggleDirection = () => setDirection(d => d === 'LR' ? 'TB' : 'LR');
 
@@ -200,13 +214,23 @@ export default function Editor() {
                             </button>
                         </div>
                         <div className="settings-body">
-                            <p className="help-text" style={{ marginBottom: '1rem' }}>You can configure up to 5 OpenAI API Keys. They are stored locally.</p>
+                            <p className="help-text" style={{ marginBottom: '1rem' }}>Configure up to 5 OpenAI API Keys. They are saved locally in your browser to persist across reloads.</p>
                             {apiKeys.map((key, index) => (
                                 <div className="form-group" key={index} style={{ marginBottom: '0.75rem' }}>
-                                    <label>API Key {index + 1} {index === 0 && '(Default)'}</label>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
+                                        <label style={{ marginBottom: 0 }}>API Key {index + 1} {index === 0 && '(Default)'}</label>
+                                        {apiKeys.length > 1 && (
+                                            <button
+                                                className="btn-text-danger"
+                                                onClick={() => setApiKeys(apiKeys.filter((_, i) => i !== index))}
+                                            >
+                                                Remove
+                                            </button>
+                                        )}
+                                    </div>
                                     <input
                                         type="password"
-                                        placeholder={`sk-... (Key ${index + 1})`}
+                                        placeholder={`sk-... (OpenAI Key ${index + 1})`}
                                         value={key}
                                         onChange={(e) => {
                                             const newKeys = [...apiKeys];
@@ -216,6 +240,11 @@ export default function Editor() {
                                     />
                                 </div>
                             ))}
+                            {apiKeys.length < 5 && (
+                                <button className="btn btn-secondary btn-sm" style={{ marginTop: '0.5rem' }} onClick={() => setApiKeys([...apiKeys, ''])}>
+                                    + Add API Key
+                                </button>
+                            )}
                         </div>
                         <div className="settings-footer">
                             <button className="btn btn-primary" onClick={() => setShowSettings(false)}>Save</button>

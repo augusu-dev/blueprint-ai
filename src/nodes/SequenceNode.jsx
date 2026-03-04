@@ -29,11 +29,9 @@ export default function SequenceNode({ data, id }) {
                             onChange={(e) => data.onChange && data.onChange(id, 'selectedApiKey', parseInt(e.target.value))}
                             title="Select API Key"
                         >
-                            <option value={0}>Key 1</option>
-                            <option value={1}>Key 2</option>
-                            <option value={2}>Key 3</option>
-                            <option value={3}>Key 4</option>
-                            <option value={4}>Key 5</option>
+                            {data.apiKeys && data.apiKeys.map((_, i) => (
+                                <option key={i} value={i}>Key {i + 1}</option>
+                            ))}
                         </select>
                     </div>
                     <textarea
