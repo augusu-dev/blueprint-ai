@@ -49,14 +49,14 @@ export default function Editor() {
                             let provider = 'openai';
                             if (item.startsWith('AIza')) provider = 'gemini';
                             else if (item.startsWith('sk-ant')) provider = 'anthropic';
-                            return { key: item, provider };
+                            return { key: item, provider, model: '' };
                         }
-                        return item;
+                        return { ...item, model: item.model || '' };
                     });
                 }
             } catch (e) { }
         }
-        return [{ key: '', provider: 'openai' }]; // Default to 1 empty key obj
+        return [{ key: '', provider: 'openai', model: '' }]; // Default to 1 empty key obj
     });
 
     useEffect(() => {
@@ -114,7 +114,8 @@ export default function Editor() {
             let reply = "";
 
             if (provider === 'gemini') {
-                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${keyToUse}`, {
+                const modelToUse = userModel || 'gemini-1.5-flash-latest';
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelToUse}:generateContent?key=${keyToUse}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -126,6 +127,7 @@ export default function Editor() {
                 reply = data.candidates?.[0]?.content?.parts?.[0]?.text || "No response content received.";
 
             } else if (provider === 'anthropic') {
+                const modelToUse = userModel || 'claude-3-haiku-20240307';
                 const response = await fetch('https://api.anthropic.com/v1/messages', {
                     method: 'POST',
                     headers: {
@@ -135,7 +137,7 @@ export default function Editor() {
                         'anthropic-dangerously-allow-browser': 'true'
                     },
                     body: JSON.stringify({
-                        model: 'claude-3-haiku-20240307',
+                        model: modelToUse,
                         max_tokens: 1024,
                         messages: [{ role: 'user', content: prompt }]
                     })
@@ -144,8 +146,43 @@ export default function Editor() {
                 if (!response.ok) throw new Error(data.error?.message || `Anthropic API Error: ${response.status}`);
                 reply = data.content?.[0]?.text || "No response content received.";
 
+            } else if (provider === 'openrouter') {
+                const modelToUse = userModel || 'google/gemini-flash-1.5';
+                const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${keyToUse}`
+                    },
+                    body: JSON.stringify({
+                        model: modelToUse,
+                        messages: [{ role: 'user', content: prompt }]
+                    })
+                });
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error?.message || `OpenRouter Error: ${response.status}`);
+                reply = data.choices?.[0]?.message?.content || "No response content received.";
+
+            } else if (provider === 'glm') {
+                const modelToUse = userModel || 'glm-4';
+                const response = await fetch('https://open.bigmodel.cn/api/paas/v4/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${keyToUse}`
+                    },
+                    body: JSON.stringify({
+                        model: modelToUse,
+                        messages: [{ role: 'user', content: prompt }]
+                    })
+                });
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error?.message || `GLM API Error: ${response.status}`);
+                reply = data.choices?.[0]?.message?.content || "No response content received.";
+
             } else {
                 // Default: OpenAI
+                const modelToUse = userModel || 'gpt-4o-mini';
                 const response = await fetch('https://api.openai.com/v1/chat/completions', {
                     method: 'POST',
                     headers: {
@@ -153,7 +190,7 @@ export default function Editor() {
                         'Authorization': `Bearer ${keyToUse}`
                     },
                     body: JSON.stringify({
-                        model: 'gpt-4o-mini',
+                        model: modelToUse,
                         messages: [{ role: 'user', content: prompt }]
                     })
                 });
@@ -258,7 +295,12 @@ export default function Editor() {
                             </button>
                         </div>
                         <div className="settings-body">
-                            <p className="help-text" style={{ marginBottom: '1rem' }}>Configure up to 5 API Keys from different providers (OpenAI, Google Gemini, Anthropic). They are saved locally.</p>
+                            <div className="glass-panel" style={{ padding: '0.75rem', marginBottom: '1.5rem', borderRadius: '8px', background: 'rgba(59, 130, 246, 0.1)', border: '1px solid rgba(59, 130, 246, 0.3)' }}>
+                                <p style={{ fontSize: '0.85rem', margin: 0, fontWeight: 500, color: 'var(--text-color)' }}>
+                                    🔒 <strong>Security Note:</strong> Your API keys are stored <em>only</em> locally in your browser to persist across reloads. <strong>Blueprint AI does not store, collect, or transmit your keys to any external servers</strong> other than the direct AI providers you choose.
+                                </p>
+                            </div>
+                            <p className="help-text" style={{ marginBottom: '1rem' }}>Configure up to 5 API Keys from different providers. Leave "Model" blank to use the default.</p>
                             {apiKeys.map((item, index) => (
                                 <div className="form-group glass-panel" key={index} style={{ marginBottom: '1rem', padding: '0.75rem', borderRadius: '8px' }}>
                                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
@@ -288,15 +330,37 @@ export default function Editor() {
                                                 <option value="openai">OpenAI</option>
                                                 <option value="gemini">Google Gemini</option>
                                                 <option value="anthropic">Anthropic (Claude)</option>
+                                                <option value="openrouter">OpenRouter</option>
+                                                <option value="glm">GLM (ZhipuAI)</option>
                                             </select>
+                                        </div>
+                                        <div style={{ flex: 1 }}>
+                                            <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Model (Optional)</label>
+                                            <input
+                                                type="text"
+                                                className="node-input"
+                                                style={{ padding: '0.4rem', height: '34px' }}
+                                                placeholder={
+                                                    item.provider === 'gemini' ? "e.g., gemini-1.5-pro-latest" :
+                                                        item.provider === 'anthropic' ? "e.g., claude-3-opus-20240229" :
+                                                            item.provider === 'openrouter' ? "e.g., meta-llama/llama-3-8b-instruct" :
+                                                                item.provider === 'glm' ? "e.g., glm-4" : "e.g., gpt-4o"
+                                                }
+                                                value={item.model || ''}
+                                                onChange={(e) => {
+                                                    const newKeys = [...apiKeys];
+                                                    newKeys[index] = { ...newKeys[index], model: e.target.value };
+                                                    setApiKeys(newKeys);
+                                                }}
+                                            />
                                         </div>
                                     </div>
                                     <div>
                                         <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Secret Key</label>
                                         <input
                                             type="password"
-                                            placeholder={`Paste your secret key here...`}
-                                            value={item.key}
+                                            placeholder={`Paste your ${item.provider} secret key here...`}
+                                            value={item.key || ''}
                                             onChange={(e) => {
                                                 const newKeys = [...apiKeys];
                                                 newKeys[index] = { ...newKeys[index], key: e.target.value };
@@ -307,7 +371,7 @@ export default function Editor() {
                                 </div>
                             ))}
                             {apiKeys.length < 5 && (
-                                <button className="btn btn-secondary btn-sm" style={{ marginTop: '0.5rem', width: '100%' }} onClick={() => setApiKeys([...apiKeys, { key: '', provider: 'openai' }])}>
+                                <button className="btn btn-secondary btn-sm" style={{ marginTop: '0.5rem', width: '100%' }} onClick={() => setApiKeys([...apiKeys, { key: '', provider: 'openai', model: '' }])}>
                                     + Add Another API Key
                                 </button>
                             )}
