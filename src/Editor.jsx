@@ -357,8 +357,9 @@ export default function Editor() {
                                                     <>
                                                         <option value="gemini-3.1-pro-preview">gemini-3.1-pro-preview</option>
                                                         <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite</option>
-                                                        <option value="gemini-1.5-pro-latest">gemini-1.5-pro-latest</option>
-                                                        <option value="gemini-1.5-flash-latest">gemini-1.5-flash-latest</option>
+                                                        <option value="gemini-2.5-pro">gemini-2.5-pro</option>
+                                                        <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+                                                        <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite</option>
                                                     </>
                                                 )}
                                                 {item.provider === 'anthropic' && (
