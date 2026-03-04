@@ -7,11 +7,14 @@ import {
     useNodesState,
     useEdgesState,
     addEdge,
+    useReactFlow,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Settings, X, LogOut, Columns, Rows } from 'lucide-react';
+import { Settings, X, LogOut, Columns, Rows, Menu } from 'lucide-react';
 import { supabase } from './lib/supabase';
+import { useParams, useNavigate } from 'react-router-dom';
 
+import Sidebar from './Sidebar';
 import SequenceNode from './nodes/SequenceNode';
 import LoopNode from './nodes/LoopNode';
 import BranchNode from './nodes/BranchNode';
@@ -34,10 +37,16 @@ const nodeTypes = {
 };
 
 export default function Editor() {
-    const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
-    const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+    const { id: spaceId } = useParams();
+    const navigate = useNavigate();
+    const { setViewport } = useReactFlow();
+
+    const [nodes, setNodes, onNodesChange] = useNodesState([]);
+    const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+    const [spaceTitle, setSpaceTitle] = useState('Loading Space...');
     const [direction, setDirection] = useState('LR'); // LR = Left-to-Right, TB = Top-to-Bottom
     const [showSettings, setShowSettings] = useState(false);
+    const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [apiKeys, setApiKeys] = useState(() => {
         const saved = localStorage.getItem('blueprint_api_keys');
         if (saved) {
@@ -62,6 +71,87 @@ export default function Editor() {
     useEffect(() => {
         localStorage.setItem('blueprint_api_keys', JSON.stringify(apiKeys));
     }, [apiKeys]);
+
+    // Fetch initial space data
+    useEffect(() => {
+        if (!spaceId) {
+            navigate('/');
+            return;
+        }
+
+        const fetchSpace = async () => {
+            const { data, error } = await supabase
+                .from('spaces')
+                .select('*')
+                .eq('id', spaceId)
+                .single();
+
+            if (error) {
+                console.error("Error fetching space:", error);
+                // Fallback for missing spaces
+                setNodes(initialNodes);
+                setEdges(initialEdges);
+                setSpaceTitle('Untitled Space');
+                return;
+            }
+
+            if (data) {
+                setSpaceTitle(data.title || 'Untitled Space');
+
+                if (data.nodes && data.nodes.length > 0) {
+                    setNodes(data.nodes);
+                } else {
+                    setNodes(initialNodes);
+                }
+
+                if (data.edges && data.edges.length > 0) {
+                    setEdges(data.edges);
+                } else {
+                    setEdges(initialEdges);
+                }
+
+                if (data.viewport && Object.keys(data.viewport).length > 0) {
+                    setViewport({ x: data.viewport.x, y: data.viewport.y, zoom: data.viewport.zoom });
+                }
+            }
+        };
+
+        fetchSpace();
+    }, [spaceId, navigate, setNodes, setEdges, setViewport]);
+
+    // Auto-save logic
+    const saveTimerRef = useRef(null);
+    useEffect(() => {
+        if (!spaceId || nodes.length === 0) return;
+
+        // Clear existing timer
+        if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+
+        // Set a new debounce timer for 2 seconds
+        saveTimerRef.current = setTimeout(async () => {
+            try {
+                // In a real app we'd also get viewport from useReactFlow instance
+                const updates = {
+                    nodes: nodes,
+                    edges: edges,
+                    updated_at: new Date().toISOString()
+                };
+
+                await supabase
+                    .from('spaces')
+                    .update(updates)
+                    .eq('id', spaceId);
+
+                console.log("Auto-saved space", spaceId);
+            } catch (err) {
+                console.error("Auto-save failed", err);
+            }
+        }, 2000);
+
+        return () => {
+            if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+        };
+    }, [nodes, edges, spaceId]);
 
     const idRef = useRef(2);
 
@@ -120,7 +210,8 @@ export default function Editor() {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        contents: [{ parts: [{ text: prompt }] }]
+                        contents: [{ parts: [{ text: prompt }] }],
+                        tools: [{ googleSearch: {} }]
                     })
                 });
                 const data = await response.json();
@@ -252,9 +343,18 @@ export default function Editor() {
 
     return (
         <div className="editor-layout">
+            <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
+
+            {/* Header */}
             <div className="editor-header">
-                <div className="editor-header-left">
-                    <h2>スペース</h2>
+                <div className="editor-header-left" style={{ cursor: 'pointer' }}>
+                    <div
+                        onClick={() => setIsSidebarOpen(true)}
+                        style={{ background: 'var(--primary)', padding: '0.4rem', borderRadius: '10px', color: 'white', marginRight: '0.75rem', display: 'flex' }}
+                    >
+                        <Menu size={20} />
+                    </div>
+                    <h2 onClick={() => navigate('/')}>Blueprint</h2>
                 </div>
                 <div className="editor-controls">
                     <button className="btn btn-icon" onClick={toggleDirection} title="Toggle Layout Direction">
