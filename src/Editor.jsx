@@ -43,10 +43,20 @@ export default function Editor() {
         if (saved) {
             try {
                 const parsed = JSON.parse(saved);
-                if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                    return parsed.map(item => {
+                        if (typeof item === 'string') {
+                            let provider = 'openai';
+                            if (item.startsWith('AIza')) provider = 'gemini';
+                            else if (item.startsWith('sk-ant')) provider = 'anthropic';
+                            return { key: item, provider };
+                        }
+                        return item;
+                    });
+                }
             } catch (e) { }
         }
-        return ['']; // Default to 1 empty key
+        return [{ key: '', provider: 'openai' }]; // Default to 1 empty key obj
     });
 
     useEffect(() => {
@@ -80,52 +90,82 @@ export default function Editor() {
         );
     }, [setNodes]);
 
-    const runAIForNode = useCallback(async (id) => {
+    const runAIForNode = useCallback(async (id, promptText, selectedKeyIndex) => {
+        const prompt = promptText || "No prompt provided.";
+        const keyIndex = selectedKeyIndex || 0;
+        const apiKeyObj = apiKeys[keyIndex];
+        const keyToUse = apiKeyObj?.key?.trim();
+        const provider = apiKeyObj?.provider || 'openai';
+
+        if (!keyToUse) {
+            setNodes(nds => nds.map(n => n.id === id ? { ...n, data: { ...n.data, response: `Error: API Key ${keyIndex + 1} (${provider}) is not set in Settings.` } } : n));
+            return;
+        }
+
         // First set to loading...
         setNodes(nds => nds.map(node => {
             if (node.id === id) {
-                return { ...node, data: { ...node.data, response: "Loading AI Response..." } };
+                return { ...node, data: { ...node.data, response: `Loading AI Response (${provider})...` } };
             }
             return node;
         }));
 
-        setNodes((nds) => {
-            const tempNodes = [...nds];
-            const targetNode = tempNodes.find(n => n.id === id);
-            if (!targetNode) return tempNodes;
+        try {
+            let reply = "";
 
-            const prompt = targetNode.data.prompt || "No prompt provided.";
-            const selectedKeyIndex = targetNode.data.selectedApiKey || 0;
-            const keyToUse = apiKeys[selectedKeyIndex];
+            if (provider === 'gemini') {
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${keyToUse}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        contents: [{ parts: [{ text: prompt }] }]
+                    })
+                });
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error?.message || `Gemini API Error: ${response.status}`);
+                reply = data.candidates?.[0]?.content?.parts?.[0]?.text || "No response content received.";
 
-            if (!keyToUse) {
-                return nds.map(n => n.id === id ? { ...n, data: { ...n.data, response: `Error: API Key ${selectedKeyIndex + 1} is not set in Settings.` } } : n);
+            } else if (provider === 'anthropic') {
+                const response = await fetch('https://api.anthropic.com/v1/messages', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'x-api-key': keyToUse,
+                        'anthropic-version': '2023-06-01',
+                        'anthropic-dangerously-allow-browser': 'true'
+                    },
+                    body: JSON.stringify({
+                        model: 'claude-3-haiku-20240307',
+                        max_tokens: 1024,
+                        messages: [{ role: 'user', content: prompt }]
+                    })
+                });
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error?.message || `Anthropic API Error: ${response.status}`);
+                reply = data.content?.[0]?.text || "No response content received.";
+
+            } else {
+                // Default: OpenAI
+                const response = await fetch('https://api.openai.com/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${keyToUse}`
+                    },
+                    body: JSON.stringify({
+                        model: 'gpt-4o-mini',
+                        messages: [{ role: 'user', content: prompt }]
+                    })
+                });
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error?.message || `OpenAI API Error: ${response.status}`);
+                reply = data.choices?.[0]?.message?.content || "No response content received.";
             }
 
-            // Async call out
-            fetch('https://api.openai.com/v1/chat/completions', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${keyToUse}`
-                },
-                body: JSON.stringify({
-                    model: 'gpt-4o-mini',
-                    messages: [{ role: 'user', content: prompt }]
-                })
-            })
-                .then(res => res.json())
-                .then(data => {
-                    if (data.error) throw new Error(data.error.message);
-                    const reply = data.choices && data.choices[0] && data.choices[0].message.content;
-                    setNodes(current => current.map(n => n.id === id ? { ...n, data: { ...n.data, response: reply } } : n));
-                })
-                .catch(err => {
-                    setNodes(current => current.map(n => n.id === id ? { ...n, data: { ...n.data, response: `Error: ${err.message}` } } : n));
-                });
-
-            return nds;
-        });
+            setNodes(nds => nds.map(n => n.id === id ? { ...n, data: { ...n.data, response: reply } } : n));
+        } catch (err) {
+            setNodes(nds => nds.map(n => n.id === id ? { ...n, data: { ...n.data, response: `Error: ${err.message}` } } : n));
+        }
     }, [apiKeys, setNodes]);
 
     const onQuickAdd = useCallback((sourceId, type) => {
@@ -218,11 +258,11 @@ export default function Editor() {
                             </button>
                         </div>
                         <div className="settings-body">
-                            <p className="help-text" style={{ marginBottom: '1rem' }}>Configure up to 5 OpenAI API Keys. They are saved locally in your browser to persist across reloads.</p>
-                            {apiKeys.map((key, index) => (
-                                <div className="form-group" key={index} style={{ marginBottom: '0.75rem' }}>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
-                                        <label style={{ marginBottom: 0 }}>API Key {index + 1} {index === 0 && '(Default)'}</label>
+                            <p className="help-text" style={{ marginBottom: '1rem' }}>Configure up to 5 API Keys from different providers (OpenAI, Google Gemini, Anthropic). They are saved locally.</p>
+                            {apiKeys.map((item, index) => (
+                                <div className="form-group glass-panel" key={index} style={{ marginBottom: '1rem', padding: '0.75rem', borderRadius: '8px' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                                        <label style={{ marginBottom: 0, fontWeight: 600 }}>API Key {index + 1} {index === 0 && '(Default)'}</label>
                                         {apiKeys.length > 1 && (
                                             <button
                                                 className="btn-text-danger"
@@ -232,21 +272,43 @@ export default function Editor() {
                                             </button>
                                         )}
                                     </div>
-                                    <input
-                                        type="password"
-                                        placeholder={`sk-... (OpenAI Key ${index + 1})`}
-                                        value={key}
-                                        onChange={(e) => {
-                                            const newKeys = [...apiKeys];
-                                            newKeys[index] = e.target.value;
-                                            setApiKeys(newKeys);
-                                        }}
-                                    />
+                                    <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                                        <div style={{ flex: 1 }}>
+                                            <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Provider</label>
+                                            <select
+                                                className="node-input"
+                                                style={{ padding: '0.4rem', height: '34px' }}
+                                                value={item.provider}
+                                                onChange={(e) => {
+                                                    const newKeys = [...apiKeys];
+                                                    newKeys[index] = { ...newKeys[index], provider: e.target.value };
+                                                    setApiKeys(newKeys);
+                                                }}
+                                            >
+                                                <option value="openai">OpenAI</option>
+                                                <option value="gemini">Google Gemini</option>
+                                                <option value="anthropic">Anthropic (Claude)</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Secret Key</label>
+                                        <input
+                                            type="password"
+                                            placeholder={`Paste your secret key here...`}
+                                            value={item.key}
+                                            onChange={(e) => {
+                                                const newKeys = [...apiKeys];
+                                                newKeys[index] = { ...newKeys[index], key: e.target.value };
+                                                setApiKeys(newKeys);
+                                            }}
+                                        />
+                                    </div>
                                 </div>
                             ))}
                             {apiKeys.length < 5 && (
-                                <button className="btn btn-secondary btn-sm" style={{ marginTop: '0.5rem' }} onClick={() => setApiKeys([...apiKeys, ''])}>
-                                    + Add API Key
+                                <button className="btn btn-secondary btn-sm" style={{ marginTop: '0.5rem', width: '100%' }} onClick={() => setApiKeys([...apiKeys, { key: '', provider: 'openai' }])}>
+                                    + Add Another API Key
                                 </button>
                             )}
                         </div>

@@ -33,8 +33,8 @@ export default function BranchNode({ data, id }) {
                             onChange={(e) => data.onChange && data.onChange(id, 'selectedApiKey', parseInt(e.target.value))}
                             title="Select API Key"
                         >
-                            {data.apiKeys && data.apiKeys.map((_, i) => (
-                                <option key={i} value={i}>Key {i + 1}</option>
+                            {data.apiKeys && data.apiKeys.map((item, i) => (
+                                <option key={i} value={i}>Key {i + 1} ({item?.provider || 'openai'})</option>
                             ))}
                         </select>
                     </div>
