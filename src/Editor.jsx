@@ -16,6 +16,7 @@ import { supabase } from './lib/supabase';
 import { useParams, useNavigate } from 'react-router-dom';
 
 import Sidebar from './Sidebar';
+import LinearChat from './LinearChat';
 import SequenceNode from './nodes/SequenceNode';
 import LoopNode from './nodes/LoopNode';
 import BranchNode from './nodes/BranchNode';
@@ -48,6 +49,11 @@ function EditorContent() {
     const [direction, setDirection] = useState('LR'); // LR = Left-to-Right, TB = Top-to-Bottom
     const [showSettings, setShowSettings] = useState(false);
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+
+    // Linear Chat State
+    const [isChatOpen, setIsChatOpen] = useState(false);
+    const [activeChatNodeId, setActiveChatNodeId] = useState(null);
+
     const [apiKeys, setApiKeys] = useState(() => {
         const saved = localStorage.getItem('blueprint_api_keys');
         if (saved) {
@@ -350,10 +356,14 @@ function EditorContent() {
                 onAddBranch: onAddBranch,
                 onRunAI: runAIForNode,
                 onQuickAdd: onQuickAdd,
+                onOpenChat: (nodeId) => {
+                    setActiveChatNodeId(nodeId);
+                    setIsChatOpen(true);
+                },
                 apiKeys: apiKeys
             }
         }));
-    }, [nodes, direction, updateNodeData, onAddBranch, runAIForNode, onQuickAdd, apiKeys]);
+    }, [nodes, direction, updateNodeData, onAddBranch, runAIForNode, onQuickAdd, apiKeys, setActiveChatNodeId, setIsChatOpen]);
 
     const toggleDirection = () => setDirection(d => d === 'LR' ? 'TB' : 'LR');
 
@@ -397,6 +407,13 @@ function EditorContent() {
                     <MiniMap nodeStrokeWidth={3} zoomable pannable />
                     <Background variant="dots" gap={20} size={1} />
                 </ReactFlow>
+
+                <LinearChat
+                    isOpen={isChatOpen}
+                    onClose={() => setIsChatOpen(false)}
+                    node={nodes.find(n => n.id === activeChatNodeId)}
+                    onUpdateNodeData={updateNodeData}
+                />
             </div>
 
             {showSettings && (

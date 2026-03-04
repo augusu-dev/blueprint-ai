@@ -20,44 +20,45 @@ export default function SequenceNode({ data, id }) {
             </div>
 
             <div className="node-body">
-                <div className="input-group">
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
-                        <label style={{ marginBottom: 0 }}>Prompt / Instruction</label>
-                        <select
-                            className="node-select-sm"
-                            defaultValue={data.selectedApiKey || 0}
-                            onChange={(e) => data.onChange && data.onChange(id, 'selectedApiKey', parseInt(e.target.value))}
-                            title="Select API Key"
-                        >
-                            {data.apiKeys && data.apiKeys.map((item, i) => (
-                                <option key={i} value={i}>Key {i + 1} ({item?.provider || 'openai'})</option>
-                            ))}
-                        </select>
-                    </div>
-                    <textarea
-                        placeholder="Tell the AI what to do..."
-                        className="node-input"
-                        defaultValue={data.prompt || ''}
-                        onChange={(e) => data.onChange && data.onChange(id, 'prompt', e.target.value)}
-                    />
-                </div>
-
-                <div className="ai-response">
-                    <label>AI Response</label>
-                    <div className="response-box">
-                        {data.response || "Waiting for prompt..."}
-                    </div>
-                    <button className="btn-run-ai" onClick={() => data.onRunAI && data.onRunAI(id, data.prompt, data.selectedApiKey)}>
-                        <Play size={12} /> Run
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                    <button
+                        onClick={() => data.onOpenChat && data.onOpenChat(id)}
+                        style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.5rem',
+                            background: 'var(--primary)',
+                            color: 'white',
+                            border: 'none',
+                            padding: '0.5rem 1rem',
+                            borderRadius: '20px',
+                            cursor: 'pointer',
+                            fontSize: '0.9rem',
+                            fontWeight: 600,
+                            boxShadow: '0 4px 10px rgba(59, 130, 246, 0.3)'
+                        }}
+                    >
+                        💬 Chat
                     </button>
+
+                    <select
+                        className="node-select-sm"
+                        defaultValue={data.selectedApiKey || 0}
+                        onChange={(e) => data.onChange && data.onChange(id, 'selectedApiKey', parseInt(e.target.value))}
+                        title="API Key Select"
+                        style={{ maxWidth: '100px' }}
+                    >
+                        {data.apiKeys && data.apiKeys.map((item, i) => (
+                            <option key={i} value={i}>Key {i + 1} ({item?.provider || 'openai'})</option>
+                        ))}
+                    </select>
                 </div>
             </div>
 
-            <div className="node-quick-add">
-                <span>+ Add Next:</span>
-                <button onClick={() => data.onQuickAdd(id, 'sequenceNode')}>Seq</button>
-                <button onClick={() => data.onQuickAdd(id, 'loopNode')}>Loop</button>
-                <button onClick={() => data.onQuickAdd(id, 'branchNode')}>Branch</button>
+            <div className="node-quick-add" style={{ padding: '0.5rem', display: 'flex', gap: '0.25rem', justifyContent: 'center' }}>
+                <button onClick={() => data.onQuickAdd(id, 'sequenceNode')} title="Sequence Node">+</button>
+                <button onClick={() => data.onQuickAdd(id, 'loopNode')} title="Loop Node">↻</button>
+                <button onClick={() => data.onQuickAdd(id, 'branchNode')} title="Branch Node">↗</button>
             </div>
 
             <Handle type="source" position={sourcePos} className="custom-handle" />
