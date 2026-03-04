@@ -7,7 +7,8 @@
     font-family: 'Inter', sans-serif;
     color: var(--text-main);
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
-    overflow: hidden;
+    overflow: visible;
+    height: auto;
     transition: box-shadow 0.2s, border-color 0.2s;
 }
 
@@ -68,13 +69,24 @@
 .node-input,
 .node-select {
     width: 100%;
-    background: rgba(0, 0, 0, 0.3);
+    background: var(--bg-dark);
     border: 1px solid var(--panel-border);
     border-radius: 6px;
     padding: 0.5rem;
-    color: white;
+    color: var(--text-main);
     font-family: inherit;
     font-size: 0.85rem;
+}
+
+.node-select-sm {
+    background: var(--bg-dark);
+    border: 1px solid var(--panel-border);
+    border-radius: 4px;
+    padding: 0.1rem 0.3rem;
+    color: var(--text-main);
+    font-size: 0.65rem;
+    outline: none;
+    cursor: pointer;
 }
 
 .node-input:focus,
@@ -133,13 +145,16 @@ textarea.node-input {
 }
 
 .response-box {
-    background: rgba(0, 0, 0, 0.4);
+    background: var(--bg-dark);
     border: 1px dashed var(--panel-border);
     border-radius: 6px;
     padding: 0.5rem;
     font-size: 0.8rem;
     color: var(--text-muted);
     min-height: 48px;
+    height: auto;
+    white-space: pre-wrap;
+    word-wrap: break-word;
 }
 
 .btn-run-ai {
@@ -167,8 +182,10 @@ textarea.node-input {
     align-items: center;
     gap: 0.25rem;
     padding: 0.5rem 1rem;
-    background: rgba(0, 0, 0, 0.2);
+    background: var(--bg-dark);
     border-top: 1px solid var(--panel-border);
+    border-bottom-left-radius: 12px;
+    border-bottom-right-radius: 12px;
     font-size: 0.7rem;
     color: var(--text-muted);
 }

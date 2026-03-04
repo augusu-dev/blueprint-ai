@@ -25,7 +25,21 @@ export default function BranchNode({ data, id }) {
 
             <div className="node-body">
                 <div className="input-group">
-                    <label>Routing Prompt / Condition</label>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
+                        <label style={{ marginBottom: 0 }}>Routing Prompt / Condition</label>
+                        <select
+                            className="node-select-sm"
+                            defaultValue={data.selectedApiKey || 0}
+                            onChange={(e) => data.onChange && data.onChange(id, 'selectedApiKey', parseInt(e.target.value))}
+                            title="Select API Key"
+                        >
+                            <option value={0}>Key 1</option>
+                            <option value={1}>Key 2</option>
+                            <option value={2}>Key 3</option>
+                            <option value={3}>Key 4</option>
+                            <option value={4}>Key 5</option>
+                        </select>
+                    </div>
                     <textarea
                         placeholder="Condition to evaluate..."
                         className="node-input"

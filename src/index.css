@@ -16,6 +16,17 @@
   --node-branch: #ec4899;
 }
 
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg-dark: #f8fafc;
+    --bg-dark-grid: #e2e8f0;
+    --panel-bg: rgba(255, 255, 255, 0.8);
+    --panel-border: rgba(0, 0, 0, 0.1);
+    --text-main: #0f172a;
+    --text-muted: #64748b;
+  }
+}
+
 * {
   box-sizing: border-box;
   margin: 0;
@@ -94,7 +105,7 @@ label {
 }
 
 input {
-  background: rgba(0, 0, 0, 0.2);
+  background: var(--bg-dark);
   border: 1px solid var(--panel-border);
   padding: 0.75rem 1rem;
   border-radius: 8px;

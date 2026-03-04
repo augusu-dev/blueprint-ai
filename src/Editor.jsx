@@ -37,7 +37,7 @@ export default function Editor() {
     const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
     const [direction, setDirection] = useState('LR'); // LR = Left-to-Right, TB = Top-to-Bottom
     const [showSettings, setShowSettings] = useState(false);
-    const [apiKey, setApiKey] = useState('');
+    const [apiKeys, setApiKeys] = useState(['', '', '', '', '']);
 
     const idRef = useRef(2);
 
@@ -71,19 +71,21 @@ export default function Editor() {
             nds.map((node) => {
                 if (node.id === id) {
                     const prompt = node.data.prompt || "No prompt provided.";
+                    const selectedKeyIndex = node.data.selectedApiKey || 0;
+                    const keyToUse = apiKeys[selectedKeyIndex];
                     // Mock AI response for now
                     return {
                         ...node,
                         data: {
                             ...node.data,
-                            response: `[API=${apiKey ? 'Set' : 'None'}] 🤖 AI Response to: "${prompt}"...`
+                            response: `[API Key ${selectedKeyIndex + 1}=${keyToUse ? 'Set' : 'None'}] 🤖 AI Response to: "${prompt}"... (Simulated long response: The quick brown fox jumps over the lazy dog. This text is meant to test the dynamic height adjustment of the node. It should expand vertically instead of hiding the content or breaking the layout. React Flow allows nodes to autosize if their internal content grows, as long as CSS doesn't restrict it.)`
                         }
                     };
                 }
                 return node;
             })
         );
-    }, [apiKey, setNodes]);
+    }, [apiKeys, setNodes]);
 
     const onQuickAdd = useCallback((sourceId, type) => {
         setNodes((nds) => {
@@ -171,16 +173,22 @@ export default function Editor() {
                             </button>
                         </div>
                         <div className="settings-body">
-                            <div className="form-group">
-                                <label>OpenAI API Key</label>
-                                <input
-                                    type="password"
-                                    placeholder="sk-..."
-                                    value={apiKey}
-                                    onChange={(e) => setApiKey(e.target.value)}
-                                />
-                                <p className="help-text">Your API key is stored locally in the browser.</p>
-                            </div>
+                            <p className="help-text" style={{ marginBottom: '1rem' }}>You can configure up to 5 OpenAI API Keys. They are stored locally.</p>
+                            {apiKeys.map((key, index) => (
+                                <div className="form-group" key={index} style={{ marginBottom: '0.75rem' }}>
+                                    <label>API Key {index + 1} {index === 0 && '(Default)'}</label>
+                                    <input
+                                        type="password"
+                                        placeholder={`sk-... (Key ${index + 1})`}
+                                        value={key}
+                                        onChange={(e) => {
+                                            const newKeys = [...apiKeys];
+                                            newKeys[index] = e.target.value;
+                                            setApiKeys(newKeys);
+                                        }}
+                                    />
+                                </div>
+                            ))}
                         </div>
                         <div className="settings-footer">
                             <button className="btn btn-primary" onClick={() => setShowSettings(false)}>Save</button>
