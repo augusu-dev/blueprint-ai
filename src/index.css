@@ -24,6 +24,19 @@
     --panel-border: rgba(0, 0, 0, 0.1);
     --text-main: #0f172a;
     --text-muted: #64748b;
+    --action-hover: #059669;
+  }
+
+  .editor-header {
+    background: rgba(255, 255, 255, 0.6) !important;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.05) !important;
+  }
+
+  .editor-header-left h2 {
+    background: linear-gradient(90deg, #0f172a, #64748b) !important;
+    background-clip: text !important;
+    -webkit-background-clip: text !important;
+    -webkit-text-fill-color: transparent !important;
   }
 }
 
@@ -189,10 +202,25 @@ input:focus {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0.5rem 1.5rem;
+  padding: 0.8rem 2rem;
   z-index: 10;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
-  /* Lighter shadow for top bar */
+  background: rgba(15, 17, 21, 0.5);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
+}
+
+.editor-header-left h2 {
+  font-size: 1.25rem;
+  font-weight: 700;
+  margin: 0;
+  background: linear-gradient(90deg, #ffffff, #94a3b8);
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  user-select: none;
+  letter-spacing: 0.5px;
 }
 
 .editor-header-left {

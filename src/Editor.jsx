@@ -114,7 +114,7 @@ export default function Editor() {
             let reply = "";
 
             if (provider === 'gemini') {
-                const modelToUse = userModel || 'gemini-1.5-flash-latest';
+                const modelToUse = userModel || 'gemini-3.1-pro-preview';
                 const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelToUse}:generateContent?key=${keyToUse}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -127,7 +127,7 @@ export default function Editor() {
                 reply = data.candidates?.[0]?.content?.parts?.[0]?.text || "No response content received.";
 
             } else if (provider === 'anthropic') {
-                const modelToUse = userModel || 'claude-3-haiku-20240307';
+                const modelToUse = userModel || 'claude-4.6-sonnet';
                 const response = await fetch('https://api.anthropic.com/v1/messages', {
                     method: 'POST',
                     headers: {
@@ -147,7 +147,7 @@ export default function Editor() {
                 reply = data.content?.[0]?.text || "No response content received.";
 
             } else if (provider === 'openrouter') {
-                const modelToUse = userModel || 'google/gemini-flash-1.5';
+                const modelToUse = userModel || 'google/gemini-3.1-pro-preview';
                 const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
                     method: 'POST',
                     headers: {
@@ -164,7 +164,7 @@ export default function Editor() {
                 reply = data.choices?.[0]?.message?.content || "No response content received.";
 
             } else if (provider === 'glm') {
-                const modelToUse = userModel || 'glm-4';
+                const modelToUse = userModel || 'glm-4-plus';
                 const response = await fetch('https://open.bigmodel.cn/api/paas/v4/chat/completions', {
                     method: 'POST',
                     headers: {
@@ -182,7 +182,7 @@ export default function Editor() {
 
             } else {
                 // Default: OpenAI
-                const modelToUse = userModel || 'gpt-4o-mini';
+                const modelToUse = userModel || 'gpt-4o';
                 const response = await fetch('https://api.openai.com/v1/chat/completions', {
                     method: 'POST',
                     headers: {
@@ -251,7 +251,7 @@ export default function Editor() {
 
     return (
         <div className="editor-layout">
-            <div className="editor-header glass-panel">
+            <div className="editor-header">
                 <div className="editor-header-left">
                     <h2>スペース</h2>
                 </div>
@@ -261,9 +261,6 @@ export default function Editor() {
                     </button>
                     <button className="btn btn-icon" onClick={() => setShowSettings(true)} title="Settings">
                         <Settings size={20} />
-                    </button>
-                    <button className="btn btn-icon" onClick={() => supabase.auth.signOut()} title="Log Out">
-                        <LogOut size={20} />
                     </button>
                 </div>
             </div>
@@ -335,24 +332,58 @@ export default function Editor() {
                                             </select>
                                         </div>
                                         <div style={{ flex: 1 }}>
-                                            <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Model (Optional)</label>
-                                            <input
-                                                type="text"
+                                            <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Model</label>
+                                            <select
                                                 className="node-input"
                                                 style={{ padding: '0.4rem', height: '34px' }}
-                                                placeholder={
-                                                    item.provider === 'gemini' ? "e.g., gemini-1.5-pro-latest" :
-                                                        item.provider === 'anthropic' ? "e.g., claude-3-opus-20240229" :
-                                                            item.provider === 'openrouter' ? "e.g., meta-llama/llama-3-8b-instruct" :
-                                                                item.provider === 'glm' ? "e.g., glm-4" : "e.g., gpt-4o"
-                                                }
                                                 value={item.model || ''}
                                                 onChange={(e) => {
                                                     const newKeys = [...apiKeys];
                                                     newKeys[index] = { ...newKeys[index], model: e.target.value };
                                                     setApiKeys(newKeys);
                                                 }}
-                                            />
+                                            >
+                                                <option value="">Default (Auto)</option>
+                                                {item.provider === 'openai' && (
+                                                    <>
+                                                        <option value="gpt-5.3-chat-latest">gpt-5.3-chat-latest</option>
+                                                        <option value="gpt-4o">gpt-4o</option>
+                                                        <option value="gpt-4o-mini">gpt-4o-mini</option>
+                                                        <option value="o4-mini">o4-mini</option>
+                                                        <option value="o3-mini">o3-mini</option>
+                                                    </>
+                                                )}
+                                                {item.provider === 'gemini' && (
+                                                    <>
+                                                        <option value="gemini-3.1-pro-preview">gemini-3.1-pro-preview</option>
+                                                        <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite</option>
+                                                        <option value="gemini-1.5-pro-latest">gemini-1.5-pro-latest</option>
+                                                        <option value="gemini-1.5-flash-latest">gemini-1.5-flash-latest</option>
+                                                    </>
+                                                )}
+                                                {item.provider === 'anthropic' && (
+                                                    <>
+                                                        <option value="claude-4.6-opus">claude-4.6-opus</option>
+                                                        <option value="claude-4.6-sonnet">claude-4.6-sonnet</option>
+                                                        <option value="claude-4.5-haiku">claude-4.5-haiku</option>
+                                                        <option value="claude-3-5-sonnet-20241022">claude-3-5-sonnet</option>
+                                                    </>
+                                                )}
+                                                {item.provider === 'openrouter' && (
+                                                    <>
+                                                        <option value="google/gemini-3.1-pro-preview">Google Gemini 3.1 Pro</option>
+                                                        <option value="anthropic/claude-4.6-sonnet">Claude 4.6 Sonnet</option>
+                                                        <option value="openai/gpt-5.3-chat-latest">GPT-5.3 Chat Latest</option>
+                                                        <option value="meta-llama/llama-3.3-70b-instruct">Llama 3.3 70B</option>
+                                                    </>
+                                                )}
+                                                {item.provider === 'glm' && (
+                                                    <>
+                                                        <option value="glm-4-plus">glm-4-plus</option>
+                                                        <option value="glm-4v-plus">glm-4v-plus</option>
+                                                    </>
+                                                )}
+                                            </select>
                                         </div>
                                     </div>
                                     <div>
@@ -376,8 +407,11 @@ export default function Editor() {
                                 </button>
                             )}
                         </div>
-                        <div className="settings-footer">
-                            <button className="btn btn-primary" onClick={() => setShowSettings(false)}>Save</button>
+                        <div className="settings-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <button className="btn-text-danger" style={{ fontSize: '0.85rem' }} onClick={() => { setShowSettings(false); supabase.auth.signOut(); }}>
+                                <LogOut size={16} style={{ display: 'inline', verticalAlign: 'text-bottom', marginRight: '4px' }} /> Log Out
+                            </button>
+                            <button className="btn btn-primary" style={{ width: 'auto', padding: '0.5rem 1.5rem' }} onClick={() => setShowSettings(false)}>Save Settings</button>
                         </div>
                     </div>
                 </div>
