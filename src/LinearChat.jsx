@@ -30,7 +30,7 @@ export default function LinearChat({ isOpen, onClose, node, onUpdateNodeData }) 
         setIsLoading(true);
 
         // Fetch settings from node API selection
-        const apiKeyObj = node.data.apiKeys?.[node.data.selectedApiKeyIndex || 0];
+        const apiKeyObj = node.data.apiKeys?.[node.data.selectedApiKey || 0];
         const keyToUse = apiKeyObj?.key?.trim();
         const provider = apiKeyObj?.provider || 'openai';
         const userModel = apiKeyObj?.model;
@@ -135,30 +135,41 @@ export default function LinearChat({ isOpen, onClose, node, onUpdateNodeData }) 
         <div style={{
             position: 'fixed',
             top: 0, left: 0, right: 0, bottom: 0,
-            background: 'rgba(0,0,0,0.6)',
-            backdropFilter: 'blur(4px)',
+            background: 'rgba(0,0,0,0.3)',
             display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
+            justifyContent: 'flex-end', // Align drawer to the right
             zIndex: 2000
-        }}>
-            <div className="glass-panel" style={{
-                background: 'var(--bg-dark)',
-                width: '600px',
-                height: '80vh',
-                maxWidth: '95vw',
-                borderRadius: '16px',
-                display: 'flex',
-                flexDirection: 'column',
-                overflow: 'hidden',
-                boxShadow: '0 20px 40px rgba(0,0,0,0.4)'
-            }}>
+        }} onClick={onClose}>
+            <div className="glass-panel"
+                onClick={(e) => e.stopPropagation()} // Prevent close on inner click
+                style={{
+                    background: 'var(--bg-dark)',
+                    width: '450px',
+                    height: '100vh',
+                    maxWidth: '90vw',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    overflow: 'hidden',
+                    boxShadow: '-10px 0 40px rgba(0,0,0,0.4)',
+                    borderLeft: '1px solid var(--panel-border)'
+                }}>
                 {/* Header */}
                 <div style={{ padding: '1rem', borderBottom: '1px solid var(--panel-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <h3 style={{ margin: 0, fontSize: '1.2rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                        💬 ノード・チャット
+                    <h3 style={{ margin: 0, fontSize: '1.1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        💬 チャット
                     </h3>
-                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <select
+                            className="node-select-sm"
+                            value={node.data.selectedApiKey || 0}
+                            onChange={(e) => onUpdateNodeData(node.id, 'selectedApiKey', parseInt(e.target.value))}
+                            style={{ background: 'var(--panel-bg)', color: 'var(--text-main)', border: '1px solid var(--panel-border)', borderRadius: '6px', padding: '0.25rem 0.5rem', outline: 'none', maxWidth: '120px' }}
+                            title="モデル / APIキー選択"
+                        >
+                            {node.data.apiKeys && node.data.apiKeys.map((item, i) => (
+                                <option key={i} value={i}>Key {i + 1} ({item?.provider || 'openai'})</option>
+                            ))}
+                        </select>
                         <button onClick={handleClearChat} className="btn-icon" title="チャット履歴を消去">
                             <Trash2 size={18} />
                         </button>

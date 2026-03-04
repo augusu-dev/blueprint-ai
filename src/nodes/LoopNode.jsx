@@ -1,6 +1,6 @@
 import React from 'react';
 import { Handle, Position } from '@xyflow/react';
-import { Repeat, Play } from 'lucide-react';
+import { Repeat, Plus } from 'lucide-react';
 import './nodes.css';
 
 export default function LoopNode({ data, id }) {
@@ -12,9 +12,18 @@ export default function LoopNode({ data, id }) {
         <div className="custom-node node-loop selected:ring-2 selected:ring-node-loop">
             <Handle type="target" position={targetPos} className="custom-handle" />
 
-            <div className="node-header">
-                <Repeat size={16} />
-                <span>Learning Loop</span>
+            <div className="node-header" style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <Repeat size={16} />
+                    <span>Learning Loop</span>
+                </div>
+                <button
+                    onClick={() => data.onQuickAdd && data.onQuickAdd(id, 'sequenceNode')}
+                    style={{ background: 'transparent', border: 'none', color: 'var(--text-main)', cursor: 'pointer', padding: '0.2rem', display: 'flex', alignItems: 'center' }}
+                    title="Add Next Node"
+                >
+                    <Plus size={16} />
+                </button>
             </div>
 
             <div className="node-body">
@@ -56,12 +65,6 @@ export default function LoopNode({ data, id }) {
                         </select>
                     </div>
                 </div>
-            </div>
-
-            <div className="node-quick-add" style={{ padding: '0.5rem', display: 'flex', gap: '0.25rem', justifyContent: 'center' }}>
-                <button onClick={() => data.onQuickAdd(id, 'sequenceNode')} title="Sequence Node">+</button>
-                <button onClick={() => data.onQuickAdd(id, 'loopNode')} title="Loop Node">↻</button>
-                <button onClick={() => data.onQuickAdd(id, 'branchNode')} title="Branch Node">↗</button>
             </div>
 
             <Handle type="source" position={sourcePos} className="custom-handle" />

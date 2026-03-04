@@ -1,6 +1,6 @@
 import React from 'react';
 import { Handle, Position } from '@xyflow/react';
-import { Split, Plus, Play } from 'lucide-react';
+import { Split, Plus } from 'lucide-react';
 import './nodes.css';
 
 export default function BranchNode({ data, id }) {
@@ -8,19 +8,22 @@ export default function BranchNode({ data, id }) {
     const sourcePos = isLR ? Position.Right : Position.Bottom;
     const targetPos = isLR ? Position.Left : Position.Top;
 
-    const numBranches = data.numBranches || 2;
-
-    const handleAddBranch = () => {
-        if (data.onAddBranch) data.onAddBranch(id);
-    };
-
     return (
         <div className="custom-node node-branch selected:ring-2 selected:ring-node-branch">
             <Handle type="target" position={targetPos} className="custom-handle" />
 
-            <div className="node-header">
-                <Split size={16} />
-                <span>Branch</span>
+            <div className="node-header" style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <Split size={16} />
+                    <span>Branch</span>
+                </div>
+                <button
+                    onClick={() => data.onQuickAdd && data.onQuickAdd(id, 'sequenceNode')}
+                    style={{ background: 'transparent', border: 'none', color: 'var(--text-main)', cursor: 'pointer', padding: '0.2rem', display: 'flex', alignItems: 'center' }}
+                    title="Add Next Node"
+                >
+                    <Plus size={16} />
+                </button>
             </div>
 
             <div className="node-body">
@@ -50,34 +53,9 @@ export default function BranchNode({ data, id }) {
                         ))}
                     </select>
                 </div>
-
-                <div style={{ display: 'flex', justifyContent: 'center', marginTop: '0.5rem' }}>
-                    <button className="node-btn-small" onClick={handleAddBranch} style={{ width: '100%', display: 'flex', justifyContent: 'center' }}>
-                        <Plus size={12} /> Add Output Route
-                    </button>
-                </div>
             </div>
 
-            <div className="node-quick-add branch-quick-add" style={{ padding: '0.5rem', display: 'flex', gap: '0.25rem', justifyContent: 'center' }}>
-                <button onClick={() => data.onQuickAdd(id, 'sequenceNode')} title="Sequence Node">+</button>
-                <button onClick={() => data.onQuickAdd(id, 'loopNode')} title="Loop Node">↻</button>
-                <button onClick={() => data.onQuickAdd(id, 'branchNode')} title="Branch Node">↗</button>
-            </div>
-
-            {Array.from({ length: numBranches }).map((_, i) => {
-                const spacing = 100 / (numBranches + 1);
-                const posStyle = isLR ? { top: `${spacing * (i + 1)}%` } : { left: `${spacing * (i + 1)}%` };
-                return (
-                    <Handle
-                        key={i}
-                        type="source"
-                        id={`source-${i}`}
-                        position={sourcePos}
-                        className="custom-handle"
-                        style={posStyle}
-                    />
-                );
-            })}
+            <Handle type="source" position={sourcePos} className="custom-handle" />
         </div>
     );
 }
