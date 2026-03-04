@@ -96,6 +96,7 @@ export default function Editor() {
         const apiKeyObj = apiKeys[keyIndex];
         const keyToUse = apiKeyObj?.key?.trim();
         const provider = apiKeyObj?.provider || 'openai';
+        const userModel = apiKeyObj?.model;
 
         if (!keyToUse) {
             setNodes(nds => nds.map(n => n.id === id ? { ...n, data: { ...n.data, response: `Error: API Key ${keyIndex + 1} (${provider}) is not set in Settings.` } } : n));
