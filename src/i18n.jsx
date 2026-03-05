@@ -32,6 +32,7 @@ const translations = {
         'editor.editTitle': 'タイトルを変更する',
         'editor.maxNodes': 'ノードの追加は1つのノードにつき最大10個までです。',
         'editor.saveError': '保存処理で問題が発生しました。',
+        'editor.saved': '保存しました',
 
         // Settings Modal
         'settings.title': '設定',
@@ -136,6 +137,7 @@ const translations = {
         'editor.editTitle': 'Edit title',
         'editor.maxNodes': 'Max 10 nodes per source node.',
         'editor.saveError': 'An error occurred while saving.',
+        'editor.saved': 'Saved',
 
         'settings.title': 'Settings',
         'settings.langLabel': 'Language',
@@ -234,6 +236,7 @@ const translations = {
         'editor.editTitle': '编辑标题',
         'editor.maxNodes': '每个节点最多添加10个子节点。',
         'editor.saveError': '保存时出现问题。',
+        'editor.saved': '已保存',
 
         'settings.title': '设置',
         'settings.langLabel': '显示语言',

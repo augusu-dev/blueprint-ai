@@ -11,7 +11,7 @@ import {
     useReactFlow,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Settings, X, LogOut, Columns, Rows, Menu, Save, Edit3, MessageSquare, GitFork } from 'lucide-react';
+import { Settings, X, LogOut, Columns, Rows, Menu, Save, Edit3, MessageSquare, GitFork, Check } from 'lucide-react';
 import { supabase } from './lib/supabase';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useLanguage } from './i18n';
@@ -55,6 +55,7 @@ function EditorContent() {
     const [isEditingTitle, setIsEditingTitle] = useState(false);
     const [tempTitle, setTempTitle] = useState('');
     const [isSaving, setIsSaving] = useState(false);
+    const [saveSuccess, setSaveSuccess] = useState(false);
 
     // Chat-first: viewMode = 'chat' | 'nodes'
     const [viewMode, setViewMode] = useState('chat');
@@ -152,13 +153,16 @@ function EditorContent() {
     const handleManualSave = async () => {
         if (!spaceId || nodes.length === 0) return;
         setIsSaving(true);
+        setSaveSuccess(false);
         try {
             const updates = { title: spaceTitle, nodes: cleanNodesForSave(nodes), edges, updated_at: new Date().toISOString() };
             localStorage.setItem(`blueprint_space_${spaceId}`, JSON.stringify(updates));
             if (supabase) {
-                await supabase.from('spaces').update({ nodes: updates.nodes, edges: updates.edges, updated_at: updates.updated_at }).eq('id', spaceId);
+                await supabase.from('spaces').update({ title: spaceTitle, nodes: updates.nodes, edges: updates.edges, updated_at: updates.updated_at }).eq('id', spaceId);
             }
             window.dispatchEvent(new CustomEvent('spaceTitleUpdated'));
+            setSaveSuccess(true);
+            setTimeout(() => setSaveSuccess(false), 2500);
         } catch (err) {
             console.error("Save error:", err);
             alert(t('editor.saveError'));
@@ -258,7 +262,16 @@ function EditorContent() {
         if (activeChatNodeId === nodeId) setActiveChatNodeId('1');
     }, [setNodes, setEdges, activeChatNodeId]);
 
-    const onConnect = useCallback((params) => setEdges((eds) => addEdge(params, eds)), [setEdges]);
+    const onConnect = useCallback((params) => {
+        // Prevent self-loops
+        if (params.source === params.target) return;
+        setEdges((eds) => addEdge(params, eds));
+    }, [setEdges]);
+
+    const onEdgeClick = useCallback((event, edge) => {
+        event.stopPropagation();
+        setEdges(eds => eds.filter(e => e.id !== edge.id));
+    }, [setEdges]);
 
     const nodesWithData = useMemo(() => {
         // Get goal/systemPrompt from starter node
@@ -339,12 +352,13 @@ function EditorContent() {
 
                         <button onClick={handleManualSave} disabled={isSaving}
                             style={{
-                                background: isSaving ? 'rgba(108, 140, 255, 0.4)' : 'var(--primary)',
+                                background: saveSuccess ? 'var(--action)' : isSaving ? 'rgba(108, 140, 255, 0.4)' : 'var(--primary)',
                                 color: 'white', fontSize: '0.78rem', padding: '0.3rem 0.8rem', border: 'none',
                                 borderRadius: '20px', display: 'flex', alignItems: 'center', gap: '0.3rem',
-                                fontWeight: 500, cursor: isSaving ? 'wait' : 'pointer', fontFamily: 'inherit'
+                                fontWeight: 500, cursor: isSaving ? 'wait' : 'pointer', fontFamily: 'inherit',
+                                transition: 'all 0.3s'
                             }}>
-                            <Save size={13} /> {isSaving ? t('editor.saving') : t('editor.save')}
+                            {saveSuccess ? <><Check size={13} /> {t('editor.saved')}</> : <><Save size={13} /> {isSaving ? t('editor.saving') : t('editor.save')}</>}
                         </button>
 
                         {viewMode === 'nodes' && (
@@ -391,9 +405,11 @@ function EditorContent() {
                             onNodesChange={onNodesChange}
                             onEdgesChange={onEdgesChange}
                             onConnect={onConnect}
+                            onEdgeClick={onEdgeClick}
                             nodeTypes={nodeTypes}
                             fitView
                             colorMode="system"
+                            defaultEdgeOptions={{ style: { stroke: 'var(--primary)', strokeWidth: 2 }, type: 'smoothstep' }}
                         >
                             <Controls />
                             <MiniMap nodeStrokeWidth={3} zoomable pannable />

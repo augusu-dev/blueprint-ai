@@ -33,7 +33,8 @@ export default function Sidebar({ isOpen, onClose }) {
         if (!supabase) return;
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return;
-        const { data, error } = await supabase.from('spaces').insert({ user_id: user.id, title: t('editor.untitled'), nodes: [], edges: [] }).select().single();
+        const initNodes = [{ id: '1', type: 'sequenceNode', position: { x: 100, y: 100 }, data: { isStarter: true, dir: 'LR', prompt: '' } }];
+        const { data, error } = await supabase.from('spaces').insert({ user_id: user.id, title: t('editor.untitled'), nodes: initNodes, edges: [] }).select().single();
         if (!error && data) {
             navigate(`/space/${data.id}`);
             onClose();

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Handle, Position, useUpdateNodeInternals } from '@xyflow/react';
-import { Target, Plus, Settings, Trash2 } from 'lucide-react';
+import { Target, Plus, Settings, Trash2, Repeat } from 'lucide-react';
 import { useLanguage } from '../i18n';
 import './nodes.css';
 
@@ -23,6 +23,18 @@ export default function SequenceNode({ data, id }) {
             <div className="node-header" style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                     <Target size={14} />
+                    <button
+                        onClick={() => data.onOpenChat && data.onOpenChat(id)}
+                        style={{
+                            background: 'rgba(251, 191, 36, 0.1)', border: '1px solid rgba(251, 191, 36, 0.25)',
+                            borderRadius: '12px', padding: '0.15rem 0.4rem', cursor: 'pointer',
+                            display: 'flex', alignItems: 'center', gap: '0.2rem', color: '#fbbf24',
+                            fontSize: '0.65rem', fontWeight: 500, transition: 'all 0.2s', fontFamily: 'inherit'
+                        }}
+                        title="Loop"
+                    >
+                        <Repeat size={10} />
+                    </button>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.2rem' }}>
                     {!data.isStarter && (
