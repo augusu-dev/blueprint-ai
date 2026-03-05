@@ -46,39 +46,8 @@ export default function Sidebar({ isOpen, onClose }) {
 
             const currentSpace = spaces.find(s => s.id === currentSpaceId);
             if (currentSpace && (currentSpace.title === '無題のスペース' || currentSpace.title === 'Untitled Space')) {
-                // 実際にノードやエッジが変更されているか確認 (Check if actually modified)
-                const { data: spaceData } = await supabase.from('spaces').select('nodes, edges').eq('id', currentSpaceId).single();
-                if (spaceData) {
-                    let nArray = spaceData.nodes || [];
-                    if (typeof nArray === 'string') {
-                        try { nArray = JSON.parse(nArray); } catch (e) { nArray = []; }
-                    }
-                    if (typeof nArray === 'string') { // stringified multiple times
-                        try { nArray = JSON.parse(nArray); } catch (e) { nArray = []; }
-                    }
-
-                    let eArray = spaceData.edges || [];
-                    if (typeof eArray === 'string') {
-                        try { eArray = JSON.parse(eArray); } catch (e) { eArray = []; }
-                    }
-
-                    let hasChanges = false;
-
-                    if (nArray.length > 1 || eArray.length > 0) {
-                        hasChanges = true;
-                    } else if (nArray.length === 1) {
-                        const n = nArray[0].data || {};
-                        // Even typing prompt, setting custom config, receiving response, or chatting will allow new space
-                        if (n.prompt || n.systemPrompt || (n.chatHistory && n.chatHistory.length > 0) || n.response) {
-                            hasChanges = true;
-                        }
-                    }
-
-                    if (!hasChanges) {
-                        onClose();
-                        return; // 変更がない場合は新規作成しない
-                    }
-                }
+                onClose();
+                return;
             }
 
             const { data, error } = await supabase

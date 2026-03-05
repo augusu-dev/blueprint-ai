@@ -11,7 +11,7 @@ import {
     useReactFlow,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Settings, X, LogOut, Columns, Rows, Menu } from 'lucide-react';
+import { Settings, X, LogOut, Columns, Rows, Menu, Save, Edit3 } from 'lucide-react';
 import { supabase } from './lib/supabase';
 import { useParams, useNavigate } from 'react-router-dom';
 
@@ -49,6 +49,11 @@ function EditorContent() {
     const [direction, setDirection] = useState('LR'); // LR = Left-to-Right, TB = Top-to-Bottom
     const [showSettings, setShowSettings] = useState(false);
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+
+    // Manual Title / Saving state
+    const [isEditingTitle, setIsEditingTitle] = useState(false);
+    const [tempTitle, setTempTitle] = useState('');
+    const [isSaving, setIsSaving] = useState(false);
 
     // Linear Chat State
     const [isChatOpen, setIsChatOpen] = useState(false);
@@ -146,6 +151,62 @@ function EditorContent() {
         return () => window.removeEventListener('spaceTitleUpdated', handleTitleUpdate);
     }, [spaceId, navigate, setNodes, setEdges, setViewport]);
 
+    const cleanNodesForSave = (rawNodes) => {
+        return rawNodes.map(n => {
+            const dataToSave = n.data ? {
+                dir: n.data.dir,
+                prompt: n.data.prompt,
+                systemPrompt: n.data.systemPrompt,
+                chatHistory: n.data.chatHistory,
+                response: n.data.response,
+                isStarter: n.data.isStarter,
+                numBranches: n.data.numBranches,
+                loopMode: n.data.loopMode,
+                selectedApiKey: n.data.selectedApiKey
+            } : {};
+
+            return {
+                id: n.id,
+                type: n.type,
+                position: n.position,
+                data: dataToSave
+            };
+        });
+    };
+
+    const handleManualSave = async () => {
+        if (!spaceId || nodes.length === 0 || !supabase) return;
+        setIsSaving(true);
+        try {
+            const updates = {
+                nodes: cleanNodesForSave(nodes),
+                edges: edges,
+                updated_at: new Date().toISOString()
+            };
+
+            const { error } = await supabase.from('spaces').update(updates).eq('id', spaceId);
+            if (error) throw error;
+            console.log("=== 手動保存完了 ===", spaceId);
+            window.dispatchEvent(new CustomEvent('spaceTitleUpdated')); // Refreshes sidebar history sorting
+        } catch (err) {
+            console.error("手動保存エラー:", err);
+            alert("保存に失敗しました。詳細: " + err.message);
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    const saveTitle = async () => {
+        const cleanedTitle = tempTitle.trim() || '無題のスペース';
+        setSpaceTitle(cleanedTitle);
+        setIsEditingTitle(false);
+        if (supabase && spaceId) {
+            await supabase.from('spaces').update({ title: cleanedTitle }).eq('id', spaceId);
+            window.dispatchEvent(new CustomEvent('spaceTitleUpdated'));
+            handleManualSave(); // Auto-save everything once manual title set
+        }
+    };
+
     // Auto-save logic
     const saveTimerRef = useRef(null);
     useEffect(() => {
@@ -157,24 +218,9 @@ function EditorContent() {
         // Set a new debounce timer for 1.5 seconds
         saveTimerRef.current = setTimeout(async () => {
             try {
-                // Remove non-serializable function references from node data
-                const cleanNodes = nodes.map(n => {
-                    const safeN = { ...n };
-                    if (safeN.data) {
-                        const { onChange, onAddBranch, onRunAI, onQuickAdd, onOpenChat, apiKeys, ...safeData } = safeN.data;
-                        safeN.data = safeData;
-                    }
-                    // remove internal fields to avoid circular/unsupported JSON
-                    delete safeN.measured;
-                    delete safeN.dragging;
-                    delete safeN.selected;
-                    delete safeN.positionAbsolute;
-                    return safeN;
-                });
-
                 const updates = {
-                    nodes: JSON.parse(JSON.stringify(cleanNodes)),
-                    edges: JSON.parse(JSON.stringify(edges)),
+                    nodes: cleanNodesForSave(nodes),
+                    edges: edges,
                     updated_at: new Date().toISOString()
                 };
 
@@ -186,7 +232,7 @@ function EditorContent() {
                 if (error) {
                     console.error("Auto-save Supabase error:", error);
                 } else {
-                    console.log("Auto-saved space", spaceId, "with", cleanNodes.length, "nodes");
+                    console.log("Auto-save success", spaceId);
                 }
             } catch (err) {
                 console.error("Auto-save failed", err);
@@ -414,21 +460,49 @@ function EditorContent() {
 
             {/* Header */}
             <div className="editor-header">
-                <div className="editor-header-left" style={{ cursor: 'pointer' }}>
+                <div className="editor-header-left" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
                     <div
                         onClick={() => setIsSidebarOpen(true)}
                         style={{ background: 'var(--primary)', padding: '0.4rem', borderRadius: '10px', color: 'white', marginRight: '0.75rem', display: 'flex' }}
                     >
                         <Menu size={20} />
                     </div>
-                    <h2 onClick={() => navigate('/')}>Blueprint</h2>
+                    {isEditingTitle ? (
+                        <input
+                            autoFocus
+                            className="node-input"
+                            style={{ fontSize: '1.25rem', fontWeight: 600, padding: '0.2rem 0.5rem', width: '250px' }}
+                            value={tempTitle}
+                            onChange={(e) => setTempTitle(e.target.value)}
+                            onBlur={saveTitle}
+                            onKeyDown={(e) => { if (e.key === 'Enter') saveTitle(); }}
+                        />
+                    ) : (
+                        <h2
+                            style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: 0 }}
+                            onClick={() => { setTempTitle(spaceTitle); setIsEditingTitle(true); }}
+                            title="タイトルを手動で変更する"
+                        >
+                            {spaceTitle} <Edit3 size={14} color="var(--text-muted)" />
+                        </h2>
+                    )}
                 </div>
                 <div className="editor-controls" style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
                     <button
                         className="btn"
+                        onClick={handleManualSave}
+                        disabled={isSaving}
+                        title="現在の状態を手動で保存する"
+                        style={{ background: isSaving ? 'rgba(59, 130, 246, 0.5)' : 'var(--primary)', color: 'white', fontSize: '0.8rem', padding: '0.4rem 1rem', border: 'none', borderRadius: '20px', display: 'flex', alignItems: 'center', gap: '0.4rem', fontWeight: 600, boxShadow: '0 4px 10px rgba(59, 130, 246, 0.3)', cursor: isSaving ? 'wait' : 'pointer' }}
+                    >
+                        <Save size={16} />
+                        {isSaving ? '保存中...' : '保存 (Save)'}
+                    </button>
+                    <button
+                        className="btn"
                         onClick={toggleDirection}
                         title="レイアウトの方向を切り替える"
-                        style={{ background: 'rgba(255,255,255,0.05)', fontSize: '0.8rem', padding: '0.3rem 0.8rem', border: '1px solid var(--panel-border)', borderRadius: '20px', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+                        style={{ background: 'rgba(255,255,255,0.05)', fontSize: '0.8rem', padding: '0.4rem 1rem', border: '1px solid var(--panel-border)', borderRadius: '20px', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
                     >
                         {direction === 'LR' ? <Columns size={16} color="var(--primary)" /> : <Rows size={16} color="var(--primary)" />}
                         {direction === 'LR' ? '左から右へ' : '上から下へ'}
