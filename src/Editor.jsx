@@ -387,7 +387,8 @@ function EditorContent() {
         nodes.forEach(node => {
             updateNodeInternals(node.id);
         });
-    }, [direction, nodes, updateNodeInternals]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [direction, updateNodeInternals]);
 
     return (
         <div className="editor-layout">
