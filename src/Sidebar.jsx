@@ -13,9 +13,33 @@ export default function Sidebar({ isOpen, onClose }) {
     const [searchQuery, setSearchQuery] = useState('');
 
     const fetchSpaces = async () => {
-        if (!supabase) { setLoading(false); return; }
-        const { data, error } = await supabase.from('spaces').select('id, title, updated_at').order('updated_at', { ascending: false });
-        if (!error && data) setSpaces(data);
+        let allSpaces = [];
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key.startsWith('blueprint_space_')) {
+                try {
+                    const spaceData = JSON.parse(localStorage.getItem(key));
+                    const id = key.replace('blueprint_space_', '');
+                    allSpaces.push({ id, title: spaceData.title || t('editor.untitled'), updated_at: spaceData.updated_at || new Date().toISOString() });
+                } catch (e) { }
+            }
+        }
+
+        if (supabase) {
+            try {
+                const { data, error } = await supabase.from('spaces').select('id, title, updated_at').order('updated_at', { ascending: false });
+                if (!error && data) {
+                    data.forEach(remoteSpace => {
+                        const existingIdx = allSpaces.findIndex(s => s.id === remoteSpace.id);
+                        if (existingIdx >= 0) allSpaces[existingIdx] = remoteSpace;
+                        else allSpaces.push(remoteSpace);
+                    });
+                }
+            } catch (e) { }
+        }
+
+        allSpaces.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+        setSpaces(allSpaces);
         setLoading(false);
     };
 
@@ -30,27 +54,39 @@ export default function Sidebar({ isOpen, onClose }) {
     }, []);
 
     const handleNewSpace = async () => {
-        if (!supabase) return;
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
         const initNodes = [{ id: '1', type: 'sequenceNode', position: { x: 100, y: 100 }, data: { isStarter: true, dir: 'LR', prompt: '' } }];
-        const { data, error } = await supabase.from('spaces').insert({ user_id: user.id, title: t('editor.untitled'), nodes: initNodes, edges: [] }).select().single();
-        if (!error && data) {
-            navigate(`/space/${data.id}`);
-            onClose();
-        }
+        try {
+            if (supabase) {
+                const { data: { user } } = await supabase.auth.getUser();
+                if (user) {
+                    const { data, error } = await supabase.from('spaces').insert({ user_id: user.id, title: t('editor.untitled'), nodes: initNodes, edges: [] }).select().single();
+                    if (!error && data) {
+                        navigate(`/space/${data.id}`);
+                        onClose();
+                        return;
+                    }
+                }
+            }
+        } catch (err) { }
+
+        const newId = crypto.randomUUID();
+        const spaceData = { title: t('editor.untitled'), nodes: initNodes, edges: [], updated_at: new Date().toISOString() };
+        localStorage.setItem(`blueprint_space_${newId}`, JSON.stringify(spaceData));
+        navigate(`/space/${newId}`);
+        onClose();
     };
 
     const handleDeleteSpace = async (e, spaceId) => {
         e.stopPropagation();
         if (!confirm(t('sidebar.deleteConfirm'))) return;
-        if (!supabase) return;
-        const { error } = await supabase.from('spaces').delete().eq('id', spaceId);
-        if (!error) {
-            localStorage.removeItem(`blueprint_space_${spaceId}`);
-            if (spaceId === currentSpaceId) navigate('/');
-            fetchSpaces();
+
+        localStorage.removeItem(`blueprint_space_${spaceId}`);
+        if (supabase) {
+            try { await supabase.from('spaces').delete().eq('id', spaceId); } catch (err) { }
         }
+
+        if (spaceId === currentSpaceId) navigate('/');
+        fetchSpaces();
     };
 
     const filteredSpaces = spaces.filter(s =>

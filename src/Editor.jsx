@@ -145,7 +145,7 @@ function EditorContent() {
                 chatHistory: n.data.chatHistory, response: n.data.response, isStarter: n.data.isStarter,
                 numBranches: n.data.numBranches, loopMode: n.data.loopMode,
                 selectedApiKey: n.data.selectedApiKey, branchCount: n.data.branchCount,
-                goalHistory: n.data.goalHistory
+                goalHistory: n.data.goalHistory, isLooping: n.data.isLooping
             } : {}
         }));
     };
@@ -409,7 +409,6 @@ function EditorContent() {
                             nodeTypes={nodeTypes}
                             fitView
                             colorMode="system"
-                            defaultEdgeOptions={{ style: { stroke: 'var(--primary)', strokeWidth: 2 }, type: 'smoothstep' }}
                         >
                             <Controls />
                             <MiniMap nodeStrokeWidth={3} zoomable pannable />

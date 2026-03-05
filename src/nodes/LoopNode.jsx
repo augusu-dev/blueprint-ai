@@ -23,6 +23,19 @@ export default function LoopNode({ data, id }) {
             <div className="node-header" style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                     <Repeat size={14} />
+                    <button
+                        onClick={() => data.onChange && data.onChange(id, 'isLooping', !data.isLooping)}
+                        style={{
+                            background: data.isLooping ? 'rgba(251, 191, 36, 0.15)' : 'transparent',
+                            border: data.isLooping ? '1px solid rgba(251, 191, 36, 0.4)' : '1px solid rgba(255, 255, 255, 0.1)',
+                            borderRadius: '12px', padding: '0.15rem 0.4rem', cursor: 'pointer',
+                            display: 'flex', alignItems: 'center', gap: '0.2rem', color: data.isLooping ? '#fbbf24' : 'var(--text-muted)',
+                            fontSize: '0.65rem', fontWeight: 500, transition: 'all 0.2s', fontFamily: 'inherit'
+                        }}
+                        title={data.isLooping ? "Loop On" : "Loop Off"}
+                    >
+                        <Repeat size={10} />
+                    </button>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.2rem' }}>
                     <button onClick={() => data.onDeleteNode && data.onDeleteNode(id)}

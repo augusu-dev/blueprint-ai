@@ -9,27 +9,32 @@ export default function Home() {
     const { t } = useLanguage();
 
     const handleNewSpace = async () => {
+        const initNodes = [{ id: '1', type: 'sequenceNode', position: { x: 100, y: 100 }, data: { isStarter: true, dir: 'LR', prompt: '' } }];
         try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) throw new Error("No user logged in");
+            if (supabase) {
+                const { data: { user } } = await supabase.auth.getUser();
+                if (user) {
+                    const { data, error } = await supabase
+                        .from('spaces')
+                        .insert([{ user_id: user.id, title: t('editor.untitled'), nodes: initNodes, edges: [] }])
+                        .select()
+                        .single();
 
-            const initNodes = [{ id: '1', type: 'sequenceNode', position: { x: 100, y: 100 }, data: { isStarter: true, dir: 'LR', prompt: '' } }];
-
-            const { data, error } = await supabase
-                .from('spaces')
-                .insert([
-                    { user_id: user.id, title: t('editor.untitled'), nodes: initNodes, edges: [] }
-                ])
-                .select()
-                .single();
-
-            if (error) throw error;
-
-            navigate(`/space/${data.id}`);
+                    if (!error && data) {
+                        navigate(`/space/${data.id}`);
+                        return;
+                    }
+                }
+            }
         } catch (err) {
-            console.error("Failed to create space:", err);
-            navigate(`/space/${crypto.randomUUID()}`);
+            console.error("Failed to create remote space:", err);
         }
+
+        // Fallback for local / unauthenticated
+        const newId = crypto.randomUUID();
+        const spaceData = { title: t('editor.untitled'), nodes: initNodes, edges: [], updated_at: new Date().toISOString() };
+        localStorage.setItem(`blueprint_space_${newId}`, JSON.stringify(spaceData));
+        navigate(`/space/${newId}`);
     };
 
     return (

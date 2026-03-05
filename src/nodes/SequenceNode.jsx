@@ -24,14 +24,15 @@ export default function SequenceNode({ data, id }) {
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                     <Target size={14} />
                     <button
-                        onClick={() => data.onOpenChat && data.onOpenChat(id)}
+                        onClick={() => data.onChange && data.onChange(id, 'isLooping', !data.isLooping)}
                         style={{
-                            background: 'rgba(251, 191, 36, 0.1)', border: '1px solid rgba(251, 191, 36, 0.25)',
+                            background: data.isLooping ? 'rgba(251, 191, 36, 0.15)' : 'transparent',
+                            border: data.isLooping ? '1px solid rgba(251, 191, 36, 0.4)' : '1px solid rgba(255, 255, 255, 0.1)',
                             borderRadius: '12px', padding: '0.15rem 0.4rem', cursor: 'pointer',
-                            display: 'flex', alignItems: 'center', gap: '0.2rem', color: '#fbbf24',
+                            display: 'flex', alignItems: 'center', gap: '0.2rem', color: data.isLooping ? '#fbbf24' : 'var(--text-muted)',
                             fontSize: '0.65rem', fontWeight: 500, transition: 'all 0.2s', fontFamily: 'inherit'
                         }}
-                        title="Loop"
+                        title={data.isLooping ? "Loop On" : "Loop Off"}
                     >
                         <Repeat size={10} />
                     </button>
