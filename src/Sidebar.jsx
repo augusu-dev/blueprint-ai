@@ -44,9 +44,15 @@ export default function Sidebar({ isOpen, onClose }) {
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) throw new Error("No user logged in");
 
+            const currentSpace = spaces.find(s => s.id === currentSpaceId);
+            if (currentSpace && (currentSpace.title === '無題のスペース' || currentSpace.title === 'Untitled Space')) {
+                onClose();
+                return;
+            }
+
             const { data, error } = await supabase
                 .from('spaces')
-                .insert([{ user_id: user.id, title: 'Untitled Space' }])
+                .insert([{ user_id: user.id, title: '無題のスペース' }])
                 .select()
                 .single();
 
@@ -109,7 +115,7 @@ export default function Sidebar({ isOpen, onClose }) {
                     justifyContent: 'space-between',
                     borderBottom: '1px solid var(--panel-border)'
                 }}>
-                    <h2 style={{ fontSize: '1.25rem', fontWeight: 600, margin: 0 }}>My Spaces</h2>
+                    <h2 style={{ fontSize: '1.25rem', fontWeight: 600, margin: 0 }}>ワークスペース</h2>
                     <button onClick={onClose} className="btn-icon" style={{ width: '30px', height: '30px' }}>
                         <X size={16} />
                     </button>
@@ -138,17 +144,17 @@ export default function Sidebar({ isOpen, onClose }) {
                         onMouseEnter={(e) => e.currentTarget.style.background = 'var(--primary-hover)'}
                         onMouseLeave={(e) => e.currentTarget.style.background = 'var(--primary)'}
                     >
-                        <Plus size={18} /> New Space
+                        <Plus size={18} /> 新規スペース
                     </button>
 
                     <h3 style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '1rem', marginLeft: '0.5rem' }}>
-                        History
+                        履歴
                     </h3>
 
                     {loading ? (
-                        <p style={{ color: 'var(--text-muted)', textAlign: 'center', fontSize: '0.9rem', marginTop: '2rem' }}>Loading spaces...</p>
+                        <p style={{ color: 'var(--text-muted)', textAlign: 'center', fontSize: '0.9rem', marginTop: '2rem' }}>読み込み中...</p>
                     ) : spaces.length === 0 ? (
-                        <p style={{ color: 'var(--text-muted)', textAlign: 'center', fontSize: '0.9rem', marginTop: '2rem' }}>No spaces found.</p>
+                        <p style={{ color: 'var(--text-muted)', textAlign: 'center', fontSize: '0.9rem', marginTop: '2rem' }}>スペースがありません</p>
                     ) : (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                             {spaces.map(space => (

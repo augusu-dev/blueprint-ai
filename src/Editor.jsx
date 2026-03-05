@@ -91,7 +91,7 @@ function EditorContent() {
                 console.warn("No Supabase instance found. Falling back to default canvas.");
                 setNodes(initialNodes);
                 setEdges(initialEdges);
-                setSpaceTitle('Untitled Space (Local Development)');
+                setSpaceTitle('無題のスペース（ローカル）');
                 return;
             }
 
@@ -106,12 +106,12 @@ function EditorContent() {
                     console.error("Error fetching space:", error);
                     setNodes(initialNodes);
                     setEdges(initialEdges);
-                    setSpaceTitle('Untitled Space');
+                    setSpaceTitle('無題のスペース');
                     return;
                 }
 
                 if (data) {
-                    setSpaceTitle(data.title || 'Untitled Space');
+                    setSpaceTitle(data.title || '無題のスペース');
 
                     // Only set nodes/edges on initial load to avoid over-writing unsaved local state
                     if (data.nodes && data.nodes.length > 0) setNodes(data.nodes);
@@ -128,7 +128,7 @@ function EditorContent() {
                 console.error("Global space fetch failed:", globalErr);
                 setNodes(initialNodes);
                 setEdges(initialEdges);
-                setSpaceTitle('Untitled Space (Error)');
+                setSpaceTitle('無題のスペース（エラー）');
             }
         };
 
@@ -397,8 +397,14 @@ function EditorContent() {
                         {direction === 'LR' ? <Columns size={16} color="var(--primary)" /> : <Rows size={16} color="var(--primary)" />}
                         {direction === 'LR' ? '左から右へ' : '上から下へ'}
                     </button>
-                    <button className="btn btn-icon" onClick={() => setShowSettings(true)} title="Settings">
-                        <Settings size={20} />
+                    <button
+                        className="btn"
+                        onClick={() => setShowSettings(true)}
+                        title="全体設定"
+                        style={{ background: 'rgba(255,255,255,0.05)', fontSize: '0.8rem', padding: '0.3rem 0.8rem', border: '1px solid var(--panel-border)', borderRadius: '20px', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+                    >
+                        <Settings size={16} color="var(--primary)" />
+                        全体設定
                     </button>
                 </div>
             </div>
@@ -431,7 +437,7 @@ function EditorContent() {
                 <div className="settings-modal-overlay">
                     <div className="settings-modal glass-panel">
                         <div className="settings-header">
-                            <h3>Global Settings</h3>
+                            <h3>全体設定</h3>
                             <button className="btn-icon" onClick={() => setShowSettings(false)}>
                                 <X size={20} />
                             </button>
@@ -439,26 +445,26 @@ function EditorContent() {
                         <div className="settings-body">
                             <div className="glass-panel" style={{ padding: '0.75rem', marginBottom: '1.5rem', borderRadius: '8px', background: 'rgba(59, 130, 246, 0.1)', border: '1px solid rgba(59, 130, 246, 0.3)' }}>
                                 <p style={{ fontSize: '0.85rem', margin: 0, fontWeight: 500, color: 'var(--text-color)' }}>
-                                    🔒 <strong>Security Note:</strong> Your API keys are stored <em>only</em> locally in your browser to persist across reloads. <strong>Blueprint AI does not store, collect, or transmit your keys to any external servers</strong> other than the direct AI providers you choose.
+                                    🔒 <strong>セキュリティ設定:</strong> APIキーはブラウザのローカル環境にのみ安全に保存されます。Blueprint AIのサーバー等へ送信されることは一切ありません。
                                 </p>
                             </div>
-                            <p className="help-text" style={{ marginBottom: '1rem' }}>Configure up to 5 API Keys from different providers. Leave "Model" blank to use the default.</p>
+                            <p className="help-text" style={{ marginBottom: '1rem' }}>複数のプロバイダーのAPIキーを最大5つまで登録できます。「モデル」を空欄にするとデフォルトモデルが使用されます。</p>
                             {apiKeys.map((item, index) => (
                                 <div className="form-group glass-panel" key={index} style={{ marginBottom: '1rem', padding: '0.75rem', borderRadius: '8px' }}>
                                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                                        <label style={{ marginBottom: 0, fontWeight: 600 }}>API Key {index + 1} {index === 0 && '(Default)'}</label>
+                                        <label style={{ marginBottom: 0, fontWeight: 600 }}>APIキー {index + 1} {index === 0 && '(デフォルト)'}</label>
                                         {apiKeys.length > 1 && (
                                             <button
                                                 className="btn-text-danger"
                                                 onClick={() => setApiKeys(apiKeys.filter((_, i) => i !== index))}
                                             >
-                                                Remove
+                                                削除
                                             </button>
                                         )}
                                     </div>
                                     <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' }}>
                                         <div style={{ flex: 1 }}>
-                                            <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Provider</label>
+                                            <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>プロバイダー</label>
                                             <select
                                                 className="node-input"
                                                 style={{ padding: '0.4rem', height: '34px' }}
@@ -477,7 +483,7 @@ function EditorContent() {
                                             </select>
                                         </div>
                                         <div style={{ flex: 1 }}>
-                                            <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Model</label>
+                                            <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>モデル名</label>
                                             <select
                                                 className="node-input"
                                                 style={{ padding: '0.4rem', height: '34px' }}
@@ -488,7 +494,7 @@ function EditorContent() {
                                                     setApiKeys(newKeys);
                                                 }}
                                             >
-                                                <option value="">Default (Auto)</option>
+                                                <option value="">デフォルト (自動選択)</option>
                                                 {item.provider === 'openai' && (
                                                     <>
                                                         <option value="gpt-5.3-chat-latest">gpt-5.3-chat-latest</option>
@@ -533,10 +539,10 @@ function EditorContent() {
                                         </div>
                                     </div>
                                     <div>
-                                        <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Secret Key</label>
+                                        <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>シークレットキー (API Key)</label>
                                         <input
                                             type="password"
-                                            placeholder={`Paste your ${item.provider} secret key here...`}
+                                            placeholder={`${item.provider} のキーを貼り付けてください...`}
                                             value={item.key || ''}
                                             onChange={(e) => {
                                                 const newKeys = [...apiKeys];
@@ -549,15 +555,18 @@ function EditorContent() {
                             ))}
                             {apiKeys.length < 5 && (
                                 <button className="btn btn-secondary btn-sm" style={{ marginTop: '0.5rem', width: '100%' }} onClick={() => setApiKeys([...apiKeys, { key: '', provider: 'openai', model: '' }])}>
-                                    + Add Another API Key
+                                    + 別のAPIキーを追加
                                 </button>
                             )}
                         </div>
                         <div className="settings-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <button className="btn-text-danger" style={{ fontSize: '0.85rem' }} onClick={() => { setShowSettings(false); supabase.auth.signOut(); }}>
-                                <LogOut size={16} style={{ display: 'inline', verticalAlign: 'text-bottom', marginRight: '4px' }} /> Log Out
+                                <LogOut size={16} style={{ display: 'inline', verticalAlign: 'text-bottom', marginRight: '4px' }} /> ログアウト
                             </button>
-                            <button className="btn btn-primary" style={{ width: 'auto', padding: '0.5rem 1.5rem' }} onClick={() => setShowSettings(false)}>Save Settings</button>
+                            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem' }}>
+                                <button className="btn btn-secondary" onClick={() => setShowSettings(false)}>キャンセル</button>
+                                <button className="btn btn-primary" onClick={() => setShowSettings(false)}>保存</button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -573,4 +582,3 @@ export default function Editor() {
         </ReactFlowProvider>
     );
 }
-

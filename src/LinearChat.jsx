@@ -39,7 +39,7 @@ export default function LinearChat({ isOpen, onClose, node, onUpdateNodeData }) 
         const userModel = apiKeyObj?.model;
 
         if (!keyToUse) {
-            const errorMsg = { role: 'ai', content: `Error: API Key (${provider}) is not set.` };
+            const errorMsg = { role: 'ai', content: `エラー: APIキーが設定されていません (${provider})` };
             const finalHistory = [...updatedHistory, errorMsg];
             setChatHistory(finalHistory);
             onUpdateNodeData(node.id, 'chatHistory', finalHistory);
@@ -175,7 +175,7 @@ export default function LinearChat({ isOpen, onClose, node, onUpdateNodeData }) 
                 }
             }
         } catch (err) {
-            const errorMsg = { role: 'ai', content: `Error: ${err.message}` };
+            const errorMsg = { role: 'ai', content: `エラー: ${err.message}` };
             const finalHistory = [...updatedHistory, errorMsg];
             setChatHistory(finalHistory);
             onUpdateNodeData(node.id, 'chatHistory', finalHistory);
@@ -229,7 +229,7 @@ export default function LinearChat({ isOpen, onClose, node, onUpdateNodeData }) 
                             title="モデル / APIキー選択"
                         >
                             {node.data.apiKeys && node.data.apiKeys.map((item, i) => (
-                                <option key={i} value={i}>Key {i + 1} ({item?.provider || 'openai'})</option>
+                                <option key={i} value={i}>キー {i + 1} ({item?.provider || 'openai'})</option>
                             ))}
                         </select>
                         <button onClick={handleClearChat} className="btn-icon" title="チャット履歴を消去">
@@ -275,7 +275,15 @@ export default function LinearChat({ isOpen, onClose, node, onUpdateNodeData }) 
                                     whiteSpace: 'pre-wrap'
                                 }}>
                                     {msg.content}
-                                </div>
+                                    {msg.images && msg.images.length > 0 && (
+                                        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
+                                            {msg.images.map(img => (
+                                                <div key={img.id} style={{ width: '60px', height: '60px', borderRadius: '8px', overflow: 'hidden', border: '1px solid rgba(255,255,255,0.2)', cursor: 'pointer' }} title="添付画像">
+                                                    <img src={img.data} alt="uploaded content" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}</div>
                             </div>
                         ))
                     )}

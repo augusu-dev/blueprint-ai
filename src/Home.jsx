@@ -14,7 +14,7 @@ export default function Home() {
             const { data, error } = await supabase
                 .from('spaces')
                 .insert([
-                    { user_id: user.id, title: 'Untitled Space' }
+                    { user_id: user.id, title: '無題のスペース' }
                 ])
                 .select()
                 .single();
@@ -25,7 +25,7 @@ export default function Home() {
         } catch (err) {
             console.error("Failed to create space:", err);
             // Fallback for development if DB fails
-            navigate(`/space/new-${Date.now()}`);
+            navigate(`/space/${crypto.randomUUID()}`);
         }
     };
 

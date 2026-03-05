@@ -16,12 +16,11 @@ export default function LoopNode({ data, id }) {
             <div className="node-header" style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                     <Repeat size={16} />
-                    <span>Learning Loop</span>
                 </div>
                 <button
                     onClick={() => data.onQuickAdd && data.onQuickAdd(id, 'sequenceNode')}
                     style={{ background: 'transparent', border: 'none', color: 'var(--text-main)', cursor: 'pointer', padding: '0.2rem', display: 'flex', alignItems: 'center' }}
-                    title="Add Next Node"
+                    title="ノードを追加"
                 >
                     <Plus size={16} />
                 </button>
@@ -60,9 +59,9 @@ export default function LoopNode({ data, id }) {
                             value={data.loopMode || 'perspective'}
                             onChange={(e) => data.onChange && data.onChange(id, 'loopMode', e.target.value)}
                         >
-                            <option value="perspective">Alternative Perspective</option>
-                            <option value="quiz">Interactive Quiz</option>
-                            <option value="summary">Summarization</option>
+                            <option value="perspective">別視点からの分析</option>
+                            <option value="quiz">インタラクティブクイズ</option>
+                            <option value="summary">自動要約ループ</option>
                         </select>
 
                         <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.25rem', display: 'block' }}>カスタマイズ指示 (System Prompt)</label>

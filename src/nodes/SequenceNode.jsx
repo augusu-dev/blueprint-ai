@@ -16,12 +16,11 @@ export default function SequenceNode({ data, id }) {
             <div className="node-header" style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                     <Target size={16} />
-                    <span>Sequence</span>
                 </div>
                 <button
                     onClick={() => data.onQuickAdd && data.onQuickAdd(id, 'sequenceNode')}
                     style={{ background: 'transparent', border: 'none', color: 'var(--text-main)', cursor: 'pointer', padding: '0.2rem', display: 'flex', alignItems: 'center' }}
-                    title="Add Next Node"
+                    title="ノードを追加"
                 >
                     <Plus size={16} />
                 </button>
