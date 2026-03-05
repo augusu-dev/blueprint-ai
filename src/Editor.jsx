@@ -92,48 +92,49 @@ function EditorContent() {
         }
 
         const fetchSpace = async () => {
-            if (!supabase) {
-                console.warn("No Supabase instance found. Falling back to default canvas.");
-                setNodes(initialNodes);
-                setEdges(initialEdges);
-                setSpaceTitle('無題のスペース（ローカル）');
-                return;
+            let localData = null;
+            try {
+                const stored = localStorage.getItem(`blueprint_space_${spaceId}`);
+                if (stored) localData = JSON.parse(stored);
+            } catch (e) { }
+
+            let remoteData = null;
+            if (supabase) {
+                try {
+                    const { data, error } = await supabase
+                        .from('spaces')
+                        .select('*')
+                        .eq('id', spaceId)
+                        .single();
+
+                    if (!error && data) remoteData = data;
+                } catch (globalErr) {
+                    console.warn("Global space fetch failed, checking local...");
+                }
             }
 
-            try {
-                const { data, error } = await supabase
-                    .from('spaces')
-                    .select('*')
-                    .eq('id', spaceId)
-                    .single();
+            let bestData = null;
+            if (remoteData && localData) {
+                bestData = (new Date(remoteData.updated_at) > new Date(localData.updated_at)) ? remoteData : localData;
+            } else {
+                bestData = remoteData || localData;
+            }
 
-                if (error) {
-                    console.error("Error fetching space:", error);
-                    setNodes(initialNodes);
-                    setEdges(initialEdges);
-                    setSpaceTitle('無題のスペース');
-                    return;
+            if (bestData) {
+                setSpaceTitle(bestData.title || '無題のスペース');
+                if (Array.isArray(bestData.nodes) && bestData.nodes.length > 0) setNodes(bestData.nodes);
+                else setNodes(initialNodes);
+
+                if (Array.isArray(bestData.edges) && bestData.edges.length > 0) setEdges(bestData.edges);
+                else setEdges(initialEdges);
+
+                if (bestData.viewport && Object.keys(bestData.viewport).length > 0) {
+                    setViewport({ x: bestData.viewport.x, y: bestData.viewport.y, zoom: bestData.viewport.zoom });
                 }
-
-                if (data) {
-                    setSpaceTitle(data.title || '無題のスペース');
-
-                    // Only set nodes/edges on initial load to avoid over-writing unsaved local state
-                    if (Array.isArray(data.nodes) && data.nodes.length > 0) setNodes(data.nodes);
-                    else setNodes(initialNodes);
-
-                    if (Array.isArray(data.edges) && data.edges.length > 0) setEdges(data.edges);
-                    else setEdges(initialEdges);
-
-                    if (data.viewport && Object.keys(data.viewport).length > 0) {
-                        setViewport({ x: data.viewport.x, y: data.viewport.y, zoom: data.viewport.zoom });
-                    }
-                }
-            } catch (globalErr) {
-                console.error("Global space fetch failed:", globalErr);
+            } else {
                 setNodes(initialNodes);
                 setEdges(initialEdges);
-                setSpaceTitle('無題のスペース（エラー）');
+                setSpaceTitle('無題のスペース');
             }
         };
 
@@ -175,22 +176,32 @@ function EditorContent() {
     };
 
     const handleManualSave = async () => {
-        if (!spaceId || nodes.length === 0 || !supabase) return;
+        if (!spaceId || nodes.length === 0) return;
         setIsSaving(true);
         try {
             const updates = {
+                title: spaceTitle,
                 nodes: cleanNodesForSave(nodes),
                 edges: edges,
                 updated_at: new Date().toISOString()
             };
 
-            const { error } = await supabase.from('spaces').update(updates).eq('id', spaceId);
-            if (error) throw error;
+            // 1. Local Storage fallback (always reliable)
+            localStorage.setItem(`blueprint_space_${spaceId}`, JSON.stringify(updates));
+
+            // 2. Supabase Cloud Sync
+            if (supabase) {
+                const { error } = await supabase.from('spaces').update({
+                    nodes: updates.nodes, edges: updates.edges, updated_at: updates.updated_at
+                }).eq('id', spaceId);
+                if (error) console.warn("Supabase skipped schema cache:", error.message);
+            }
+
             console.log("=== 手動保存完了 ===", spaceId);
             window.dispatchEvent(new CustomEvent('spaceTitleUpdated')); // Refreshes sidebar history sorting
         } catch (err) {
             console.error("手動保存エラー:", err);
-            alert("保存に失敗しました。詳細: " + err.message);
+            alert("保存処理で問題が発生しました。");
         } finally {
             setIsSaving(false);
         }
@@ -210,7 +221,7 @@ function EditorContent() {
     // Auto-save logic
     const saveTimerRef = useRef(null);
     useEffect(() => {
-        if (!spaceId || nodes.length === 0 || !supabase) return;
+        if (!spaceId || nodes.length === 0) return;
 
         // Clear existing timer
         if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
@@ -219,21 +230,24 @@ function EditorContent() {
         saveTimerRef.current = setTimeout(async () => {
             try {
                 const updates = {
+                    title: spaceTitle,
                     nodes: cleanNodesForSave(nodes),
                     edges: edges,
                     updated_at: new Date().toISOString()
                 };
 
-                const { error } = await supabase
-                    .from('spaces')
-                    .update(updates)
-                    .eq('id', spaceId);
+                // 1. Local Storage Fallback
+                localStorage.setItem(`blueprint_space_${spaceId}`, JSON.stringify(updates));
 
-                if (error) {
-                    console.error("Auto-save Supabase error:", error);
-                } else {
-                    console.log("Auto-save success", spaceId);
+                // 2. Supabase
+                if (supabase) {
+                    const { error } = await supabase.from('spaces').update({
+                        nodes: updates.nodes, edges: updates.edges, updated_at: updates.updated_at
+                    }).eq('id', spaceId);
+                    if (error) console.warn("Auto-save Supabase warning: schema cache sync failed");
                 }
+
+                console.log("Auto-save success", spaceId);
             } catch (err) {
                 console.error("Auto-save failed", err);
             }
@@ -242,7 +256,7 @@ function EditorContent() {
         return () => {
             if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
         };
-    }, [nodes, edges, spaceId]);
+    }, [nodes, edges, spaceId, spaceTitle]);
 
     const idRef = useRef(2);
 

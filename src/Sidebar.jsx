@@ -13,21 +13,47 @@ export default function Sidebar({ isOpen, onClose }) {
         if (!isOpen) return;
 
         const fetchSpaces = async () => {
+            let localSpaces = [];
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && key.startsWith('blueprint_space_')) {
+                    try {
+                        const s = JSON.parse(localStorage.getItem(key));
+                        localSpaces.push({
+                            id: key.replace('blueprint_space_', ''),
+                            title: s.title || '無題のスペース',
+                            updated_at: s.updated_at || new Date(0).toISOString()
+                        });
+                    } catch (e) { }
+                }
+            }
+
             try {
                 const { data: { user } } = await supabase.auth.getUser();
-                if (!user) return;
+                if (user) {
+                    const { data, error } = await supabase
+                        .from('spaces')
+                        .select('id, title, updated_at')
+                        .eq('user_id', user.id)
+                        .order('updated_at', { ascending: false });
 
-                const { data, error } = await supabase
-                    .from('spaces')
-                    .select('id, title, updated_at')
-                    .eq('user_id', user.id)
-                    .order('updated_at', { ascending: false });
-
-                if (error) throw error;
-                setSpaces(data || []);
+                    if (!error && data) {
+                        const map = new Map();
+                        localSpaces.forEach(s => map.set(s.id, s));
+                        data.forEach(s => {
+                            const l = map.get(s.id);
+                            if (!l || new Date(s.updated_at) > new Date(l.updated_at)) {
+                                map.set(s.id, s);
+                            }
+                        });
+                        localSpaces = Array.from(map.values());
+                    }
+                }
             } catch (err) {
-                console.error("Failed to load spaces", err);
+                console.warn("Failed to load spaces from Supabase", err);
             } finally {
+                localSpaces.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+                setSpaces(localSpaces);
                 setLoading(false);
             }
         };
@@ -61,7 +87,10 @@ export default function Sidebar({ isOpen, onClose }) {
             navigate(`/space/${data.id}`);
             onClose();
         } catch (err) {
-            console.error("Failed to create new space:", err);
+            console.warn("Cloud DB creation failed, falling back to local space:", err.message);
+            // Fallback for missing DB schema
+            navigate(`/space/${crypto.randomUUID()}`);
+            onClose();
         }
     };
 
