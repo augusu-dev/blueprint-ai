@@ -13,7 +13,7 @@ export default function LoopNode({ data, id }) {
     const targetPos = isLR ? Position.Left : Position.Top;
 
     useEffect(() => {
-        updateNodeInternals(id);
+        try { updateNodeInternals(id); } catch (e) { }
     }, [isLR, id, updateNodeInternals]);
 
     return (
@@ -98,6 +98,17 @@ export default function LoopNode({ data, id }) {
                         </div>
                     </div>
                 )}
+            </div>
+
+            {/* Loop self-connection indicator */}
+            <div style={{
+                position: 'absolute', top: '-6px', right: '-6px',
+                width: '22px', height: '22px', borderRadius: '50%',
+                background: 'var(--bg-dark)', border: '2px solid var(--primary)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: '0.6rem'
+            }}>
+                <Repeat size={10} color="var(--primary)" />
             </div>
 
             <Handle type="source" position={sourcePos} className="custom-handle" />

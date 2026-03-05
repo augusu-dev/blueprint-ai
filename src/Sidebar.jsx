@@ -1,230 +1,160 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { X, Plus, Clock, LayoutTemplate } from 'lucide-react';
 import { supabase } from './lib/supabase';
+import { Plus, X, Search, MessageSquare } from 'lucide-react';
 import { useLanguage } from './i18n';
 
 export default function Sidebar({ isOpen, onClose }) {
     const { t } = useLanguage();
+    const navigate = useNavigate();
+    const { id: currentSpaceId } = useParams();
     const [spaces, setSpaces] = useState([]);
     const [loading, setLoading] = useState(true);
-    const { id: currentSpaceId } = useParams();
-    const navigate = useNavigate();
+    const [searchQuery, setSearchQuery] = useState('');
+
+    const fetchSpaces = async () => {
+        if (!supabase) { setLoading(false); return; }
+        const { data, error } = await supabase.from('spaces').select('id, title, updated_at').order('updated_at', { ascending: false });
+        if (!error && data) setSpaces(data);
+        setLoading(false);
+    };
 
     useEffect(() => {
-        if (!isOpen) return;
+        if (isOpen) fetchSpaces();
+    }, [isOpen]);
 
-        const fetchSpaces = async () => {
-            let localSpaces = [];
-            for (let i = 0; i < localStorage.length; i++) {
-                const key = localStorage.key(i);
-                if (key && key.startsWith('blueprint_space_')) {
-                    try {
-                        const s = JSON.parse(localStorage.getItem(key));
-                        localSpaces.push({
-                            id: key.replace('blueprint_space_', ''),
-                            title: s.title || t('editor.untitled'),
-                            updated_at: s.updated_at || new Date(0).toISOString()
-                        });
-                    } catch (e) { }
-                }
-            }
-
-            try {
-                const { data: { user } } = await supabase.auth.getUser();
-                if (user) {
-                    const { data, error } = await supabase
-                        .from('spaces')
-                        .select('id, title, updated_at')
-                        .eq('user_id', user.id)
-                        .order('updated_at', { ascending: false });
-
-                    if (!error && data) {
-                        const map = new Map();
-                        localSpaces.forEach(s => map.set(s.id, s));
-                        data.forEach(s => {
-                            const l = map.get(s.id);
-                            if (!l || new Date(s.updated_at) > new Date(l.updated_at)) {
-                                map.set(s.id, s);
-                            }
-                        });
-                        localSpaces = Array.from(map.values());
-                    }
-                }
-            } catch (err) {
-                console.warn("Failed to load spaces from Supabase", err);
-            } finally {
-                localSpaces.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
-                setSpaces(localSpaces);
-                setLoading(false);
-            }
-        };
-
-        fetchSpaces();
-
+    useEffect(() => {
         const handleTitleUpdate = () => fetchSpaces();
         window.addEventListener('spaceTitleUpdated', handleTitleUpdate);
         return () => window.removeEventListener('spaceTitleUpdated', handleTitleUpdate);
-    }, [isOpen]);
+    }, []);
 
     const handleNewSpace = async () => {
-        try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) throw new Error("No user logged in");
-
-            const currentSpace = spaces.find(s => s.id === currentSpaceId);
-            if (currentSpace && (currentSpace.title === t('editor.untitled') || currentSpace.title === 'Untitled Space' || currentSpace.title === '無題のスペース' || currentSpace.title === '未命名空间')) {
-                onClose();
-                return;
-            }
-
-            const { data, error } = await supabase
-                .from('spaces')
-                .insert([{ user_id: user.id, title: t('editor.untitled') }])
-                .select()
-                .single();
-
-            if (error) throw error;
-
+        if (!supabase) return;
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+        const { data, error } = await supabase.from('spaces').insert({ user_id: user.id, title: t('editor.untitled'), nodes: [], edges: [] }).select().single();
+        if (!error && data) {
             navigate(`/space/${data.id}`);
-            onClose();
-        } catch (err) {
-            console.warn("Cloud DB creation failed, falling back to local space:", err.message);
-            navigate(`/space/${crypto.randomUUID()}`);
             onClose();
         }
     };
 
-    const handleSelectSpace = (id) => {
-        navigate(`/space/${id}`);
-        onClose();
-    };
-
-    const formatDate = (dateString) => {
-        const d = new Date(dateString);
-        return `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-    };
+    const filteredSpaces = spaces.filter(s =>
+        !searchQuery || (s.title || '').toLowerCase().includes(searchQuery.toLowerCase())
+    );
 
     return (
         <>
-            {/* Backdrop */}
-            {isOpen && (
-                <div
-                    onClick={onClose}
-                    style={{
-                        position: 'fixed',
-                        top: 0, left: 0, right: 0, bottom: 0,
-                        backgroundColor: 'rgba(0,0,0,0.4)',
-                        backdropFilter: 'blur(6px)',
-                        zIndex: 999
-                    }}
-                />
-            )}
-
-            {/* Drawer */}
-            <div style={{
-                position: 'fixed',
-                top: 0,
-                left: isOpen ? 0 : '-340px',
-                width: '310px',
-                height: '100vh',
-                background: 'var(--bg-dark)',
-                borderRight: '1px solid var(--panel-border)',
-                transition: 'left 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
-                zIndex: 1000,
-                display: 'flex',
-                flexDirection: 'column',
-                boxShadow: isOpen ? '8px 0 30px rgba(0,0,0,0.25)' : 'none'
-            }}>
-
+            {isOpen && <div className="sidebar-backdrop" onClick={onClose} />}
+            <div className={`sidebar-drawer ${isOpen ? 'sidebar-open' : ''}`}>
                 {/* Header */}
                 <div style={{
-                    padding: '1.25rem 1.25rem',
+                    padding: '0.75rem 0.85rem',
                     display: 'flex',
-                    alignItems: 'center',
                     justifyContent: 'space-between',
+                    alignItems: 'center',
                     borderBottom: '1px solid var(--panel-border)'
                 }}>
-                    <h2 style={{ fontSize: '1.1rem', fontWeight: 500, margin: 0, letterSpacing: '-0.01em' }}>{t('sidebar.title')}</h2>
-                    <button onClick={onClose} className="btn-icon" style={{ width: '28px', height: '28px' }}>
-                        <X size={14} />
+                    <span style={{ fontWeight: 500, fontSize: '0.95rem' }}>{t('sidebar.title')}</span>
+                    <button className="btn-icon" onClick={onClose} style={{ width: '28px', height: '28px' }}>
+                        <X size={16} />
                     </button>
                 </div>
 
-                {/* Body */}
-                <div style={{ flex: 1, overflowY: 'auto', padding: '1rem' }}>
+                {/* New Chat Button */}
+                <div style={{ padding: '0.6rem 0.85rem' }}>
                     <button
                         onClick={handleNewSpace}
                         style={{
-                            width: '100%',
-                            padding: '0.65rem',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            gap: '0.4rem',
-                            background: 'var(--primary)',
-                            color: 'white',
-                            border: 'none',
-                            borderRadius: '8px',
-                            cursor: 'pointer',
-                            fontWeight: 500,
-                            fontSize: '0.85rem',
-                            marginBottom: '1.25rem',
-                            transition: 'all 0.2s',
-                            boxShadow: '0 4px 12px rgba(108, 140, 255, 0.2)'
+                            width: '100%', background: 'var(--primary)', color: 'white',
+                            border: 'none', padding: '0.55rem', borderRadius: '10px',
+                            fontSize: '0.82rem', fontWeight: 500, cursor: 'pointer',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem',
+                            transition: 'all 0.2s', fontFamily: 'inherit'
                         }}
-                        onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--primary-hover)'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
-                        onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--primary)'; e.currentTarget.style.transform = 'translateY(0)'; }}
                     >
-                        <Plus size={16} /> {t('sidebar.newSpace')}
+                        <Plus size={15} />
+                        {t('sidebar.newSpace')}
                     </button>
+                </div>
 
-                    <h3 style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1.5px', marginBottom: '0.75rem', marginLeft: '0.4rem', fontWeight: 500 }}>
-                        {t('sidebar.history')}
-                    </h3>
+                {/* Search */}
+                <div style={{ padding: '0 0.85rem 0.5rem' }}>
+                    <div style={{
+                        display: 'flex', background: 'rgba(255,255,255,0.04)',
+                        border: '1px solid var(--panel-border)', borderRadius: '8px',
+                        alignItems: 'center', padding: '0 0.5rem'
+                    }}>
+                        <Search size={14} color="var(--text-muted)" />
+                        <input
+                            type="text"
+                            value={searchQuery}
+                            onChange={e => setSearchQuery(e.target.value)}
+                            placeholder={t('sidebar.search')}
+                            style={{
+                                flex: 1, background: 'transparent', border: 'none',
+                                color: 'var(--text-main)', padding: '0.45rem 0.5rem',
+                                fontSize: '0.82rem', outline: 'none', fontFamily: 'inherit'
+                            }}
+                        />
+                    </div>
+                </div>
 
+                {/* Space list */}
+                <div style={{ flex: 1, overflowY: 'auto', padding: '0.3rem 0.55rem' }}>
                     {loading ? (
-                        <p style={{ color: 'var(--text-muted)', textAlign: 'center', fontSize: '0.85rem', marginTop: '2rem' }}>{t('sidebar.loading')}</p>
-                    ) : spaces.length === 0 ? (
-                        <p style={{ color: 'var(--text-muted)', textAlign: 'center', fontSize: '0.85rem', marginTop: '2rem' }}>{t('sidebar.empty')}</p>
+                        <p style={{ padding: '1rem', color: 'var(--text-muted)', fontSize: '0.82rem', textAlign: 'center' }}>{t('sidebar.loading')}</p>
+                    ) : filteredSpaces.length === 0 ? (
+                        <p style={{ padding: '1rem', color: 'var(--text-muted)', fontSize: '0.82rem', textAlign: 'center' }}>{t('sidebar.empty')}</p>
                     ) : (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                            {spaces.map(space => (
-                                <div
-                                    key={space.id}
-                                    onClick={() => handleSelectSpace(space.id)}
-                                    style={{
-                                        padding: '0.6rem 0.8rem',
-                                        borderRadius: '8px',
-                                        background: space.id === currentSpaceId ? 'rgba(108, 140, 255, 0.08)' : 'transparent',
-                                        border: `1px solid ${space.id === currentSpaceId ? 'rgba(108, 140, 255, 0.12)' : 'transparent'}`,
-                                        cursor: 'pointer',
-                                        transition: 'all 0.15s',
-                                        display: 'flex',
-                                        flexDirection: 'column',
-                                        gap: '0.2rem'
-                                    }}
-                                    onMouseEnter={(e) => {
-                                        if (space.id !== currentSpaceId) e.currentTarget.style.background = 'rgba(255,255,255,0.03)';
-                                    }}
-                                    onMouseLeave={(e) => {
-                                        if (space.id !== currentSpaceId) e.currentTarget.style.background = 'transparent';
-                                    }}
-                                >
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                        <LayoutTemplate size={13} color="var(--primary)" />
-                                        <span style={{ fontWeight: 400, fontSize: '0.88rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                            {space.title}
-                                        </span>
-                                    </div>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', color: 'var(--text-muted)', fontSize: '0.7rem', paddingLeft: '1.2rem' }}>
-                                        <Clock size={9} />
-                                        <span>{formatDate(space.updated_at)}</span>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
+                        filteredSpaces.map(space => (
+                            <button
+                                key={space.id}
+                                onClick={() => { navigate(`/space/${space.id}`); onClose(); }}
+                                style={{
+                                    width: '100%', textAlign: 'left', padding: '0.55rem 0.65rem',
+                                    background: space.id === currentSpaceId ? 'rgba(108, 140, 255, 0.08)' : 'transparent',
+                                    border: space.id === currentSpaceId ? '1px solid rgba(108, 140, 255, 0.15)' : '1px solid transparent',
+                                    borderRadius: '8px', cursor: 'pointer', color: 'var(--text-main)',
+                                    fontSize: '0.82rem', transition: 'all 0.15s', display: 'flex',
+                                    alignItems: 'center', gap: '0.5rem', marginBottom: '0.15rem',
+                                    fontFamily: 'inherit'
+                                }}
+                                onMouseEnter={e => { if (space.id !== currentSpaceId) e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; }}
+                                onMouseLeave={e => { if (space.id !== currentSpaceId) e.currentTarget.style.background = 'transparent'; }}
+                            >
+                                <MessageSquare size={14} color="var(--text-muted)" style={{ flexShrink: 0 }} />
+                                <span style={{
+                                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                                    fontWeight: space.id === currentSpaceId ? 500 : 400
+                                }}>
+                                    {space.title || t('editor.untitled')}
+                                </span>
+                            </button>
+                        ))
                     )}
+                </div>
+
+                {/* Bottom search button */}
+                <div style={{
+                    padding: '0.6rem 0.85rem', borderTop: '1px solid var(--panel-border)'
+                }}>
+                    <button
+                        onClick={() => { document.querySelector('.sidebar-drawer input')?.focus(); }}
+                        style={{
+                            width: '100%', background: 'rgba(255,255,255,0.03)',
+                            border: '1px solid var(--panel-border)',
+                            padding: '0.5rem', borderRadius: '8px',
+                            fontSize: '0.8rem', color: 'var(--text-muted)',
+                            cursor: 'pointer', display: 'flex', alignItems: 'center',
+                            justifyContent: 'center', gap: '0.35rem', transition: 'all 0.2s',
+                            fontFamily: 'inherit'
+                        }}
+                    >
+                        <Search size={13} />
+                        {t('sidebar.searchBtn')}
+                    </button>
                 </div>
             </div>
         </>

@@ -357,10 +357,9 @@ select:focus {
 /* ── Chat Action Buttons ── */
 .chat-actions {
   display: flex;
-  gap: 0.35rem;
-  margin-top: 0.5rem;
-  opacity: 0;
-  transition: opacity 0.2s ease;
+  gap: 0.3rem;
+  align-items: center;
+  flex-wrap: wrap;
 }
 
 .chat-msg-wrapper:hover .chat-actions {
