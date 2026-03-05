@@ -432,3 +432,8 @@ select:focus {
     opacity: 1;
   }
 }
+
+/* ── Sidebar ── */
+.sidebar-item:hover .sidebar-delete-btn {
+  opacity: 1 !important;
+}

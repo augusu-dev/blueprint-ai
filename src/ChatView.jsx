@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Bot, User, Copy, Check, RefreshCw, GitBranch, ExternalLink, ChevronLeft, ChevronRight, Target, Trash2 } from 'lucide-react';
+import { Send, Bot, User, Copy, Check, RefreshCw, GitBranch, ExternalLink, ChevronLeft, ChevronRight, Target } from 'lucide-react';
 import { useLanguage } from './i18n';
 import GoalWizard from './GoalWizard';
 
@@ -197,12 +197,7 @@ export default function ChatView({
         }
     };
 
-    const handleClearChat = () => {
-        if (confirm(t('chat.clearConfirm'))) {
-            setChatHistory([]);
-            onUpdateNodeData(node.id, 'chatHistory', []);
-        }
-    };
+
 
     if (showGoalWizard) {
         return (
@@ -210,6 +205,10 @@ export default function ChatView({
                 onClose={() => setShowGoalWizard(false)}
                 apiKeys={apiKeys}
                 selectedApiKey={node?.data?.selectedApiKey || 0}
+                initialHistory={node?.data?.goalHistory || []}
+                onSaveHistory={(history) => {
+                    if (node) onUpdateNodeData(node.id, 'goalHistory', history);
+                }}
                 onSetGoal={(goalText) => {
                     if (node) onUpdateNodeData(node.id, 'systemPrompt', goalText);
                 }}
@@ -264,22 +263,17 @@ export default function ChatView({
                         </button>
                     )}
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                    <select
-                        className="node-select-sm"
-                        value={node.data?.selectedApiKey || 0}
-                        onChange={(e) => onUpdateNodeData(node.id, 'selectedApiKey', parseInt(e.target.value))}
-                        style={{ maxWidth: '130px' }}
-                        title={t('chat.modelSelect')}
-                    >
-                        {apiKeys?.map((item, i) => (
-                            <option key={i} value={i}>Key {i + 1} ({item?.provider || 'openai'})</option>
-                        ))}
-                    </select>
-                    <button onClick={handleClearChat} className="btn-icon" style={{ width: '30px', height: '30px' }} title={t('chat.clearBtn')}>
-                        <Trash2 size={14} />
-                    </button>
-                </div>
+                <select
+                    className="node-select-sm"
+                    value={node.data?.selectedApiKey || 0}
+                    onChange={(e) => onUpdateNodeData(node.id, 'selectedApiKey', parseInt(e.target.value))}
+                    style={{ maxWidth: '130px' }}
+                    title={t('chat.modelSelect')}
+                >
+                    {apiKeys?.map((item, i) => (
+                        <option key={i} value={i}>Key {i + 1} ({item?.provider || 'openai'})</option>
+                    ))}
+                </select>
             </div>
 
             {/* Messages */}

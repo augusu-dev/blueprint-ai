@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Handle, Position, useUpdateNodeInternals } from '@xyflow/react';
-import { Target, Plus, Settings } from 'lucide-react';
+import { Target, Plus, Settings, Trash2 } from 'lucide-react';
 import { useLanguage } from '../i18n';
 import './nodes.css';
 
@@ -13,7 +13,7 @@ export default function SequenceNode({ data, id }) {
     const targetPos = isLR ? Position.Left : Position.Top;
 
     useEffect(() => {
-        updateNodeInternals(id);
+        try { updateNodeInternals(id); } catch (e) { }
     }, [isLR, id, updateNodeInternals]);
 
     return (
@@ -24,38 +24,37 @@ export default function SequenceNode({ data, id }) {
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                     <Target size={14} />
                 </div>
-                <button
-                    onClick={() => data.onQuickAdd && data.onQuickAdd(id, 'sequenceNode')}
-                    style={{ background: 'transparent', border: 'none', color: 'var(--text-main)', cursor: 'pointer', padding: '0.15rem', display: 'flex', alignItems: 'center', opacity: 0.7, transition: 'opacity 0.2s' }}
-                    title={t('node.addNode')}
-                    onMouseEnter={(e) => e.currentTarget.style.opacity = '1'}
-                    onMouseLeave={(e) => e.currentTarget.style.opacity = '0.7'}
-                >
-                    <Plus size={14} />
-                </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.2rem' }}>
+                    {!data.isStarter && (
+                        <button onClick={() => data.onDeleteNode && data.onDeleteNode(id)}
+                            style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '0.15rem', display: 'flex', alignItems: 'center', opacity: 0.5, transition: 'opacity 0.2s' }}
+                            title={t('node.delete')}
+                            onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.color = '#f87171'; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.5'; e.currentTarget.style.color = 'var(--text-muted)'; }}
+                        >
+                            <Trash2 size={12} />
+                        </button>
+                    )}
+                    <button onClick={() => data.onQuickAdd && data.onQuickAdd(id, 'sequenceNode')}
+                        style={{ background: 'transparent', border: 'none', color: 'var(--text-main)', cursor: 'pointer', padding: '0.15rem', display: 'flex', alignItems: 'center', opacity: 0.7, transition: 'opacity 0.2s' }}
+                        title={t('node.addNode')}
+                        onMouseEnter={(e) => e.currentTarget.style.opacity = '1'}
+                        onMouseLeave={(e) => e.currentTarget.style.opacity = '0.7'}
+                    >
+                        <Plus size={14} />
+                    </button>
+                </div>
             </div>
 
             <div className="node-body" style={{ paddingBottom: '0.9rem' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <button
-                        onClick={() => data.onOpenChat && data.onOpenChat(id)}
-                        style={{
-                            display: 'flex', alignItems: 'center', gap: '0.4rem',
-                            background: 'var(--primary)', color: 'white', border: 'none',
-                            padding: '0.4rem 0.9rem', borderRadius: '18px', cursor: 'pointer',
-                            fontSize: '0.82rem', fontWeight: 500,
-                            boxShadow: '0 3px 10px rgba(108, 140, 255, 0.25)',
-                            transition: 'all 0.2s'
-                        }}
-                    >
+                    <button onClick={() => data.onOpenChat && data.onOpenChat(id)}
+                        style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', background: 'var(--primary)', color: 'white', border: 'none', padding: '0.4rem 0.9rem', borderRadius: '18px', cursor: 'pointer', fontSize: '0.82rem', fontWeight: 500, boxShadow: '0 3px 10px rgba(108, 140, 255, 0.25)', transition: 'all 0.2s' }}>
                         💬 Chat
                     </button>
-
-                    <button
-                        onClick={() => setShowConfig(!showConfig)}
+                    <button onClick={() => setShowConfig(!showConfig)}
                         style={{ background: showConfig ? 'var(--text-main)' : 'rgba(255,255,255,0.04)', color: showConfig ? 'var(--bg-dark)' : 'var(--text-main)', border: '1px solid var(--panel-border)', borderRadius: '50%', width: '28px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', transition: 'all 0.2s' }}
-                        title={t('node.settings')}
-                    >
+                        title={t('node.settings')}>
                         <Settings size={13} />
                     </button>
                 </div>
@@ -63,24 +62,11 @@ export default function SequenceNode({ data, id }) {
                 {showConfig && (
                     <div style={{ marginTop: '0.75rem', background: 'rgba(255,255,255,0.02)', padding: '0.65rem', borderRadius: '8px', border: '1px solid var(--panel-border)', animation: 'fadeIn 0.2s ease' }}>
                         <label style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginBottom: '0.2rem', display: 'block' }}>{t('node.systemPrompt')}</label>
-                        <textarea
-                            className="node-input"
-                            style={{ minHeight: '50px', width: '100%' }}
-                            placeholder={t('node.systemPlaceholder')}
-                            value={data.systemPrompt || ''}
-                            onChange={(e) => data.onChange && data.onChange(id, 'systemPrompt', e.target.value)}
-                        />
+                        <textarea className="node-input" style={{ minHeight: '50px', width: '100%' }} placeholder={t('node.systemPlaceholder')} value={data.systemPrompt || ''} onChange={(e) => data.onChange && data.onChange(id, 'systemPrompt', e.target.value)} />
                         <div style={{ marginTop: '0.6rem' }}>
                             <label style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginBottom: '0.2rem', display: 'block' }}>{t('node.apiKeyLabel')}</label>
-                            <select
-                                className="node-select-sm"
-                                style={{ width: '100%', padding: '0.35rem' }}
-                                value={data.selectedApiKey || 0}
-                                onChange={(e) => data.onChange && data.onChange(id, 'selectedApiKey', parseInt(e.target.value))}
-                            >
-                                {data.apiKeys && data.apiKeys.map((item, i) => (
-                                    <option key={i} value={i}>Key {i + 1} ({item?.provider || 'openai'})</option>
-                                ))}
+                            <select className="node-select-sm" style={{ width: '100%', padding: '0.35rem' }} value={data.selectedApiKey || 0} onChange={(e) => data.onChange && data.onChange(id, 'selectedApiKey', parseInt(e.target.value))}>
+                                {data.apiKeys && data.apiKeys.map((item, i) => (<option key={i} value={i}>Key {i + 1} ({item?.provider || 'openai'})</option>))}
                             </select>
                         </div>
                     </div>

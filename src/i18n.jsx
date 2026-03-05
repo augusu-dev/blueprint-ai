@@ -63,6 +63,7 @@ const translations = {
         'sidebar.empty': 'チャットがありません',
         'sidebar.search': '検索...',
         'sidebar.searchBtn': '検索',
+        'sidebar.deleteConfirm': 'この会話を削除しますか？',
 
         // Chat
         'chat.title': 'チャット',
@@ -101,6 +102,7 @@ const translations = {
         'node.loopPerspective': '別視点からの分析',
         'node.loopQuiz': 'インタラクティブクイズ',
         'node.loopSummary': '自動要約ループ',
+        'node.delete': '削除',
 
         // General
         'general.loading': '読み込み中...',
@@ -163,6 +165,7 @@ const translations = {
         'sidebar.empty': 'No chats yet',
         'sidebar.search': 'Search...',
         'sidebar.searchBtn': 'Search',
+        'sidebar.deleteConfirm': 'Delete this conversation?',
 
         'chat.title': 'Chat',
         'chat.clearConfirm': 'Clear chat history?',
@@ -198,6 +201,7 @@ const translations = {
         'node.loopPerspective': 'Alternative perspective',
         'node.loopQuiz': 'Interactive quiz',
         'node.loopSummary': 'Auto-summary loop',
+        'node.delete': 'Delete',
 
         'general.loading': 'Loading...',
         'general.supabaseWarning': 'Warning: Supabase credentials are missing. Check .env.local file.',
@@ -259,6 +263,7 @@ const translations = {
         'sidebar.empty': '暂无聊天',
         'sidebar.search': '搜索...',
         'sidebar.searchBtn': '搜索',
+        'sidebar.deleteConfirm': '删除此对话？',
 
         'chat.title': '聊天',
         'chat.clearConfirm': '确定清除聊天记录？',
@@ -294,6 +299,7 @@ const translations = {
         'node.loopPerspective': '多角度分析',
         'node.loopQuiz': '交互式测验',
         'node.loopSummary': '自动摘要循环',
+        'node.delete': '删除',
 
         'general.loading': '加载中...',
         'general.supabaseWarning': '警告：Supabase凭据缺失。请检查.env.local文件。',

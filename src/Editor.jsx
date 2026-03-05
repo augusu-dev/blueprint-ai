@@ -143,7 +143,8 @@ function EditorContent() {
                 dir: n.data.dir, prompt: n.data.prompt, systemPrompt: n.data.systemPrompt,
                 chatHistory: n.data.chatHistory, response: n.data.response, isStarter: n.data.isStarter,
                 numBranches: n.data.numBranches, loopMode: n.data.loopMode,
-                selectedApiKey: n.data.selectedApiKey, branchCount: n.data.branchCount
+                selectedApiKey: n.data.selectedApiKey, branchCount: n.data.branchCount,
+                goalHistory: n.data.goalHistory
             } : {}
         }));
     };
@@ -251,19 +252,29 @@ function EditorContent() {
         }
     }, [edges]);
 
+    const onDeleteNode = useCallback((nodeId) => {
+        setNodes(nds => nds.filter(n => n.id !== nodeId));
+        setEdges(eds => eds.filter(e => e.source !== nodeId && e.target !== nodeId));
+        if (activeChatNodeId === nodeId) setActiveChatNodeId('1');
+    }, [setNodes, setEdges, activeChatNodeId]);
+
     const onConnect = useCallback((params) => setEdges((eds) => addEdge(params, eds)), [setEdges]);
 
     const nodesWithData = useMemo(() => {
+        // Get goal/systemPrompt from starter node
+        const starterNode = nodes.find(n => n.data?.isStarter);
+        const sharedGoal = starterNode?.data?.systemPrompt || '';
         return nodes.map(n => ({
             ...n,
             data: {
                 ...n.data, dir: direction,
-                onChange: updateNodeData, onAddBranch, onQuickAdd,
+                systemPrompt: n.data?.isStarter ? n.data.systemPrompt : (n.data?.systemPrompt || sharedGoal),
+                onChange: updateNodeData, onAddBranch, onQuickAdd, onDeleteNode,
                 onOpenChat: (nodeId) => { setActiveChatNodeId(nodeId); setViewMode('chat'); },
                 apiKeys
             }
         }));
-    }, [nodes, direction, updateNodeData, onAddBranch, onQuickAdd, apiKeys]);
+    }, [nodes, direction, updateNodeData, onAddBranch, onQuickAdd, onDeleteNode, apiKeys]);
 
     const toggleDirection = () => setDirection(d => d === 'LR' ? 'TB' : 'LR');
 

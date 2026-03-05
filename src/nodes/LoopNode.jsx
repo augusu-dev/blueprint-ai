@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Handle, Position, useUpdateNodeInternals } from '@xyflow/react';
-import { Repeat, Plus, Settings } from 'lucide-react';
+import { Repeat, Plus, Settings, Trash2 } from 'lucide-react';
 import { useLanguage } from '../i18n';
 import './nodes.css';
 
@@ -24,15 +24,24 @@ export default function LoopNode({ data, id }) {
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                     <Repeat size={14} />
                 </div>
-                <button
-                    onClick={() => data.onQuickAdd && data.onQuickAdd(id, 'sequenceNode')}
-                    style={{ background: 'transparent', border: 'none', color: 'var(--text-main)', cursor: 'pointer', padding: '0.15rem', display: 'flex', alignItems: 'center', opacity: 0.7, transition: 'opacity 0.2s' }}
-                    title={t('node.addNode')}
-                    onMouseEnter={(e) => e.currentTarget.style.opacity = '1'}
-                    onMouseLeave={(e) => e.currentTarget.style.opacity = '0.7'}
-                >
-                    <Plus size={14} />
-                </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.2rem' }}>
+                    <button onClick={() => data.onDeleteNode && data.onDeleteNode(id)}
+                        style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '0.15rem', display: 'flex', alignItems: 'center', opacity: 0.5, transition: 'opacity 0.2s' }}
+                        title={t('node.delete')}
+                        onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.color = '#f87171'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.5'; e.currentTarget.style.color = 'var(--text-muted)'; }}>
+                        <Trash2 size={12} />
+                    </button>
+                    <button
+                        onClick={() => data.onQuickAdd && data.onQuickAdd(id, 'sequenceNode')}
+                        style={{ background: 'transparent', border: 'none', color: 'var(--text-main)', cursor: 'pointer', padding: '0.15rem', display: 'flex', alignItems: 'center', opacity: 0.7, transition: 'opacity 0.2s' }}
+                        title={t('node.addNode')}
+                        onMouseEnter={(e) => e.currentTarget.style.opacity = '1'}
+                        onMouseLeave={(e) => e.currentTarget.style.opacity = '0.7'}
+                    >
+                        <Plus size={14} />
+                    </button>
+                </div>
             </div>
 
             <div className="node-body" style={{ paddingBottom: '0.9rem' }}>
