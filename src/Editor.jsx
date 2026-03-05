@@ -114,10 +114,10 @@ function EditorContent() {
                     setSpaceTitle(data.title || '無題のスペース');
 
                     // Only set nodes/edges on initial load to avoid over-writing unsaved local state
-                    if (data.nodes && data.nodes.length > 0) setNodes(data.nodes);
+                    if (Array.isArray(data.nodes) && data.nodes.length > 0) setNodes(data.nodes);
                     else setNodes(initialNodes);
 
-                    if (data.edges && data.edges.length > 0) setEdges(data.edges);
+                    if (Array.isArray(data.edges) && data.edges.length > 0) setEdges(data.edges);
                     else setEdges(initialEdges);
 
                     if (data.viewport && Object.keys(data.viewport).length > 0) {
@@ -154,26 +154,36 @@ function EditorContent() {
         // Clear existing timer
         if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
 
-        // Set a new debounce timer for 2 seconds
+        // Set a new debounce timer for 1.5 seconds
         saveTimerRef.current = setTimeout(async () => {
             try {
-                // In a real app we'd also get viewport from useReactFlow instance
+                // Remove non-serializable function references from node data
+                const cleanNodes = nodes.map(n => {
+                    if (!n.data) return n;
+                    const { onChange, onAddBranch, onRunAI, onQuickAdd, onOpenChat, apiKeys, ...safeData } = n.data;
+                    return { ...n, data: safeData };
+                });
+
                 const updates = {
-                    nodes: nodes,
+                    nodes: cleanNodes,
                     edges: edges,
                     updated_at: new Date().toISOString()
                 };
 
-                await supabase
+                const { error } = await supabase
                     .from('spaces')
                     .update(updates)
                     .eq('id', spaceId);
 
-                console.log("Auto-saved space", spaceId);
+                if (error) {
+                    console.error("Auto-save Supabase error:", error);
+                } else {
+                    console.log("Auto-saved space", spaceId, "with", cleanNodes.length, "nodes");
+                }
             } catch (err) {
                 console.error("Auto-save failed", err);
             }
-        }, 2000);
+        }, 1500);
 
         return () => {
             if (saveTimerRef.current) clearTimeout(saveTimerRef.current);

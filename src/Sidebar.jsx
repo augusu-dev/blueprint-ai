@@ -46,8 +46,15 @@ export default function Sidebar({ isOpen, onClose }) {
 
             const currentSpace = spaces.find(s => s.id === currentSpaceId);
             if (currentSpace && (currentSpace.title === '無題のスペース' || currentSpace.title === 'Untitled Space')) {
-                onClose();
-                return;
+                // 実際にノードやエッジが変更されているか確認 (Check if actually modified)
+                const { data: spaceData } = await supabase.from('spaces').select('nodes, edges').eq('id', currentSpaceId).single();
+                if (spaceData) {
+                    const hasModifications = (spaceData.nodes && spaceData.nodes.length > 1) || (spaceData.edges && spaceData.edges.length > 0);
+                    if (!hasModifications) {
+                        onClose();
+                        return; // 変更がない場合は新規作成しない
+                    }
+                }
             }
 
             const { data, error } = await supabase
