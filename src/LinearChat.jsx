@@ -62,7 +62,7 @@ export default function LinearChat({ isOpen, onClose, node, onUpdateNodeData, on
             let reply = "";
 
             if (provider === 'gemini') {
-                const modelToUse = userModel || 'gemini-2.5-flash';
+                const modelToUse = userModel || 'gemini-3.1-pro-preview';
                 const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelToUse}:generateContent?key=${keyToUse}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -79,7 +79,7 @@ export default function LinearChat({ isOpen, onClose, node, onUpdateNodeData, on
                 if (!response.ok) throw new Error(data.error?.message || `Gemini API Error`);
                 reply = data.candidates?.[0]?.content?.parts?.[0]?.text || "No response.";
             } else if (provider === 'anthropic') {
-                const modelToUse = userModel || 'claude-3-5-sonnet-20241022';
+                const modelToUse = userModel || 'claude-sonnet-4-6';
                 const messages = updatedHistory.map(m => ({ role: m.role === 'ai' ? 'assistant' : 'user', content: m.content }));
                 const response = await fetch('https://api.anthropic.com/v1/messages', {
                     method: 'POST',
@@ -100,7 +100,7 @@ export default function LinearChat({ isOpen, onClose, node, onUpdateNodeData, on
                 if (!response.ok) throw new Error(data.error?.message || `Anthropic API Error`);
                 reply = data.content?.[0]?.text || "No response.";
             } else {
-                const modelToUse = userModel || (provider === 'openai' ? 'gpt-4o' : provider === 'openrouter' ? 'google/gemini-2.5-flash' : 'glm-4-plus');
+                const modelToUse = userModel || (provider === 'openai' ? 'gpt-5.3-chat-latest' : provider === 'openrouter' ? 'google/gemini-3.1-pro-preview' : 'glm-4-plus');
                 const endpoint = provider === 'openrouter' ? 'https://openrouter.ai/api/v1/chat/completions' :
                     provider === 'glm' ? 'https://open.bigmodel.cn/api/paas/v4/chat/completions' :
                         'https://api.openai.com/v1/chat/completions';
@@ -138,7 +138,7 @@ export default function LinearChat({ isOpen, onClose, node, onUpdateNodeData, on
                     const titlePrompt = `ユーザーの最初のメッセージ「${messageText}」に基づき、このワークスペースのタイトルを10文字以内で作成してください。余計な記号や説明は一切含めず、タイトルテキストのみを出力してください。`;
 
                     if (provider === 'gemini') {
-                        const modelToUse = userModel || 'gemini-2.5-flash';
+                        const modelToUse = userModel || 'gemini-3.1-pro-preview';
                         const tRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelToUse}:generateContent?key=${keyToUse}`, {
                             method: 'POST', headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: titlePrompt }] }] })
@@ -146,7 +146,7 @@ export default function LinearChat({ isOpen, onClose, node, onUpdateNodeData, on
                         const tData = await tRes.json();
                         newTitle = tData.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || newTitle;
                     } else if (provider === 'anthropic') {
-                        const modelToUse = userModel || 'claude-3-5-sonnet-20241022';
+                        const modelToUse = userModel || 'claude-sonnet-4-6';
                         const tRes = await fetch('https://api.anthropic.com/v1/messages', {
                             method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': keyToUse, 'anthropic-version': '2023-06-01', 'anthropic-dangerously-allow-browser': 'true' },
                             body: JSON.stringify({ model: modelToUse, max_tokens: 50, messages: [{ role: 'user', content: titlePrompt }] })
@@ -154,7 +154,7 @@ export default function LinearChat({ isOpen, onClose, node, onUpdateNodeData, on
                         const tData = await tRes.json();
                         newTitle = tData.content?.[0]?.text?.trim() || newTitle;
                     } else {
-                        const modelToUse = userModel || (provider === 'openai' ? 'gpt-4o' : provider === 'openrouter' ? 'google/gemini-2.5-flash' : 'glm-4-plus');
+                        const modelToUse = userModel || (provider === 'openai' ? 'gpt-5.3-chat-latest' : provider === 'openrouter' ? 'google/gemini-3.1-pro-preview' : 'glm-4-plus');
                         const endpoint = provider === 'openrouter' ? 'https://openrouter.ai/api/v1/chat/completions' :
                             provider === 'glm' ? 'https://open.bigmodel.cn/api/paas/v4/chat/completions' : 'https://api.openai.com/v1/chat/completions';
                         const tRes = await fetch(endpoint, {

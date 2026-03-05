@@ -304,7 +304,7 @@ function EditorContent() {
             let reply = "";
 
             if (provider === 'gemini') {
-                const modelToUse = userModel || 'gemini-2.5-flash';
+                const modelToUse = userModel || 'gemini-3.1-pro-preview';
                 const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelToUse}:generateContent?key=${keyToUse}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -318,7 +318,7 @@ function EditorContent() {
                 reply = data.candidates?.[0]?.content?.parts?.[0]?.text || "No response content received.";
 
             } else if (provider === 'anthropic') {
-                const modelToUse = userModel || 'claude-3-5-sonnet-20241022';
+                const modelToUse = userModel || 'claude-sonnet-4-6';
                 const response = await fetch('https://api.anthropic.com/v1/messages', {
                     method: 'POST',
                     headers: {
@@ -338,7 +338,7 @@ function EditorContent() {
                 reply = data.content?.[0]?.text || "No response content received.";
 
             } else if (provider === 'openrouter') {
-                const modelToUse = userModel || 'google/gemini-2.5-flash';
+                const modelToUse = userModel || 'google/gemini-3.1-pro-preview';
                 const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
                     method: 'POST',
                     headers: {
@@ -372,7 +372,7 @@ function EditorContent() {
                 reply = data.choices?.[0]?.message?.content || "No response content received.";
 
             } else {
-                const modelToUse = userModel || 'gpt-4o';
+                const modelToUse = userModel || 'gpt-5.3-chat-latest';
                 const response = await fetch('https://api.openai.com/v1/chat/completions', {
                     method: 'POST',
                     headers: {
@@ -492,10 +492,19 @@ function EditorContent() {
     const toggleDirection = () => setDirection(d => d === 'LR' ? 'TB' : 'LR');
 
     useEffect(() => {
-        nodes.forEach(node => {
-            updateNodeInternals(node.id);
-        });
-    }, [direction, updateNodeInternals]);
+        // Use a small delay to ensure ReactFlow has processed the nodes
+        const timer = setTimeout(() => {
+            nodes.forEach(node => {
+                try {
+                    updateNodeInternals(node.id);
+                } catch (e) {
+                    // Ignore if node not yet registered in ReactFlow
+                }
+            });
+        }, 50);
+        return () => clearTimeout(timer);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [direction, nodes.length, updateNodeInternals]);
 
     return (
         <div className="editor-layout">
@@ -668,29 +677,39 @@ function EditorContent() {
                                                 <option value="">{t('settings.modelDefault')}</option>
                                                 {item.provider === 'openai' && (
                                                     <>
+                                                        <option value="gpt-5.3-chat-latest">gpt-5.3-chat-latest</option>
+                                                        <option value="gpt-5">gpt-5</option>
                                                         <option value="gpt-4o">gpt-4o</option>
                                                         <option value="gpt-4o-mini">gpt-4o-mini</option>
+                                                        <option value="o4-mini">o4-mini</option>
                                                         <option value="o3-mini">o3-mini</option>
                                                     </>
                                                 )}
                                                 {item.provider === 'gemini' && (
                                                     <>
+                                                        <option value="gemini-3.1-pro-preview">gemini-3.1-pro-preview</option>
+                                                        <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite</option>
+                                                        <option value="gemini-3-flash-preview">gemini-3-flash-preview</option>
+                                                        <option value="gemini-3-pro-preview">gemini-3-pro-preview</option>
                                                         <option value="gemini-2.5-pro">gemini-2.5-pro</option>
                                                         <option value="gemini-2.5-flash">gemini-2.5-flash</option>
-                                                        <option value="gemini-2.0-flash">gemini-2.0-flash</option>
                                                     </>
                                                 )}
                                                 {item.provider === 'anthropic' && (
                                                     <>
-                                                        <option value="claude-3-5-sonnet-20241022">claude-3.5-sonnet</option>
-                                                        <option value="claude-3-5-haiku-20241022">claude-3.5-haiku</option>
+                                                        <option value="claude-opus-4-6">Claude Opus 4.6</option>
+                                                        <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
+                                                        <option value="claude-sonnet-4-5">Claude Sonnet 4.5</option>
+                                                        <option value="claude-haiku-4-5-20251015">Claude Haiku 4.5</option>
                                                     </>
                                                 )}
                                                 {item.provider === 'openrouter' && (
                                                     <>
-                                                        <option value="google/gemini-2.5-flash">Google Gemini 2.5 Flash</option>
-                                                        <option value="anthropic/claude-3.5-sonnet">Claude 3.5 Sonnet</option>
-                                                        <option value="openai/gpt-4o">GPT-4o</option>
+                                                        <option value="google/gemini-3.1-pro-preview">Gemini 3.1 Pro</option>
+                                                        <option value="google/gemini-3-flash-preview">Gemini 3 Flash</option>
+                                                        <option value="anthropic/claude-sonnet-4.6">Claude Sonnet 4.6</option>
+                                                        <option value="openai/gpt-5.3-chat-latest">GPT-5.3 Chat</option>
+                                                        <option value="openai/o4-mini">o4-mini</option>
                                                         <option value="meta-llama/llama-3.3-70b-instruct">Llama 3.3 70B</option>
                                                     </>
                                                 )}
