@@ -41,7 +41,7 @@ const nodeTypes = {
 function EditorContent() {
     const { id: spaceId } = useParams();
     const navigate = useNavigate();
-    const { setViewport } = useReactFlow();
+    const { setViewport, updateNodeInternals } = useReactFlow();
 
     const [nodes, setNodes, onNodesChange] = useNodesState([]);
     const [edges, setEdges, onEdgesChange] = useEdgesState([]);
@@ -381,6 +381,13 @@ function EditorContent() {
     }, [nodes, direction, updateNodeData, onAddBranch, runAIForNode, onQuickAdd, apiKeys, setActiveChatNodeId, setIsChatOpen]);
 
     const toggleDirection = () => setDirection(d => d === 'LR' ? 'TB' : 'LR');
+
+    // React Flow requires explicit notification when handle positions change dynamically
+    useEffect(() => {
+        nodes.forEach(node => {
+            updateNodeInternals(node.id);
+        });
+    }, [direction, nodes, updateNodeInternals]);
 
     return (
         <div className="editor-layout">

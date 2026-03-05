@@ -49,8 +49,21 @@ export default function Sidebar({ isOpen, onClose }) {
                 // 実際にノードやエッジが変更されているか確認 (Check if actually modified)
                 const { data: spaceData } = await supabase.from('spaces').select('nodes, edges').eq('id', currentSpaceId).single();
                 if (spaceData) {
-                    const hasModifications = (spaceData.nodes && spaceData.nodes.length > 1) || (spaceData.edges && spaceData.edges.length > 0);
-                    if (!hasModifications) {
+                    const hasAddedNodesOrEdges = (spaceData.nodes && spaceData.nodes.length > 1) || (spaceData.edges && spaceData.edges.length > 0);
+
+                    // Even if there's only 1 node, check if its prompt or history changed from default
+                    let hasContentChanges = false;
+                    if (!hasAddedNodesOrEdges && spaceData.nodes && spaceData.nodes.length === 1) {
+                        const defaultPrompt = "";
+                        const nodeData = spaceData.nodes[0]?.data || {};
+                        if ((nodeData.prompt && nodeData.prompt !== defaultPrompt) ||
+                            (nodeData.chatHistory && nodeData.chatHistory.length > 0) ||
+                            (nodeData.systemPrompt && nodeData.systemPrompt.length > 0)) {
+                            hasContentChanges = true;
+                        }
+                    }
+
+                    if (!hasAddedNodesOrEdges && !hasContentChanges) {
                         onClose();
                         return; // 変更がない場合は新規作成しない
                     }
