@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { supabase } from './lib/supabase';
+import { useLanguage } from './i18n';
 
 export default function AuthScreen() {
+    const { t } = useLanguage();
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [loading, setLoading] = useState(false);
@@ -9,7 +11,7 @@ export default function AuthScreen() {
 
     const handleAuth = async (isSignUp) => {
         if (!supabase) {
-            setMessage("Error: Supabase is not configured. Please add keys to .env.local");
+            setMessage(t('auth.noSupabase'));
             return;
         }
 
@@ -24,10 +26,10 @@ export default function AuthScreen() {
             if (error) {
                 setMessage(error.message);
             } else if (isSignUp) {
-                setMessage('Check your email for the confirmation link!');
+                setMessage(t('auth.checkEmail'));
             }
         } catch (err) {
-            setMessage('An unexpected error occurred.');
+            setMessage(t('auth.unexpectedError'));
         } finally {
             setLoading(false);
         }
@@ -35,14 +37,25 @@ export default function AuthScreen() {
 
     return (
         <div className="auth-container">
-            <div className="auth-card glass-panel">
+            {/* Ambient glow */}
+            <div style={{
+                position: 'absolute', top: '-15%', left: '20%', width: '40%', height: '40%',
+                background: 'radial-gradient(circle, rgba(108, 140, 255, 0.08) 0%, transparent 70%)',
+                filter: 'blur(60px)', zIndex: 0
+            }} />
+            <div className="auth-card glass-panel" style={{ position: 'relative', zIndex: 1 }}>
                 <div className="auth-header">
-                    <h2>Blueprint AI</h2>
-                    <p>Login to start building your AI workflows</p>
+                    <h2 style={{
+                        background: 'linear-gradient(135deg, #fff, #94a3b8)',
+                        WebkitBackgroundClip: 'text',
+                        WebkitTextFillColor: 'transparent',
+                        letterSpacing: '-0.02em'
+                    }}>{t('auth.title')}</h2>
+                    <p>{t('auth.subtitle')}</p>
                 </div>
                 <div className="auth-form">
                     <div className="form-group">
-                        <label>Email</label>
+                        <label>{t('auth.email')}</label>
                         <input
                             type="email"
                             placeholder="you@example.com"
@@ -52,7 +65,7 @@ export default function AuthScreen() {
                         />
                     </div>
                     <div className="form-group">
-                        <label>Password</label>
+                        <label>{t('auth.password')}</label>
                         <input
                             type="password"
                             placeholder="••••••••"
@@ -62,15 +75,15 @@ export default function AuthScreen() {
                         />
                     </div>
 
-                    {message && <p style={{ color: 'var(--node-branch)', fontSize: '0.8rem', marginBottom: '1rem' }}>{message}</p>}
+                    {message && <p style={{ color: '#f472b6', fontSize: '0.8rem', marginBottom: '1rem' }}>{message}</p>}
 
-                    <div style={{ display: 'flex', gap: '1rem' }}>
+                    <div style={{ display: 'flex', gap: '0.75rem' }}>
                         <button
                             className="btn btn-primary"
                             onClick={() => handleAuth(false)}
                             disabled={loading}
                         >
-                            {loading ? 'Processing...' : 'Sign In'}
+                            {loading ? t('auth.processing') : t('auth.signIn')}
                         </button>
                         <button
                             className="btn btn-secondary"
@@ -78,12 +91,12 @@ export default function AuthScreen() {
                             disabled={loading}
                             style={{ flex: 1 }}
                         >
-                            Sign Up
+                            {t('auth.signUp')}
                         </button>
                     </div>
                 </div>
                 <div className="auth-footer">
-                    <p>Powered by Supabase Auth</p>
+                    <p>{t('auth.footer')}</p>
                 </div>
             </div>
         </div>

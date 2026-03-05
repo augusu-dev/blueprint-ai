@@ -2,8 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { X, Plus, Clock, LayoutTemplate } from 'lucide-react';
 import { supabase } from './lib/supabase';
+import { useLanguage } from './i18n';
 
 export default function Sidebar({ isOpen, onClose }) {
+    const { t } = useLanguage();
     const [spaces, setSpaces] = useState([]);
     const [loading, setLoading] = useState(true);
     const { id: currentSpaceId } = useParams();
@@ -21,7 +23,7 @@ export default function Sidebar({ isOpen, onClose }) {
                         const s = JSON.parse(localStorage.getItem(key));
                         localSpaces.push({
                             id: key.replace('blueprint_space_', ''),
-                            title: s.title || '無題のスペース',
+                            title: s.title || t('editor.untitled'),
                             updated_at: s.updated_at || new Date(0).toISOString()
                         });
                     } catch (e) { }
@@ -71,14 +73,14 @@ export default function Sidebar({ isOpen, onClose }) {
             if (!user) throw new Error("No user logged in");
 
             const currentSpace = spaces.find(s => s.id === currentSpaceId);
-            if (currentSpace && (currentSpace.title === '無題のスペース' || currentSpace.title === 'Untitled Space')) {
+            if (currentSpace && (currentSpace.title === t('editor.untitled') || currentSpace.title === 'Untitled Space' || currentSpace.title === '無題のスペース' || currentSpace.title === '未命名空间')) {
                 onClose();
                 return;
             }
 
             const { data, error } = await supabase
                 .from('spaces')
-                .insert([{ user_id: user.id, title: '無題のスペース' }])
+                .insert([{ user_id: user.id, title: t('editor.untitled') }])
                 .select()
                 .single();
 
@@ -88,7 +90,6 @@ export default function Sidebar({ isOpen, onClose }) {
             onClose();
         } catch (err) {
             console.warn("Cloud DB creation failed, falling back to local space:", err.message);
-            // Fallback for missing DB schema
             navigate(`/space/${crypto.randomUUID()}`);
             onClose();
         }
@@ -113,8 +114,8 @@ export default function Sidebar({ isOpen, onClose }) {
                     style={{
                         position: 'fixed',
                         top: 0, left: 0, right: 0, bottom: 0,
-                        backgroundColor: 'rgba(0,0,0,0.5)',
-                        backdropFilter: 'blur(4px)',
+                        backgroundColor: 'rgba(0,0,0,0.4)',
+                        backdropFilter: 'blur(6px)',
                         zIndex: 999
                     }}
                 />
@@ -124,8 +125,8 @@ export default function Sidebar({ isOpen, onClose }) {
             <div style={{
                 position: 'fixed',
                 top: 0,
-                left: isOpen ? 0 : '-350px',
-                width: '320px',
+                left: isOpen ? 0 : '-340px',
+                width: '310px',
                 height: '100vh',
                 background: 'var(--bg-dark)',
                 borderRight: '1px solid var(--panel-border)',
@@ -133,20 +134,20 @@ export default function Sidebar({ isOpen, onClose }) {
                 zIndex: 1000,
                 display: 'flex',
                 flexDirection: 'column',
-                boxShadow: isOpen ? '10px 0 30px rgba(0,0,0,0.3)' : 'none'
+                boxShadow: isOpen ? '8px 0 30px rgba(0,0,0,0.25)' : 'none'
             }}>
 
                 {/* Header */}
                 <div style={{
-                    padding: '1.5rem',
+                    padding: '1.25rem 1.25rem',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'space-between',
                     borderBottom: '1px solid var(--panel-border)'
                 }}>
-                    <h2 style={{ fontSize: '1.25rem', fontWeight: 600, margin: 0 }}>ワークスペース</h2>
-                    <button onClick={onClose} className="btn-icon" style={{ width: '30px', height: '30px' }}>
-                        <X size={16} />
+                    <h2 style={{ fontSize: '1.1rem', fontWeight: 500, margin: 0, letterSpacing: '-0.01em' }}>{t('sidebar.title')}</h2>
+                    <button onClick={onClose} className="btn-icon" style={{ width: '28px', height: '28px' }}>
+                        <X size={14} />
                     </button>
                 </div>
 
@@ -156,66 +157,68 @@ export default function Sidebar({ isOpen, onClose }) {
                         onClick={handleNewSpace}
                         style={{
                             width: '100%',
-                            padding: '0.75rem',
+                            padding: '0.65rem',
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
-                            gap: '0.5rem',
+                            gap: '0.4rem',
                             background: 'var(--primary)',
                             color: 'white',
                             border: 'none',
                             borderRadius: '8px',
                             cursor: 'pointer',
                             fontWeight: 500,
-                            marginBottom: '1.5rem',
-                            transition: 'background 0.2s'
+                            fontSize: '0.85rem',
+                            marginBottom: '1.25rem',
+                            transition: 'all 0.2s',
+                            boxShadow: '0 4px 12px rgba(108, 140, 255, 0.2)'
                         }}
-                        onMouseEnter={(e) => e.currentTarget.style.background = 'var(--primary-hover)'}
-                        onMouseLeave={(e) => e.currentTarget.style.background = 'var(--primary)'}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--primary-hover)'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--primary)'; e.currentTarget.style.transform = 'translateY(0)'; }}
                     >
-                        <Plus size={18} /> 新規スペース
+                        <Plus size={16} /> {t('sidebar.newSpace')}
                     </button>
 
-                    <h3 style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '1rem', marginLeft: '0.5rem' }}>
-                        履歴
+                    <h3 style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1.5px', marginBottom: '0.75rem', marginLeft: '0.4rem', fontWeight: 500 }}>
+                        {t('sidebar.history')}
                     </h3>
 
                     {loading ? (
-                        <p style={{ color: 'var(--text-muted)', textAlign: 'center', fontSize: '0.9rem', marginTop: '2rem' }}>読み込み中...</p>
+                        <p style={{ color: 'var(--text-muted)', textAlign: 'center', fontSize: '0.85rem', marginTop: '2rem' }}>{t('sidebar.loading')}</p>
                     ) : spaces.length === 0 ? (
-                        <p style={{ color: 'var(--text-muted)', textAlign: 'center', fontSize: '0.9rem', marginTop: '2rem' }}>スペースがありません</p>
+                        <p style={{ color: 'var(--text-muted)', textAlign: 'center', fontSize: '0.85rem', marginTop: '2rem' }}>{t('sidebar.empty')}</p>
                     ) : (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
                             {spaces.map(space => (
                                 <div
                                     key={space.id}
                                     onClick={() => handleSelectSpace(space.id)}
                                     style={{
-                                        padding: '0.75rem 1rem',
+                                        padding: '0.6rem 0.8rem',
                                         borderRadius: '8px',
-                                        background: space.id === currentSpaceId ? 'rgba(255,255,255,0.08)' : 'transparent',
-                                        border: `1px solid ${space.id === currentSpaceId ? 'rgba(255,255,255,0.1)' : 'transparent'}`,
+                                        background: space.id === currentSpaceId ? 'rgba(108, 140, 255, 0.08)' : 'transparent',
+                                        border: `1px solid ${space.id === currentSpaceId ? 'rgba(108, 140, 255, 0.12)' : 'transparent'}`,
                                         cursor: 'pointer',
-                                        transition: 'background 0.2s',
+                                        transition: 'all 0.15s',
                                         display: 'flex',
                                         flexDirection: 'column',
-                                        gap: '0.3rem'
+                                        gap: '0.2rem'
                                     }}
                                     onMouseEnter={(e) => {
-                                        if (space.id !== currentSpaceId) e.currentTarget.style.background = 'rgba(255,255,255,0.04)';
+                                        if (space.id !== currentSpaceId) e.currentTarget.style.background = 'rgba(255,255,255,0.03)';
                                     }}
                                     onMouseLeave={(e) => {
                                         if (space.id !== currentSpaceId) e.currentTarget.style.background = 'transparent';
                                     }}
                                 >
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                        <LayoutTemplate size={14} color="var(--primary)" />
-                                        <span style={{ fontWeight: 500, fontSize: '0.95rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                        <LayoutTemplate size={13} color="var(--primary)" />
+                                        <span style={{ fontWeight: 400, fontSize: '0.88rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                                             {space.title}
                                         </span>
                                     </div>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--text-muted)', fontSize: '0.75rem', paddingLeft: '1.2rem' }}>
-                                        <Clock size={10} />
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', color: 'var(--text-muted)', fontSize: '0.7rem', paddingLeft: '1.2rem' }}>
+                                        <Clock size={9} />
                                         <span>{formatDate(space.updated_at)}</span>
                                     </div>
                                 </div>

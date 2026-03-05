@@ -14,6 +14,7 @@ import '@xyflow/react/dist/style.css';
 import { Settings, X, LogOut, Columns, Rows, Menu, Save, Edit3 } from 'lucide-react';
 import { supabase } from './lib/supabase';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useLanguage } from './i18n';
 
 import Sidebar from './Sidebar';
 import LinearChat from './LinearChat';
@@ -42,20 +43,19 @@ function EditorContent() {
     const { id: spaceId } = useParams();
     const navigate = useNavigate();
     const { setViewport, updateNodeInternals } = useReactFlow();
+    const { t, lang, setLang } = useLanguage();
 
     const [nodes, setNodes, onNodesChange] = useNodesState([]);
     const [edges, setEdges, onEdgesChange] = useEdgesState([]);
-    const [spaceTitle, setSpaceTitle] = useState('Loading Space...');
-    const [direction, setDirection] = useState('LR'); // LR = Left-to-Right, TB = Top-to-Bottom
+    const [spaceTitle, setSpaceTitle] = useState(t('editor.loading'));
+    const [direction, setDirection] = useState('LR');
     const [showSettings, setShowSettings] = useState(false);
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
-    // Manual Title / Saving state
     const [isEditingTitle, setIsEditingTitle] = useState(false);
     const [tempTitle, setTempTitle] = useState('');
     const [isSaving, setIsSaving] = useState(false);
 
-    // Linear Chat State
     const [isChatOpen, setIsChatOpen] = useState(false);
     const [activeChatNodeId, setActiveChatNodeId] = useState(null);
 
@@ -77,7 +77,7 @@ function EditorContent() {
                 }
             } catch (e) { }
         }
-        return [{ key: '', provider: 'openai', model: '' }]; // Default to 1 empty key obj
+        return [{ key: '', provider: 'openai', model: '' }];
     });
 
     useEffect(() => {
@@ -121,7 +121,7 @@ function EditorContent() {
             }
 
             if (bestData) {
-                setSpaceTitle(bestData.title || '無題のスペース');
+                setSpaceTitle(bestData.title || t('editor.untitled'));
                 if (Array.isArray(bestData.nodes) && bestData.nodes.length > 0) setNodes(bestData.nodes);
                 else setNodes(initialNodes);
 
@@ -134,7 +134,7 @@ function EditorContent() {
             } else {
                 setNodes(initialNodes);
                 setEdges(initialEdges);
-                setSpaceTitle('無題のスペース');
+                setSpaceTitle(t('editor.untitled'));
             }
         };
 
@@ -163,7 +163,8 @@ function EditorContent() {
                 isStarter: n.data.isStarter,
                 numBranches: n.data.numBranches,
                 loopMode: n.data.loopMode,
-                selectedApiKey: n.data.selectedApiKey
+                selectedApiKey: n.data.selectedApiKey,
+                branchCount: n.data.branchCount
             } : {};
 
             return {
@@ -186,10 +187,8 @@ function EditorContent() {
                 updated_at: new Date().toISOString()
             };
 
-            // 1. Local Storage fallback (always reliable)
             localStorage.setItem(`blueprint_space_${spaceId}`, JSON.stringify(updates));
 
-            // 2. Supabase Cloud Sync
             if (supabase) {
                 const { error } = await supabase.from('spaces').update({
                     nodes: updates.nodes, edges: updates.edges, updated_at: updates.updated_at
@@ -197,24 +196,24 @@ function EditorContent() {
                 if (error) console.warn("Supabase skipped schema cache:", error.message);
             }
 
-            console.log("=== 手動保存完了 ===", spaceId);
-            window.dispatchEvent(new CustomEvent('spaceTitleUpdated')); // Refreshes sidebar history sorting
+            console.log("=== Manual save done ===", spaceId);
+            window.dispatchEvent(new CustomEvent('spaceTitleUpdated'));
         } catch (err) {
-            console.error("手動保存エラー:", err);
-            alert("保存処理で問題が発生しました。");
+            console.error("Save error:", err);
+            alert(t('editor.saveError'));
         } finally {
             setIsSaving(false);
         }
     };
 
     const saveTitle = async () => {
-        const cleanedTitle = tempTitle.trim() || '無題のスペース';
+        const cleanedTitle = tempTitle.trim() || t('editor.untitled');
         setSpaceTitle(cleanedTitle);
         setIsEditingTitle(false);
         if (supabase && spaceId) {
             await supabase.from('spaces').update({ title: cleanedTitle }).eq('id', spaceId);
             window.dispatchEvent(new CustomEvent('spaceTitleUpdated'));
-            handleManualSave(); // Auto-save everything once manual title set
+            handleManualSave();
         }
     };
 
@@ -223,10 +222,8 @@ function EditorContent() {
     useEffect(() => {
         if (!spaceId || nodes.length === 0) return;
 
-        // Clear existing timer
         if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
 
-        // Set a new debounce timer for 1.5 seconds
         saveTimerRef.current = setTimeout(async () => {
             try {
                 const updates = {
@@ -236,10 +233,8 @@ function EditorContent() {
                     updated_at: new Date().toISOString()
                 };
 
-                // 1. Local Storage Fallback
                 localStorage.setItem(`blueprint_space_${spaceId}`, JSON.stringify(updates));
 
-                // 2. Supabase
                 if (supabase) {
                     const { error } = await supabase.from('spaces').update({
                         nodes: updates.nodes, edges: updates.edges, updated_at: updates.updated_at
@@ -298,7 +293,6 @@ function EditorContent() {
             return;
         }
 
-        // First set to loading...
         setNodes(nds => nds.map(node => {
             if (node.id === id) {
                 return { ...node, data: { ...node.data, response: `Loading AI Response (${provider})...` } };
@@ -310,7 +304,7 @@ function EditorContent() {
             let reply = "";
 
             if (provider === 'gemini') {
-                const modelToUse = userModel || 'gemini-3.1-pro-preview';
+                const modelToUse = userModel || 'gemini-2.5-flash';
                 const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelToUse}:generateContent?key=${keyToUse}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -324,7 +318,7 @@ function EditorContent() {
                 reply = data.candidates?.[0]?.content?.parts?.[0]?.text || "No response content received.";
 
             } else if (provider === 'anthropic') {
-                const modelToUse = userModel || 'claude-4.6-sonnet';
+                const modelToUse = userModel || 'claude-3-5-sonnet-20241022';
                 const response = await fetch('https://api.anthropic.com/v1/messages', {
                     method: 'POST',
                     headers: {
@@ -344,7 +338,7 @@ function EditorContent() {
                 reply = data.content?.[0]?.text || "No response content received.";
 
             } else if (provider === 'openrouter') {
-                const modelToUse = userModel || 'google/gemini-3.1-pro-preview';
+                const modelToUse = userModel || 'google/gemini-2.5-flash';
                 const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
                     method: 'POST',
                     headers: {
@@ -378,7 +372,6 @@ function EditorContent() {
                 reply = data.choices?.[0]?.message?.content || "No response content received.";
 
             } else {
-                // Default: OpenAI
                 const modelToUse = userModel || 'gpt-4o';
                 const response = await fetch('https://api.openai.com/v1/chat/completions', {
                     method: 'POST',
@@ -405,7 +398,7 @@ function EditorContent() {
     const onQuickAdd = useCallback((sourceId, type) => {
         const outgoingEdges = edges.filter(e => e.source === sourceId);
         if (outgoingEdges.length >= 10) {
-            alert("ノードの追加は1つのノードにつき最大10個までです。");
+            alert(t('editor.maxNodes'));
             return;
         }
 
@@ -435,6 +428,44 @@ function EditorContent() {
 
             return [...nds, newNode];
         });
+    }, [direction, edges, setNodes, setEdges, t]);
+
+    // Branch from chat: create a new node linked to the source chat node
+    const onBranchFromChat = useCallback((sourceNodeId, chatHistory) => {
+        const outgoingEdges = edges.filter(e => e.source === sourceNodeId);
+        if (outgoingEdges.length >= 10) return false;
+
+        setNodes((nds) => {
+            const sourceNode = nds.find(n => n.id === sourceNodeId);
+            if (!sourceNode) return nds;
+
+            const newId = `node-${crypto.randomUUID()}`;
+            const num = outgoingEdges.length;
+
+            let px = direction === 'LR' ? 350 : (num * 240 - 120);
+            let py = direction === 'TB' ? 350 : (num * 200 - 100);
+
+            const newNode = {
+                id: newId,
+                type: 'sequenceNode',
+                position: { x: sourceNode.position.x + px, y: sourceNode.position.y + py },
+                data: {
+                    dir: direction,
+                    prompt: '',
+                    chatHistory: chatHistory ? [...chatHistory] : [],
+                    systemPrompt: sourceNode.data?.systemPrompt || '',
+                    selectedApiKey: sourceNode.data?.selectedApiKey || 0
+                }
+            };
+
+            setTimeout(() => {
+                setEdges(eds => addEdge({ id: `e-${sourceNodeId}-${newId}`, source: sourceNodeId, sourceHandle: null, target: newId, targetHandle: null }, eds));
+            }, 50);
+
+            return [...nds, newNode];
+        });
+
+        return true;
     }, [direction, edges, setNodes, setEdges]);
 
     const onConnect = useCallback((params) => setEdges((eds) => addEdge(params, eds)), [setEdges]);
@@ -460,12 +491,10 @@ function EditorContent() {
 
     const toggleDirection = () => setDirection(d => d === 'LR' ? 'TB' : 'LR');
 
-    // React Flow requires explicit notification when handle positions change dynamically
     useEffect(() => {
         nodes.forEach(node => {
             updateNodeInternals(node.id);
         });
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [direction, updateNodeInternals]);
 
     return (
@@ -477,15 +506,15 @@ function EditorContent() {
                 <div className="editor-header-left" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
                     <div
                         onClick={() => setIsSidebarOpen(true)}
-                        style={{ background: 'var(--primary)', padding: '0.4rem', borderRadius: '10px', color: 'white', marginRight: '0.75rem', display: 'flex' }}
+                        style={{ background: 'var(--primary)', padding: '0.35rem', borderRadius: '8px', color: 'white', marginRight: '0.65rem', display: 'flex', cursor: 'pointer' }}
                     >
-                        <Menu size={20} />
+                        <Menu size={18} />
                     </div>
                     {isEditingTitle ? (
                         <input
                             autoFocus
                             className="node-input"
-                            style={{ fontSize: '1.25rem', fontWeight: 600, padding: '0.2rem 0.5rem', width: '250px' }}
+                            style={{ fontSize: '1.05rem', fontWeight: 500, padding: '0.2rem 0.5rem', width: '220px', background: 'transparent', border: '1px solid var(--panel-border)', borderRadius: '6px' }}
                             value={tempTitle}
                             onChange={(e) => setTempTitle(e.target.value)}
                             onBlur={saveTitle}
@@ -493,42 +522,42 @@ function EditorContent() {
                         />
                     ) : (
                         <h2
-                            style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: 0 }}
+                            style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', margin: 0, cursor: 'pointer' }}
                             onClick={() => { setTempTitle(spaceTitle); setIsEditingTitle(true); }}
-                            title="タイトルを手動で変更する"
+                            title={t('editor.editTitle')}
                         >
-                            {spaceTitle} <Edit3 size={14} color="var(--text-muted)" />
+                            {spaceTitle} <Edit3 size={13} color="var(--text-muted)" />
                         </h2>
                     )}
                 </div>
-                <div className="editor-controls" style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                <div className="editor-controls" style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
                     <button
                         className="btn"
                         onClick={handleManualSave}
                         disabled={isSaving}
-                        title="現在の状態を手動で保存する"
-                        style={{ background: isSaving ? 'rgba(59, 130, 246, 0.5)' : 'var(--primary)', color: 'white', fontSize: '0.8rem', padding: '0.4rem 1rem', border: 'none', borderRadius: '20px', display: 'flex', alignItems: 'center', gap: '0.4rem', fontWeight: 600, boxShadow: '0 4px 10px rgba(59, 130, 246, 0.3)', cursor: isSaving ? 'wait' : 'pointer' }}
+                        title={t('editor.save')}
+                        style={{ background: isSaving ? 'rgba(108, 140, 255, 0.4)' : 'var(--primary)', color: 'white', fontSize: '0.78rem', padding: '0.35rem 0.9rem', border: 'none', borderRadius: '20px', display: 'flex', alignItems: 'center', gap: '0.35rem', fontWeight: 500, boxShadow: '0 3px 10px rgba(108, 140, 255, 0.2)', cursor: isSaving ? 'wait' : 'pointer' }}
                     >
-                        <Save size={16} />
-                        {isSaving ? '保存中...' : '保存 (Save)'}
+                        <Save size={14} />
+                        {isSaving ? t('editor.saving') : t('editor.save')}
                     </button>
                     <button
                         className="btn"
                         onClick={toggleDirection}
-                        title="レイアウトの方向を切り替える"
-                        style={{ background: 'rgba(255,255,255,0.05)', fontSize: '0.8rem', padding: '0.4rem 1rem', border: '1px solid var(--panel-border)', borderRadius: '20px', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+                        title={direction === 'LR' ? t('editor.ltr') : t('editor.ttb')}
+                        style={{ background: 'rgba(255,255,255,0.04)', fontSize: '0.78rem', padding: '0.35rem 0.9rem', border: '1px solid var(--panel-border)', borderRadius: '20px', display: 'flex', alignItems: 'center', gap: '0.35rem', color: 'var(--text-main)' }}
                     >
-                        {direction === 'LR' ? <Columns size={16} color="var(--primary)" /> : <Rows size={16} color="var(--primary)" />}
-                        {direction === 'LR' ? '左から右へ' : '上から下へ'}
+                        {direction === 'LR' ? <Columns size={14} color="var(--primary)" /> : <Rows size={14} color="var(--primary)" />}
+                        {direction === 'LR' ? t('editor.ltr') : t('editor.ttb')}
                     </button>
                     <button
                         className="btn"
                         onClick={() => setShowSettings(true)}
-                        title="全体設定"
-                        style={{ background: 'rgba(255,255,255,0.05)', fontSize: '0.8rem', padding: '0.3rem 0.8rem', border: '1px solid var(--panel-border)', borderRadius: '20px', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+                        title={t('editor.settings')}
+                        style={{ background: 'rgba(255,255,255,0.04)', fontSize: '0.78rem', padding: '0.3rem 0.75rem', border: '1px solid var(--panel-border)', borderRadius: '20px', display: 'flex', alignItems: 'center', gap: '0.35rem', color: 'var(--text-main)' }}
                     >
-                        <Settings size={16} color="var(--primary)" />
-                        全体設定
+                        <Settings size={14} color="var(--primary)" />
+                        {t('editor.settings')}
                     </button>
                 </div>
             </div>
@@ -554,6 +583,7 @@ function EditorContent() {
                     onClose={() => setIsChatOpen(false)}
                     node={nodesWithData.find(n => n.id === activeChatNodeId)}
                     onUpdateNodeData={updateNodeData}
+                    onBranchFromChat={onBranchFromChat}
                 />
             </div>
 
@@ -561,34 +591,51 @@ function EditorContent() {
                 <div className="settings-modal-overlay">
                     <div className="settings-modal glass-panel">
                         <div className="settings-header">
-                            <h3>全体設定</h3>
+                            <h3>{t('settings.title')}</h3>
                             <button className="btn-icon" onClick={() => setShowSettings(false)}>
-                                <X size={20} />
+                                <X size={18} />
                             </button>
                         </div>
                         <div className="settings-body">
-                            <div className="glass-panel" style={{ padding: '0.75rem', marginBottom: '1.5rem', borderRadius: '8px', background: 'rgba(59, 130, 246, 0.1)', border: '1px solid rgba(59, 130, 246, 0.3)' }}>
-                                <p style={{ fontSize: '0.85rem', margin: 0, fontWeight: 500, color: 'var(--text-color)' }}>
-                                    🔒 <strong>セキュリティ設定:</strong> APIキーはブラウザのローカル環境にのみ安全に保存されます。Blueprint AIのサーバー等へ送信されることは一切ありません。
+                            {/* Language Selector */}
+                            <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+                                <label style={{ fontSize: '0.8rem', fontWeight: 500, marginBottom: '0.4rem' }}>{t('settings.langLabel')}</label>
+                                <select
+                                    className="node-input"
+                                    style={{ padding: '0.5rem', height: '38px' }}
+                                    value={lang}
+                                    onChange={(e) => setLang(e.target.value)}
+                                >
+                                    <option value="ja">{t('settings.langJa')}</option>
+                                    <option value="en">{t('settings.langEn')}</option>
+                                    <option value="zh">{t('settings.langZh')}</option>
+                                </select>
+                            </div>
+
+                            <div style={{ height: '1px', background: 'var(--panel-border)', marginBottom: '1.25rem' }} />
+
+                            <div className="glass-panel" style={{ padding: '0.65rem', marginBottom: '1.25rem', borderRadius: '8px', background: 'rgba(108, 140, 255, 0.06)', border: '1px solid rgba(108, 140, 255, 0.15)' }}>
+                                <p style={{ fontSize: '0.8rem', margin: 0, fontWeight: 400, color: 'var(--text-main)', lineHeight: 1.5 }}>
+                                    🔒 <strong>{t('settings.securityLabel')}</strong> {t('settings.security')}
                                 </p>
                             </div>
-                            <p className="help-text" style={{ marginBottom: '1rem' }}>複数のプロバイダーのAPIキーを最大5つまで登録できます。「モデル」を空欄にするとデフォルトモデルが使用されます。</p>
+                            <p className="help-text" style={{ marginBottom: '1rem' }}>{t('settings.apiHelp')}</p>
                             {apiKeys.map((item, index) => (
-                                <div className="form-group glass-panel" key={index} style={{ marginBottom: '1rem', padding: '0.75rem', borderRadius: '8px' }}>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                                        <label style={{ marginBottom: 0, fontWeight: 600 }}>APIキー {index + 1} {index === 0 && '(デフォルト)'}</label>
+                                <div className="form-group glass-panel" key={index} style={{ marginBottom: '0.75rem', padding: '0.65rem', borderRadius: '8px' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
+                                        <label style={{ marginBottom: 0, fontWeight: 500, fontSize: '0.82rem' }}>{t('settings.apiKey')} {index + 1} {index === 0 && t('settings.default')}</label>
                                         {apiKeys.length > 1 && (
                                             <button
                                                 className="btn-text-danger"
                                                 onClick={() => setApiKeys(apiKeys.filter((_, i) => i !== index))}
                                             >
-                                                削除
+                                                {t('settings.delete')}
                                             </button>
                                         )}
                                     </div>
-                                    <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                                    <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.4rem' }}>
                                         <div style={{ flex: 1 }}>
-                                            <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>プロバイダー</label>
+                                            <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{t('settings.provider')}</label>
                                             <select
                                                 className="node-input"
                                                 style={{ padding: '0.4rem', height: '34px' }}
@@ -607,7 +654,7 @@ function EditorContent() {
                                             </select>
                                         </div>
                                         <div style={{ flex: 1 }}>
-                                            <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>モデル名</label>
+                                            <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{t('settings.model')}</label>
                                             <select
                                                 className="node-input"
                                                 style={{ padding: '0.4rem', height: '34px' }}
@@ -618,38 +665,32 @@ function EditorContent() {
                                                     setApiKeys(newKeys);
                                                 }}
                                             >
-                                                <option value="">デフォルト (自動選択)</option>
+                                                <option value="">{t('settings.modelDefault')}</option>
                                                 {item.provider === 'openai' && (
                                                     <>
-                                                        <option value="gpt-5.3-chat-latest">gpt-5.3-chat-latest</option>
                                                         <option value="gpt-4o">gpt-4o</option>
                                                         <option value="gpt-4o-mini">gpt-4o-mini</option>
-                                                        <option value="o4-mini">o4-mini</option>
                                                         <option value="o3-mini">o3-mini</option>
                                                     </>
                                                 )}
                                                 {item.provider === 'gemini' && (
                                                     <>
-                                                        <option value="gemini-3.1-pro-preview">gemini-3.1-pro-preview</option>
-                                                        <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite</option>
                                                         <option value="gemini-2.5-pro">gemini-2.5-pro</option>
                                                         <option value="gemini-2.5-flash">gemini-2.5-flash</option>
-                                                        <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite</option>
+                                                        <option value="gemini-2.0-flash">gemini-2.0-flash</option>
                                                     </>
                                                 )}
                                                 {item.provider === 'anthropic' && (
                                                     <>
-                                                        <option value="claude-4.6-opus">claude-4.6-opus</option>
-                                                        <option value="claude-4.6-sonnet">claude-4.6-sonnet</option>
-                                                        <option value="claude-4.5-haiku">claude-4.5-haiku</option>
-                                                        <option value="claude-3-5-sonnet-20241022">claude-3-5-sonnet</option>
+                                                        <option value="claude-3-5-sonnet-20241022">claude-3.5-sonnet</option>
+                                                        <option value="claude-3-5-haiku-20241022">claude-3.5-haiku</option>
                                                     </>
                                                 )}
                                                 {item.provider === 'openrouter' && (
                                                     <>
-                                                        <option value="google/gemini-3.1-pro-preview">Google Gemini 3.1 Pro</option>
-                                                        <option value="anthropic/claude-4.6-sonnet">Claude 4.6 Sonnet</option>
-                                                        <option value="openai/gpt-5.3-chat-latest">GPT-5.3 Chat Latest</option>
+                                                        <option value="google/gemini-2.5-flash">Google Gemini 2.5 Flash</option>
+                                                        <option value="anthropic/claude-3.5-sonnet">Claude 3.5 Sonnet</option>
+                                                        <option value="openai/gpt-4o">GPT-4o</option>
                                                         <option value="meta-llama/llama-3.3-70b-instruct">Llama 3.3 70B</option>
                                                     </>
                                                 )}
@@ -663,10 +704,10 @@ function EditorContent() {
                                         </div>
                                     </div>
                                     <div>
-                                        <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>シークレットキー (API Key)</label>
+                                        <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{t('settings.secretKey')}</label>
                                         <input
                                             type="password"
-                                            placeholder={`${item.provider} のキーを貼り付けてください...`}
+                                            placeholder={`${item.provider}${t('settings.secretPlaceholder')}`}
                                             value={item.key || ''}
                                             onChange={(e) => {
                                                 const newKeys = [...apiKeys];
@@ -678,18 +719,18 @@ function EditorContent() {
                                 </div>
                             ))}
                             {apiKeys.length < 5 && (
-                                <button className="btn btn-secondary btn-sm" style={{ marginTop: '0.5rem', width: '100%' }} onClick={() => setApiKeys([...apiKeys, { key: '', provider: 'openai', model: '' }])}>
-                                    + 別のAPIキーを追加
+                                <button className="btn btn-secondary btn-sm" style={{ marginTop: '0.4rem', width: '100%' }} onClick={() => setApiKeys([...apiKeys, { key: '', provider: 'openai', model: '' }])}>
+                                    {t('settings.addKey')}
                                 </button>
                             )}
                         </div>
                         <div className="settings-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <button className="btn-text-danger" style={{ fontSize: '0.85rem' }} onClick={() => { setShowSettings(false); supabase.auth.signOut(); }}>
-                                <LogOut size={16} style={{ display: 'inline', verticalAlign: 'text-bottom', marginRight: '4px' }} /> ログアウト
+                            <button className="btn-text-danger" style={{ fontSize: '0.82rem' }} onClick={() => { setShowSettings(false); supabase.auth.signOut(); }}>
+                                <LogOut size={14} style={{ display: 'inline', verticalAlign: 'text-bottom', marginRight: '4px' }} /> {t('settings.logout')}
                             </button>
-                            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem' }}>
-                                <button className="btn btn-secondary" onClick={() => setShowSettings(false)}>キャンセル</button>
-                                <button className="btn btn-primary" onClick={() => setShowSettings(false)}>保存</button>
+                            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+                                <button className="btn btn-secondary" onClick={() => setShowSettings(false)}>{t('settings.cancel')}</button>
+                                <button className="btn btn-primary" style={{ width: 'auto' }} onClick={() => setShowSettings(false)}>{t('settings.save')}</button>
                             </div>
                         </div>
                     </div>

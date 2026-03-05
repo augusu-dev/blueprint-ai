@@ -2,9 +2,11 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from './lib/supabase';
 import { Box, LogOut, ChevronRight } from 'lucide-react';
+import { useLanguage } from './i18n';
 
 export default function Home() {
     const navigate = useNavigate();
+    const { t } = useLanguage();
 
     const handleNewSpace = async () => {
         try {
@@ -14,7 +16,7 @@ export default function Home() {
             const { data, error } = await supabase
                 .from('spaces')
                 .insert([
-                    { user_id: user.id, title: '無題のスペース' }
+                    { user_id: user.id, title: t('editor.untitled') }
                 ])
                 .select()
                 .single();
@@ -24,7 +26,6 @@ export default function Home() {
             navigate(`/space/${data.id}`);
         } catch (err) {
             console.error("Failed to create space:", err);
-            // Fallback for development if DB fails
             navigate(`/space/${crypto.randomUUID()}`);
         }
     };
@@ -43,14 +44,14 @@ export default function Home() {
 
             {/* Ambient Background Glows */}
             <div style={{
-                position: 'absolute', top: '-10%', left: '-10%', width: '40%', height: '40%',
-                background: 'radial-gradient(circle, rgba(59, 130, 246, 0.15) 0%, transparent 70%)',
-                filter: 'blur(60px)', zIndex: 0
+                position: 'absolute', top: '-15%', left: '-5%', width: '35%', height: '35%',
+                background: 'radial-gradient(circle, rgba(108, 140, 255, 0.1) 0%, transparent 70%)',
+                filter: 'blur(80px)', zIndex: 0
             }} />
             <div style={{
-                position: 'absolute', bottom: '-20%', right: '-10%', width: '60%', height: '60%',
-                background: 'radial-gradient(circle, rgba(16, 185, 129, 0.1) 0%, transparent 70%)',
-                filter: 'blur(80px)', zIndex: 0
+                position: 'absolute', bottom: '-20%', right: '-5%', width: '50%', height: '50%',
+                background: 'radial-gradient(circle, rgba(52, 211, 153, 0.06) 0%, transparent 70%)',
+                filter: 'blur(100px)', zIndex: 0
             }} />
 
             {/* Header */}
@@ -63,17 +64,17 @@ export default function Home() {
                 zIndex: 10
             }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                    <div style={{ background: 'var(--primary)', padding: '0.5rem', borderRadius: '12px', color: 'white' }}>
-                        <Box size={24} />
+                    <div style={{ background: 'var(--primary)', padding: '0.45rem', borderRadius: '10px', color: 'white', display: 'flex' }}>
+                        <Box size={22} />
                     </div>
                     <h1 style={{
                         margin: 0,
-                        fontSize: '1.5rem',
-                        fontWeight: 700,
+                        fontSize: '1.3rem',
+                        fontWeight: 600,
                         background: 'linear-gradient(90deg, #ffffff, #94a3b8)',
                         WebkitBackgroundClip: 'text',
                         WebkitTextFillColor: 'transparent',
-                        letterSpacing: '1px'
+                        letterSpacing: '0.5px'
                     }}>Blueprint</h1>
                 </div>
 
@@ -82,21 +83,22 @@ export default function Home() {
                         onClick={() => supabase.auth.signOut()}
                         style={{
                             background: 'transparent',
-                            border: '1px solid rgba(255,255,255,0.1)',
+                            border: '1px solid rgba(255,255,255,0.08)',
                             color: 'var(--text-muted)',
-                            padding: '0.5rem 1rem',
+                            padding: '0.45rem 1rem',
                             borderRadius: '20px',
                             display: 'flex',
                             alignItems: 'center',
                             gap: '0.5rem',
                             cursor: 'pointer',
                             transition: 'all 0.2s',
-                            fontSize: '0.85rem'
+                            fontSize: '0.82rem',
+                            fontWeight: 400
                         }}
-                        onMouseEnter={(e) => e.currentTarget.style.color = '#fff'}
-                        onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-muted)'}
+                        onMouseEnter={(e) => { e.currentTarget.style.color = '#fff'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.15)'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-muted)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'; }}
                     >
-                        <LogOut size={16} /> ログアウト
+                        <LogOut size={15} /> {t('home.logout')}
                     </button>
                 </div>
             </header>
@@ -111,57 +113,60 @@ export default function Home() {
                 zIndex: 10
             }}>
                 <div style={{
-                    maxWidth: '800px',
+                    maxWidth: '720px',
                     textAlign: 'center',
-                    padding: '0 2rem'
+                    padding: '0 2rem',
+                    animation: 'fadeSlideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1)'
                 }}>
                     <h2 style={{
-                        fontSize: '3.5rem',
-                        fontWeight: 800,
-                        lineHeight: 1.2,
+                        fontSize: '3rem',
+                        fontWeight: 700,
+                        lineHeight: 1.15,
                         marginBottom: '1.5rem',
-                        background: 'linear-gradient(135deg, #ffffff 0%, #94a3b8 100%)',
+                        background: 'linear-gradient(135deg, #ffffff 0%, #7b8ba3 100%)',
                         WebkitBackgroundClip: 'text',
                         WebkitTextFillColor: 'transparent',
+                        letterSpacing: '-0.02em'
                     }}>
-                        思考を直感的に組み上げよう。
+                        {t('home.title')}
                     </h2>
 
                     <p style={{
-                        fontSize: '1.25rem',
+                        fontSize: '1.1rem',
                         color: 'var(--text-muted)',
                         marginBottom: '3rem',
-                        maxWidth: '650px',
+                        maxWidth: '580px',
                         margin: '0 auto 3rem auto',
-                        lineHeight: 1.6
+                        lineHeight: 1.7,
+                        fontWeight: 400
                     }}>
-                        Blueprintは直線的なチャットUIを置き換える、新次元のAI連携エディター。
-                        無限のキャンバスで高度なプロンプトフローを設計し、多彩なAIモデルを動的に操ることができます。
+                        {t('home.subtitle')}
                     </p>
 
                     <button
                         onClick={handleNewSpace}
                         className="btn btn-primary"
                         style={{
-                            padding: '1rem 2.5rem',
-                            fontSize: '1.1rem',
-                            borderRadius: '30px',
+                            padding: '0.9rem 2.5rem',
+                            fontSize: '1rem',
+                            borderRadius: '28px',
                             display: 'inline-flex',
                             alignItems: 'center',
                             gap: '0.5rem',
-                            boxShadow: '0 10px 25px rgba(59, 130, 246, 0.4)',
-                            transition: 'transform 0.2s, box-shadow 0.2s'
+                            boxShadow: '0 8px 25px rgba(108, 140, 255, 0.3)',
+                            transition: 'transform 0.2s, box-shadow 0.2s',
+                            fontWeight: 500
                         }}
                         onMouseEnter={(e) => {
                             e.currentTarget.style.transform = 'translateY(-2px)';
-                            e.currentTarget.style.boxShadow = '0 15px 35px rgba(59, 130, 246, 0.5)';
+                            e.currentTarget.style.boxShadow = '0 12px 35px rgba(108, 140, 255, 0.4)';
                         }}
                         onMouseLeave={(e) => {
                             e.currentTarget.style.transform = 'translateY(0)';
-                            e.currentTarget.style.boxShadow = '0 10px 25px rgba(59, 130, 246, 0.4)';
+                            e.currentTarget.style.boxShadow = '0 8px 25px rgba(108, 140, 255, 0.3)';
                         }}
                     >
-                        新規スペースを開く <ChevronRight size={20} />
+                        {t('home.newSpace')} <ChevronRight size={18} />
                     </button>
                 </div>
             </main>

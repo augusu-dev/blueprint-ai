@@ -1,40 +1,48 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
 :root {
-  --bg-dark: #0f1115;
-  --bg-dark-grid: #1a1d24;
-  --panel-bg: rgba(26, 29, 36, 0.7);
-  --panel-border: rgba(255, 255, 255, 0.08);
-  --text-main: #e2e8f0;
-  --text-muted: #94a3b8;
-  --primary: #3b82f6;
-  --primary-hover: #2563eb;
-  --action: #10b981;
-  --action-hover: #059669;
-  --node-seq: #6366f1;
-  --node-loop: #f59e0b;
-  --node-branch: #ec4899;
+  --bg-dark: #0b0d11;
+  --bg-dark-grid: #13161d;
+  --panel-bg: rgba(20, 23, 30, 0.65);
+  --panel-border: rgba(255, 255, 255, 0.06);
+  --text-main: #dfe6f0;
+  --text-muted: #7b8ba3;
+  --primary: #6c8cff;
+  --primary-hover: #5472e8;
+  --primary-glow: rgba(108, 140, 255, 0.15);
+  --action: #34d399;
+  --action-hover: #10b981;
+  --node-seq: #818cf8;
+  --node-loop: #fbbf24;
+  --node-branch: #f472b6;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.15);
+  --shadow-md: 0 4px 20px rgba(0, 0, 0, 0.25);
+  --shadow-lg: 0 8px 40px rgba(0, 0, 0, 0.35);
 }
 
 @media (prefers-color-scheme: light) {
   :root {
-    --bg-dark: #f8fafc;
-    --bg-dark-grid: #e2e8f0;
-    --panel-bg: rgba(255, 255, 255, 0.8);
-    --panel-border: rgba(0, 0, 0, 0.1);
-    --text-main: #0f172a;
-    --text-muted: #64748b;
-    --action-hover: #059669;
+    --bg-dark: #f4f6fa;
+    --bg-dark-grid: #e8ecf2;
+    --panel-bg: rgba(255, 255, 255, 0.72);
+    --panel-border: rgba(0, 0, 0, 0.07);
+    --text-main: #1a2033;
+    --text-muted: #6b7a90;
+    --primary-glow: rgba(108, 140, 255, 0.1);
   }
 
   .editor-header {
-    background: rgba(255, 255, 255, 0.75) !important;
-    border: 1px solid rgba(0, 0, 0, 0.08) !important;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.05) !important;
+    background: rgba(255, 255, 255, 0.7) !important;
+    border: 1px solid rgba(0, 0, 0, 0.06) !important;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06) !important;
   }
 
   .editor-header-left h2 {
-    background: linear-gradient(90deg, #0f172a, #64748b) !important;
+    background: linear-gradient(90deg, #1a2033, #6b7a90) !important;
     background-clip: text !important;
     -webkit-background-clip: text !important;
     -webkit-text-fill-color: transparent !important;
@@ -48,11 +56,15 @@
 }
 
 body {
-  font-family: 'Inter', sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   background-color: var(--bg-dark);
   color: var(--text-main);
   min-height: 100vh;
   overflow: hidden;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   transition: background-color 0.3s ease, color 0.3s ease;
 }
 
@@ -62,83 +74,96 @@ body {
   display: flex;
 }
 
-/* Glassmorphism Panel */
+/* ── Glassmorphism Panel ── */
 .glass-panel {
   background: var(--panel-bg);
-  backdrop-filter: blur(12px);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--panel-border);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--shadow-md);
 }
 
-/* Auth Screen */
+/* ── Auth Screen ── */
 .auth-container {
   width: 100%;
   height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
+  background: var(--bg-dark);
+  position: relative;
+  overflow: hidden;
 }
 
 .auth-card {
   width: 100%;
-  max-width: 400px;
+  max-width: 380px;
   padding: 2.5rem;
-  border-radius: 16px;
+  border-radius: var(--radius-lg);
   display: flex;
   flex-direction: column;
   gap: 2rem;
-  animation: slideUp 0.5s ease-out;
+  animation: fadeSlideUp 0.5s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .auth-header h2 {
-  font-size: 1.5rem;
+  font-size: 1.4rem;
   font-weight: 600;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.4rem;
+  letter-spacing: -0.02em;
 }
 
 .auth-header p {
   color: var(--text-muted);
-  font-size: 0.9rem;
+  font-size: 0.85rem;
+  font-weight: 400;
 }
 
 .form-group {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-  margin-bottom: 1.5rem;
+  gap: 0.4rem;
+  margin-bottom: 1.25rem;
 }
 
 label {
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   font-weight: 500;
   color: var(--text-muted);
+  letter-spacing: 0.02em;
 }
 
-input {
+input,
+select {
   background: var(--bg-dark);
   border: 1px solid var(--panel-border);
-  padding: 0.75rem 1rem;
-  border-radius: 8px;
+  padding: 0.65rem 0.9rem;
+  border-radius: var(--radius-sm);
   color: var(--text-main);
   font-family: inherit;
+  font-size: 0.85rem;
+  font-weight: 400;
   transition: border-color 0.2s, box-shadow 0.2s;
 }
 
-input:focus {
+input:focus,
+select:focus {
   outline: none;
   border-color: var(--primary);
-  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+  box-shadow: 0 0 0 3px var(--primary-glow);
 }
 
+/* ── Buttons ── */
 .btn {
-  padding: 0.75rem 1.5rem;
-  border-radius: 8px;
+  padding: 0.6rem 1.25rem;
+  border-radius: var(--radius-sm);
   border: none;
   font-weight: 500;
+  font-size: 0.85rem;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   font-family: inherit;
-  font-size: 0.95rem;
+  letter-spacing: 0.01em;
 }
 
 .btn-primary {
@@ -150,6 +175,7 @@ input:focus {
 .btn-primary:hover {
   background: var(--primary-hover);
   transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(108, 140, 255, 0.25);
 }
 
 .btn-action {
@@ -162,36 +188,37 @@ input:focus {
 }
 
 .btn-secondary {
-  background: rgba(255, 255, 255, 0.05);
-  color: white;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-main);
   border: 1px solid var(--panel-border);
 }
 
 .btn-secondary:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .btn-text-danger {
   background: transparent;
   border: none;
-  color: #ef4444;
+  color: #f87171;
   font-size: 0.75rem;
   font-weight: 500;
   cursor: pointer;
   padding: 0;
+  transition: opacity 0.2s;
 }
 
 .btn-text-danger:hover {
-  text-decoration: underline;
+  opacity: 0.7;
 }
 
 .auth-footer p {
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   color: var(--text-muted);
   text-align: center;
 }
 
-/* Editor Layout */
+/* ── Editor Layout ── */
 .editor-layout {
   width: 100%;
   height: 100%;
@@ -201,34 +228,34 @@ input:focus {
 
 .editor-header {
   position: absolute;
-  top: 1.5rem;
+  top: 1.25rem;
   left: 50%;
   transform: translateX(-50%);
-  width: calc(100% - 4rem);
-  max-width: 1200px;
+  width: calc(100% - 3rem);
+  max-width: 1100px;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0.75rem 1.5rem;
+  padding: 0.6rem 1.25rem;
   z-index: 100;
-  background: rgba(15, 17, 21, 0.65);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+  background: rgba(11, 13, 17, 0.55);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.2);
   border-radius: 100px;
 }
 
 .editor-header-left h2 {
-  font-size: 1.25rem;
-  font-weight: 700;
+  font-size: 1.1rem;
+  font-weight: 500;
   margin: 0;
   background: linear-gradient(90deg, #ffffff, #94a3b8);
   background-clip: text;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   user-select: none;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.02em;
 }
 
 .editor-header-left {
@@ -241,52 +268,55 @@ input:focus {
 }
 
 .btn-sm {
-  padding: 0.4rem 0.8rem;
-  font-size: 0.8rem;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.78rem;
 }
 
 .btn-icon,
 .editor-controls .btn-icon {
   background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   color: var(--text-main);
   border-radius: 50%;
-  width: 38px;
-  height: 38px;
+  width: 34px;
+  height: 34px;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
 .btn-icon:hover {
-  background: rgba(128, 128, 128, 0.1);
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.12);
 }
 
+/* ── Settings Modal ── */
 .settings-modal-overlay {
-  position: absolute;
+  position: fixed;
   top: 0;
   left: 0;
   width: 100vw;
   height: 100vh;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(0, 0, 0, 0.45);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 1000;
-  backdrop-filter: blur(4px);
+  backdrop-filter: blur(6px);
 }
 
 .settings-modal {
-  width: 400px;
-  border-radius: 12px;
-  padding: 1.5rem;
+  width: 480px;
+  max-height: 85vh;
+  overflow-y: auto;
+  border-radius: var(--radius-lg);
+  padding: 1.75rem;
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
-  animation: slideUp 0.3s ease-out;
+  gap: 1.25rem;
+  animation: fadeSlideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .settings-header {
@@ -296,8 +326,9 @@ input:focus {
 }
 
 .settings-header h3 {
-  font-size: 1.25rem;
+  font-size: 1.15rem;
   font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 .settings-body {
@@ -323,14 +354,82 @@ input:focus {
   height: 100%;
 }
 
-@keyframes slideUp {
+/* ── Chat Action Buttons ── */
+.chat-actions {
+  display: flex;
+  gap: 0.35rem;
+  margin-top: 0.5rem;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.chat-msg-wrapper:hover .chat-actions {
+  opacity: 1;
+}
+
+.chat-action-btn {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text-muted);
+  border-radius: 6px;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.7rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  transition: all 0.15s ease;
+  font-family: inherit;
+}
+
+.chat-action-btn:hover {
+  background: rgba(108, 140, 255, 0.1);
+  border-color: rgba(108, 140, 255, 0.25);
+  color: var(--primary);
+}
+
+.chat-action-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.chat-action-btn:disabled:hover {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.08);
+  color: var(--text-muted);
+}
+
+/* ── Animations ── */
+@keyframes fadeSlideUp {
   from {
     opacity: 0;
-    transform: translateY(20px);
+    transform: translateY(12px);
   }
 
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes pulse {
+
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+
+  50% {
+    opacity: 1;
   }
 }
