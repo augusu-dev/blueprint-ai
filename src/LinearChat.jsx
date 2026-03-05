@@ -1,7 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { X, Send, Bot, User, Trash2 } from 'lucide-react';
+import { supabase } from './lib/supabase';
+import { useParams } from 'react-router-dom';
 
 export default function LinearChat({ isOpen, onClose, node, onUpdateNodeData }) {
+    const { id: spaceId } = useParams();
     const [input, setInput] = useState('');
     const [chatHistory, setChatHistory] = useState([]);
     const [isLoading, setIsLoading] = useState(false);
@@ -54,6 +57,7 @@ export default function LinearChat({ isOpen, onClose, node, onUpdateNodeData }) 
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
+                        systemInstruction: node.data.systemPrompt ? { parts: [{ text: node.data.systemPrompt }] } : undefined,
                         contents: updatedHistory.map(msg => ({
                             role: msg.role === 'user' ? 'user' : 'model',
                             parts: [{ text: msg.content }]
@@ -78,6 +82,7 @@ export default function LinearChat({ isOpen, onClose, node, onUpdateNodeData }) 
                     body: JSON.stringify({
                         model: modelToUse,
                         max_tokens: 2048,
+                        system: node.data.systemPrompt || undefined,
                         messages: messages
                     })
                 });
@@ -91,7 +96,11 @@ export default function LinearChat({ isOpen, onClose, node, onUpdateNodeData }) 
                     provider === 'glm' ? 'https://open.bigmodel.cn/api/paas/v4/chat/completions' :
                         'https://api.openai.com/v1/chat/completions';
 
-                const messages = updatedHistory.map(m => ({ role: m.role === 'ai' ? 'assistant' : 'user', content: m.content }));
+                const messages = [];
+                if (node.data.systemPrompt) {
+                    messages.push({ role: 'system', content: node.data.systemPrompt });
+                }
+                updatedHistory.forEach(m => messages.push({ role: m.role === 'ai' ? 'assistant' : 'user', content: m.content }));
 
                 const response = await fetch(endpoint, {
                     method: 'POST',
@@ -112,6 +121,59 @@ export default function LinearChat({ isOpen, onClose, node, onUpdateNodeData }) 
             const finalHistory = [...updatedHistory, { role: 'ai', content: reply }];
             setChatHistory(finalHistory);
             onUpdateNodeData(node.id, 'chatHistory', finalHistory);
+
+            // Auto-generate title on first message in space
+            if (chatHistory.length === 0 && spaceId) {
+                // Determine Title Name using the same provider
+                try {
+                    let newTitle = "Untitled Space";
+                    const titlePrompt = `ユーザーの最初のメッセージ「${input}」に基づき、このワークスペースのタイトルを10文字以内で作成してください。余計な記号や説明は一切含めず、タイトルテキストのみを出力してください。`;
+
+                    if (provider === 'gemini') {
+                        const modelToUse = userModel || 'gemini-3.1-pro-preview';
+                        const tRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelToUse}:generateContent?key=${keyToUse}`, {
+                            method: 'POST', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: titlePrompt }] }] })
+                        });
+                        const tData = await tRes.json();
+                        newTitle = tData.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || newTitle;
+                    } else if (provider === 'anthropic') {
+                        const modelToUse = userModel || 'claude-4.6-sonnet';
+                        const tRes = await fetch('https://api.anthropic.com/v1/messages', {
+                            method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': keyToUse, 'anthropic-version': '2023-06-01', 'anthropic-dangerously-allow-browser': 'true' },
+                            body: JSON.stringify({ model: modelToUse, max_tokens: 50, messages: [{ role: 'user', content: titlePrompt }] })
+                        });
+                        const tData = await tRes.json();
+                        newTitle = tData.content?.[0]?.text?.trim() || newTitle;
+                    } else {
+                        const modelToUse = userModel || (provider === 'openai' ? 'gpt-4o' : provider === 'openrouter' ? 'google/gemini-3.1-pro-preview' : 'glm-4-plus');
+                        const endpoint = provider === 'openrouter' ? 'https://openrouter.ai/api/v1/chat/completions' :
+                            provider === 'glm' ? 'https://open.bigmodel.cn/api/paas/v4/chat/completions' : 'https://api.openai.com/v1/chat/completions';
+                        const tRes = await fetch(endpoint, {
+                            method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${keyToUse}` },
+                            body: JSON.stringify({ model: modelToUse, messages: [{ role: 'user', content: titlePrompt }] })
+                        });
+                        const tData = await tRes.json();
+                        newTitle = tData.choices?.[0]?.message?.content?.trim() || newTitle;
+                    }
+
+                    // Cleanup title block
+                    newTitle = newTitle.replace(/^["']|["']$/g, '');
+
+                    // Update DB
+                    if (!newTitle.includes("Untitled")) {
+                        await supabase
+                            .from('spaces')
+                            .update({ title: newTitle })
+                            .eq('id', spaceId);
+
+                        // Dispatch custom event so Sidebar/Editor can refresh title if needed
+                        window.dispatchEvent(new CustomEvent('spaceTitleUpdated'));
+                    }
+                } catch (tErr) {
+                    console.error("Title Generation Failed:", tErr);
+                }
+            }
         } catch (err) {
             const errorMsg = { role: 'ai', content: `Error: ${err.message}` };
             const finalHistory = [...updatedHistory, errorMsg];

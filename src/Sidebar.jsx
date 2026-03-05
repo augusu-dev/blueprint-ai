@@ -13,7 +13,6 @@ export default function Sidebar({ isOpen, onClose }) {
         if (!isOpen) return;
 
         const fetchSpaces = async () => {
-            setLoading(true);
             try {
                 const { data: { user } } = await supabase.auth.getUser();
                 if (!user) return;
@@ -34,6 +33,10 @@ export default function Sidebar({ isOpen, onClose }) {
         };
 
         fetchSpaces();
+
+        const handleTitleUpdate = () => fetchSpaces();
+        window.addEventListener('spaceTitleUpdated', handleTitleUpdate);
+        return () => window.removeEventListener('spaceTitleUpdated', handleTitleUpdate);
     }, [isOpen]);
 
     const handleNewSpace = async () => {

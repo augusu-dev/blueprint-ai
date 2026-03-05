@@ -104,7 +104,6 @@ function EditorContent() {
 
                 if (error) {
                     console.error("Error fetching space:", error);
-                    // Fallback for missing spaces
                     setNodes(initialNodes);
                     setEdges(initialEdges);
                     setSpaceTitle('Untitled Space');
@@ -114,17 +113,12 @@ function EditorContent() {
                 if (data) {
                     setSpaceTitle(data.title || 'Untitled Space');
 
-                    if (data.nodes && data.nodes.length > 0) {
-                        setNodes(data.nodes);
-                    } else {
-                        setNodes(initialNodes);
-                    }
+                    // Only set nodes/edges on initial load to avoid over-writing unsaved local state
+                    if (data.nodes && data.nodes.length > 0) setNodes(data.nodes);
+                    else setNodes(initialNodes);
 
-                    if (data.edges && data.edges.length > 0) {
-                        setEdges(data.edges);
-                    } else {
-                        setEdges(initialEdges);
-                    }
+                    if (data.edges && data.edges.length > 0) setEdges(data.edges);
+                    else setEdges(initialEdges);
 
                     if (data.viewport && Object.keys(data.viewport).length > 0) {
                         setViewport({ x: data.viewport.x, y: data.viewport.y, zoom: data.viewport.zoom });
@@ -138,7 +132,18 @@ function EditorContent() {
             }
         };
 
+        const fetchTitleOnly = async () => {
+            try {
+                const { data, error } = await supabase.from('spaces').select('title').eq('id', spaceId).single();
+                if (data && data.title) setSpaceTitle(data.title);
+            } catch (e) { }
+        };
+
         fetchSpace();
+
+        const handleTitleUpdate = () => fetchTitleOnly();
+        window.addEventListener('spaceTitleUpdated', handleTitleUpdate);
+        return () => window.removeEventListener('spaceTitleUpdated', handleTitleUpdate);
     }, [spaceId, navigate, setNodes, setEdges, setViewport]);
 
     // Auto-save logic
@@ -382,9 +387,15 @@ function EditorContent() {
                     </div>
                     <h2 onClick={() => navigate('/')}>Blueprint</h2>
                 </div>
-                <div className="editor-controls">
-                    <button className="btn btn-icon" onClick={toggleDirection} title="Toggle Layout Direction">
-                        {direction === 'LR' ? <Columns size={20} /> : <Rows size={20} />}
+                <div className="editor-controls" style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                    <button
+                        className="btn"
+                        onClick={toggleDirection}
+                        title="レイアウトの方向を切り替える"
+                        style={{ background: 'rgba(255,255,255,0.05)', fontSize: '0.8rem', padding: '0.3rem 0.8rem', border: '1px solid var(--panel-border)', borderRadius: '20px', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+                    >
+                        {direction === 'LR' ? <Columns size={16} color="var(--primary)" /> : <Rows size={16} color="var(--primary)" />}
+                        {direction === 'LR' ? '左から右へ' : '上から下へ'}
                     </button>
                     <button className="btn btn-icon" onClick={() => setShowSettings(true)} title="Settings">
                         <Settings size={20} />
@@ -411,7 +422,7 @@ function EditorContent() {
                 <LinearChat
                     isOpen={isChatOpen}
                     onClose={() => setIsChatOpen(false)}
-                    node={nodes.find(n => n.id === activeChatNodeId)}
+                    node={nodesWithData.find(n => n.id === activeChatNodeId)}
                     onUpdateNodeData={updateNodeData}
                 />
             </div>

@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Handle, Position } from '@xyflow/react';
-import { Repeat, Plus } from 'lucide-react';
+import { Repeat, Plus, Settings } from 'lucide-react';
 import './nodes.css';
 
 export default function LoopNode({ data, id }) {
+    const [showConfig, setShowConfig] = useState(false);
     const isLR = data.dir === 'LR';
     const sourcePos = isLR ? Position.Right : Position.Bottom;
     const targetPos = isLR ? Position.Left : Position.Top;
@@ -26,45 +27,68 @@ export default function LoopNode({ data, id }) {
                 </button>
             </div>
 
-            <div className="node-body">
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '0.5rem' }}>
-                    <select
-                        className="node-select mb-2"
-                        defaultValue={data.loopMode || 'perspective'}
-                        onChange={(e) => data.onChange && data.onChange(id, 'loopMode', e.target.value)}
+            <div className="node-body" style={{ paddingBottom: '1rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <button
+                        onClick={() => data.onOpenChat && data.onOpenChat(id)}
+                        style={{
+                            display: 'flex', alignItems: 'center', gap: '0.5rem',
+                            background: 'var(--primary)', color: 'white', border: 'none',
+                            padding: '0.5rem 1rem', borderRadius: '20px', cursor: 'pointer',
+                            fontSize: '0.9rem', fontWeight: 600,
+                            boxShadow: '0 4px 10px rgba(59, 130, 246, 0.3)'
+                        }}
                     >
-                        <option value="perspective">Alternative Perspective</option>
-                        <option value="quiz">Interactive Quiz</option>
-                        <option value="summary">Summarization</option>
-                    </select>
+                        💬 Chat
+                    </button>
 
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <button
-                            onClick={() => data.onOpenChat && data.onOpenChat(id)}
-                            style={{
-                                display: 'flex', alignItems: 'center', gap: '0.5rem',
-                                background: 'var(--primary)', color: 'white', border: 'none',
-                                padding: '0.5rem 1rem', borderRadius: '20px', cursor: 'pointer',
-                                fontSize: '0.9rem', fontWeight: 600,
-                                boxShadow: '0 4px 10px rgba(59, 130, 246, 0.3)'
-                            }}
-                        >
-                            💬 Chat
-                        </button>
+                    <button
+                        onClick={() => setShowConfig(!showConfig)}
+                        style={{ background: showConfig ? 'var(--text-main)' : 'var(--panel-bg)', color: showConfig ? 'var(--bg-dark)' : 'var(--text-main)', border: '1px solid var(--panel-border)', borderRadius: '50%', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', transition: 'all 0.2s' }}
+                        title="設定 / Settings"
+                    >
+                        <Settings size={16} />
+                    </button>
+                </div>
 
+                {showConfig && (
+                    <div style={{ marginTop: '1rem', background: 'rgba(255,255,255,0.03)', padding: '0.75rem', borderRadius: '8px', border: '1px solid var(--panel-border)' }}>
+                        <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.25rem', display: 'block' }}>ループ戦略 (Strategy)</label>
                         <select
                             className="node-select-sm"
-                            defaultValue={data.selectedApiKey || 0}
-                            onChange={(e) => data.onChange && data.onChange(id, 'selectedApiKey', parseInt(e.target.value))}
-                            title="API Key Select"
-                            style={{ maxWidth: '100px' }}
+                            style={{ width: '100%', marginBottom: '0.75rem', padding: '0.4rem' }}
+                            value={data.loopMode || 'perspective'}
+                            onChange={(e) => data.onChange && data.onChange(id, 'loopMode', e.target.value)}
                         >
-                            {data.apiKeys && data.apiKeys.map((item, i) => (
-                                <option key={i} value={i}>Key {i + 1} ({item?.provider || 'openai'})</option>
-                            ))}
+                            <option value="perspective">Alternative Perspective</option>
+                            <option value="quiz">Interactive Quiz</option>
+                            <option value="summary">Summarization</option>
                         </select>
+
+                        <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.25rem', display: 'block' }}>カスタマイズ指示 (System Prompt)</label>
+                        <textarea
+                            className="node-input"
+                            style={{ minHeight: '60px', width: '100%' }}
+                            placeholder="AIに対する事前指示..."
+                            value={data.systemPrompt || ''}
+                            onChange={(e) => data.onChange && data.onChange(id, 'systemPrompt', e.target.value)}
+                        />
+
+                        <div style={{ marginTop: '0.75rem' }}>
+                            <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.25rem', display: 'block' }}>使用モデル / APIキー</label>
+                            <select
+                                className="node-select-sm"
+                                style={{ width: '100%', padding: '0.4rem' }}
+                                value={data.selectedApiKey || 0}
+                                onChange={(e) => data.onChange && data.onChange(id, 'selectedApiKey', parseInt(e.target.value))}
+                            >
+                                {data.apiKeys && data.apiKeys.map((item, i) => (
+                                    <option key={i} value={i}>Key {i + 1} ({item?.provider || 'openai'})</option>
+                                ))}
+                            </select>
+                        </div>
                     </div>
-                </div>
+                )}
             </div>
 
             <Handle type="source" position={sourcePos} className="custom-handle" />
