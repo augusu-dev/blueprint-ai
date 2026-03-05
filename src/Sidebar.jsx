@@ -49,21 +49,32 @@ export default function Sidebar({ isOpen, onClose }) {
                 // 実際にノードやエッジが変更されているか確認 (Check if actually modified)
                 const { data: spaceData } = await supabase.from('spaces').select('nodes, edges').eq('id', currentSpaceId).single();
                 if (spaceData) {
-                    const hasAddedNodesOrEdges = (spaceData.nodes && spaceData.nodes.length > 1) || (spaceData.edges && spaceData.edges.length > 0);
+                    let nArray = spaceData.nodes || [];
+                    if (typeof nArray === 'string') {
+                        try { nArray = JSON.parse(nArray); } catch (e) { nArray = []; }
+                    }
+                    if (typeof nArray === 'string') { // stringified multiple times
+                        try { nArray = JSON.parse(nArray); } catch (e) { nArray = []; }
+                    }
 
-                    // Even if there's only 1 node, check if its prompt or history changed from default
-                    let hasContentChanges = false;
-                    if (!hasAddedNodesOrEdges && spaceData.nodes && spaceData.nodes.length === 1) {
-                        const defaultPrompt = "";
-                        const nodeData = spaceData.nodes[0]?.data || {};
-                        if ((nodeData.prompt && nodeData.prompt !== defaultPrompt) ||
-                            (nodeData.chatHistory && nodeData.chatHistory.length > 0) ||
-                            (nodeData.systemPrompt && nodeData.systemPrompt.length > 0)) {
-                            hasContentChanges = true;
+                    let eArray = spaceData.edges || [];
+                    if (typeof eArray === 'string') {
+                        try { eArray = JSON.parse(eArray); } catch (e) { eArray = []; }
+                    }
+
+                    let hasChanges = false;
+
+                    if (nArray.length > 1 || eArray.length > 0) {
+                        hasChanges = true;
+                    } else if (nArray.length === 1) {
+                        const n = nArray[0].data || {};
+                        // Even typing prompt, setting custom config, receiving response, or chatting will allow new space
+                        if (n.prompt || n.systemPrompt || (n.chatHistory && n.chatHistory.length > 0) || n.response) {
+                            hasChanges = true;
                         }
                     }
 
-                    if (!hasAddedNodesOrEdges && !hasContentChanges) {
+                    if (!hasChanges) {
                         onClose();
                         return; // 変更がない場合は新規作成しない
                     }

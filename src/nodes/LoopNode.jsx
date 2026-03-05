@@ -1,13 +1,18 @@
-import React, { useState } from 'react';
-import { Handle, Position } from '@xyflow/react';
+import React, { useState, useEffect } from 'react';
+import { Handle, Position, useUpdateNodeInternals } from '@xyflow/react';
 import { Repeat, Plus, Settings } from 'lucide-react';
 import './nodes.css';
 
 export default function LoopNode({ data, id }) {
     const [showConfig, setShowConfig] = useState(false);
+    const updateNodeInternals = useUpdateNodeInternals();
     const isLR = data.dir === 'LR';
     const sourcePos = isLR ? Position.Right : Position.Bottom;
     const targetPos = isLR ? Position.Left : Position.Top;
+
+    useEffect(() => {
+        updateNodeInternals(id);
+    }, [isLR, id, updateNodeInternals]);
 
     return (
         <div className="custom-node node-loop selected:ring-2 selected:ring-node-loop">

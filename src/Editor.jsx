@@ -159,14 +159,22 @@ function EditorContent() {
             try {
                 // Remove non-serializable function references from node data
                 const cleanNodes = nodes.map(n => {
-                    if (!n.data) return n;
-                    const { onChange, onAddBranch, onRunAI, onQuickAdd, onOpenChat, apiKeys, ...safeData } = n.data;
-                    return { ...n, data: safeData };
+                    const safeN = { ...n };
+                    if (safeN.data) {
+                        const { onChange, onAddBranch, onRunAI, onQuickAdd, onOpenChat, apiKeys, ...safeData } = safeN.data;
+                        safeN.data = safeData;
+                    }
+                    // remove internal fields to avoid circular/unsupported JSON
+                    delete safeN.measured;
+                    delete safeN.dragging;
+                    delete safeN.selected;
+                    delete safeN.positionAbsolute;
+                    return safeN;
                 });
 
                 const updates = {
-                    nodes: cleanNodes,
-                    edges: edges,
+                    nodes: JSON.parse(JSON.stringify(cleanNodes)),
+                    edges: JSON.parse(JSON.stringify(edges)),
                     updated_at: new Date().toISOString()
                 };
 
@@ -335,14 +343,24 @@ function EditorContent() {
     }, [apiKeys, setNodes]);
 
     const onQuickAdd = useCallback((sourceId, type) => {
+        const outgoingEdges = edges.filter(e => e.source === sourceId);
+        if (outgoingEdges.length >= 10) {
+            alert("ノードの追加は1つのノードにつき最大10個までです。");
+            return;
+        }
+
         setNodes((nds) => {
             const sourceNode = nds.find(n => n.id === sourceId);
             if (!sourceNode) return nds;
 
-            const newId = `${idRef.current++}`;
-            // Calculate a rough position offset
-            const posX = sourceNode.position.x + (direction === 'LR' ? 350 : 0);
-            const posY = sourceNode.position.y + (direction === 'TB' ? 350 : 0);
+            const newId = `node-${crypto.randomUUID()}`;
+            const num = outgoingEdges.length;
+
+            let px = direction === 'LR' ? 350 : (num * 240 - 120);
+            let py = direction === 'TB' ? 350 : (num * 200 - 100);
+
+            const posX = sourceNode.position.x + px;
+            const posY = sourceNode.position.y + py;
 
             const newNode = {
                 id: newId,
@@ -352,12 +370,12 @@ function EditorContent() {
             };
 
             setTimeout(() => {
-                setEdges(eds => addEdge({ source: sourceId, sourceHandle: null, target: newId, targetHandle: null }, eds));
+                setEdges(eds => addEdge({ id: `e-${sourceId}-${newId}`, source: sourceId, sourceHandle: null, target: newId, targetHandle: null }, eds));
             }, 50);
 
             return [...nds, newNode];
         });
-    }, [direction, setNodes, setEdges]);
+    }, [direction, edges, setNodes, setEdges]);
 
     const onConnect = useCallback((params) => setEdges((eds) => addEdge(params, eds)), [setEdges]);
 
