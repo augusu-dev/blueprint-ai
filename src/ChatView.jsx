@@ -350,13 +350,16 @@ export default function ChatView({
                                     {msg.role === 'user' ? <User size={14} color="white" /> : <Bot size={14} />}
                                 </div>
                                 <div style={{
-                                    background: msg.role === 'user' ? 'var(--primary)' : 'rgba(255,255,255,0.04)',
+                                    background: msg.role === 'user' ? 'linear-gradient(135deg, var(--primary) 0%, #748ffc 100%)' : 'rgba(20, 23, 30, 0.45)',
                                     color: msg.role === 'user' ? 'white' : 'var(--text-main)',
-                                    padding: '0.7rem 1.1rem',
-                                    borderRadius: msg.role === 'user' ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
-                                    border: msg.role === 'ai' ? '1px solid var(--panel-border)' : 'none',
+                                    padding: '0.8rem 1.25rem',
+                                    borderRadius: msg.role === 'user' ? '20px 20px 4px 20px' : '20px 20px 20px 4px',
+                                    border: msg.role === 'ai' ? '1px solid var(--panel-border)' : '1px solid rgba(255,255,255,0.1)',
+                                    boxShadow: msg.role === 'user' ? '0 4px 15px rgba(92, 124, 250, 0.25)' : 'var(--shadow-sm)',
                                     wordBreak: 'break-word', whiteSpace: 'pre-wrap',
-                                    fontSize: '0.9rem', lineHeight: 1.7
+                                    fontSize: '0.92rem', lineHeight: 1.75,
+                                    backdropFilter: msg.role === 'ai' ? 'blur(20px)' : 'none',
+                                    WebkitBackdropFilter: msg.role === 'ai' ? 'blur(20px)' : 'none'
                                 }}>
                                     {msg.content}
                                 </div>
@@ -431,19 +434,22 @@ export default function ChatView({
             </div>
 
             {/* Input Area */}
-            <div style={{ padding: '1rem 1.5rem', borderTop: '1px solid var(--panel-border)' }}>
+            <div style={{ padding: '1.25rem 2rem', borderTop: '1px solid var(--panel-border)' }}>
                 <div style={{
                     display: 'flex',
-                    background: 'rgba(255,255,255,0.03)',
+                    background: 'rgba(20, 23, 30, 0.65)',
+                    backdropFilter: 'blur(24px)',
+                    WebkitBackdropFilter: 'blur(24px)',
                     border: '1px solid var(--panel-border)',
-                    borderRadius: '24px',
+                    boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
+                    borderRadius: '28px',
                     overflow: 'hidden',
-                    padding: '0.25rem 0.25rem 0.25rem 1rem',
+                    padding: '0.35rem 0.35rem 0.35rem 1.25rem',
                     alignItems: 'flex-end',
                     maxWidth: '820px',
                     margin: '0 auto',
-                    transition: 'border-color 0.2s',
-                    minHeight: '50px'
+                    transition: 'var(--transition-smooth)',
+                    minHeight: '56px'
                 }}>
                     <textarea
                         value={input}

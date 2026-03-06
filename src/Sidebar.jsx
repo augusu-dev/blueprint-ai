@@ -98,11 +98,14 @@ export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
             {isOpen && <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 998, backdropFilter: 'blur(2px)' }} onClick={onClose} />}
             <div style={{
                 position: 'fixed', top: 0, left: 0, bottom: 0,
-                width: isOpen ? '220px' : '0',
-                background: 'var(--bg-dark)',
+                width: isOpen ? '240px' : '0',
+                background: 'rgba(11, 13, 17, 0.75)',
+                backdropFilter: 'blur(30px)',
+                WebkitBackdropFilter: 'blur(30px)',
                 borderRight: isOpen ? '1px solid var(--panel-border)' : 'none',
+                boxShadow: isOpen ? '4px 0 24px rgba(0,0,0,0.3)' : 'none',
                 zIndex: 999, overflow: 'hidden',
-                transition: 'width 0.2s ease',
+                transition: 'width 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
                 display: 'flex', flexDirection: 'column'
             }}>
                 {/* Header */}
@@ -112,14 +115,18 @@ export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
                 </div>
 
                 {/* New Chat */}
-                <div style={{ padding: '0.5rem 0.65rem', minWidth: '220px' }}>
+                <div style={{ padding: '0.6rem 0.8rem', minWidth: '240px' }}>
                     <button onClick={handleNewSpace} style={{
-                        width: '100%', background: 'var(--primary)', color: 'white', border: 'none',
-                        padding: '0.45rem', borderRadius: '8px', fontSize: '0.78rem', fontWeight: 500,
+                        width: '100%', background: 'linear-gradient(135deg, var(--primary) 0%, #748ffc 100%)', color: 'white', border: 'none',
+                        padding: '0.55rem', borderRadius: '10px', fontSize: '0.8rem', fontWeight: 500,
                         cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        gap: '0.3rem', transition: 'all 0.2s', fontFamily: 'inherit'
-                    }}>
-                        <Plus size={13} /> {t('sidebar.newSpace')}
+                        gap: '0.4rem', transition: 'var(--transition-smooth)', fontFamily: 'inherit',
+                        boxShadow: '0 4px 12px rgba(92, 124, 250, 0.3)'
+                    }}
+                        onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = '0 6px 16px rgba(92, 124, 250, 0.4)'; }}
+                        onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 4px 12px rgba(92, 124, 250, 0.3)'; }}
+                    >
+                        <Plus size={14} /> {t('sidebar.newSpace')}
                     </button>
                 </div>
 
@@ -143,11 +150,11 @@ export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
                             <div key={space.id} className="sidebar-item"
                                 onClick={() => { navigate(`/space/${space.id}`); onClose(); }}
                                 style={{
-                                    padding: '0.4rem 0.5rem', display: 'flex', alignItems: 'center', gap: '0.4rem',
-                                    background: space.id === currentSpaceId ? 'rgba(108, 140, 255, 0.08)' : 'transparent',
-                                    border: space.id === currentSpaceId ? '1px solid rgba(108, 140, 255, 0.15)' : '1px solid transparent',
-                                    borderRadius: '6px', cursor: 'pointer', marginBottom: '0.1rem',
-                                    transition: 'all 0.15s', position: 'relative'
+                                    padding: '0.5rem 0.6rem', display: 'flex', alignItems: 'center', gap: '0.5rem',
+                                    background: space.id === currentSpaceId ? 'linear-gradient(90deg, rgba(92, 124, 250, 0.15) 0%, transparent 100%)' : 'transparent',
+                                    borderLeft: space.id === currentSpaceId ? '3px solid var(--primary)' : '3px solid transparent',
+                                    borderRadius: '0 6px 6px 0', cursor: 'pointer', marginBottom: '0.2rem',
+                                    transition: 'background 0.2s ease', position: 'relative'
                                 }}
                                 onMouseEnter={e => { if (space.id !== currentSpaceId) e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; }}
                                 onMouseLeave={e => { if (space.id !== currentSpaceId) e.currentTarget.style.background = 'transparent'; }}

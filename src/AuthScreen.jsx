@@ -40,18 +40,25 @@ export default function AuthScreen() {
             {/* Ambient glow */}
             <div style={{
                 position: 'absolute', top: '-15%', left: '20%', width: '40%', height: '40%',
-                background: 'radial-gradient(circle, rgba(108, 140, 255, 0.08) 0%, transparent 70%)',
-                filter: 'blur(60px)', zIndex: 0
+                background: 'radial-gradient(circle, rgba(92, 124, 250, 0.15) 0%, transparent 60%)',
+                filter: 'blur(80px)', zIndex: 0
+            }} />
+            <div style={{
+                position: 'absolute', bottom: '-15%', right: '20%', width: '40%', height: '40%',
+                background: 'radial-gradient(circle, rgba(32, 201, 151, 0.1) 0%, transparent 60%)',
+                filter: 'blur(80px)', zIndex: 0
             }} />
             <div className="auth-card glass-panel" style={{ position: 'relative', zIndex: 1 }}>
                 <div className="auth-header">
                     <h2 style={{
-                        background: 'linear-gradient(135deg, #fff, #94a3b8)',
+                        background: 'linear-gradient(135deg, #ffffff 0%, #b8c6dc 100%)',
                         WebkitBackgroundClip: 'text',
                         WebkitTextFillColor: 'transparent',
-                        letterSpacing: '-0.02em'
+                        letterSpacing: '-0.02em',
+                        fontSize: '1.6rem',
+                        fontWeight: 700
                     }}>{t('auth.title')}</h2>
-                    <p>{t('auth.subtitle')}</p>
+                    <p style={{ marginTop: '0.4rem' }}>{t('auth.subtitle')}</p>
                 </div>
                 <div className="auth-form">
                     <div className="form-group">

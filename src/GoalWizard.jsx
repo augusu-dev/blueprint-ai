@@ -230,10 +230,11 @@ export default function GoalWizard({ onClose, apiKeys, selectedApiKey, onSetGoal
                                             style={{
                                                 display: 'flex', alignItems: 'center', gap: '0.5rem',
                                                 width: '100%', padding: '0.55rem 0.75rem', marginBottom: '0.35rem',
-                                                background: checked ? 'rgba(108, 140, 255, 0.12)' : 'rgba(255,255,255,0.03)',
-                                                border: checked ? '1px solid rgba(108, 140, 255, 0.4)' : '1px solid var(--panel-border)',
-                                                borderRadius: '10px', cursor: 'pointer', color: 'var(--text-main)',
-                                                fontSize: '0.88rem', textAlign: 'left', transition: 'all 0.15s',
+                                                background: checked ? 'rgba(92, 124, 250, 0.15)' : 'rgba(255,255,255,0.02)',
+                                                border: checked ? '1px solid rgba(92, 124, 250, 0.4)' : '1px solid var(--panel-border)',
+                                                boxShadow: checked ? '0 4px 12px rgba(92, 124, 250, 0.15)' : 'none',
+                                                borderRadius: '12px', cursor: 'pointer', color: 'var(--text-main)',
+                                                fontSize: '0.88rem', textAlign: 'left', transition: 'var(--transition-smooth)',
                                                 fontFamily: 'inherit'
                                             }}
                                         >
@@ -255,10 +256,11 @@ export default function GoalWizard({ onClose, apiKeys, selectedApiKey, onSetGoal
                                             onClick={() => selectOption(msgIdx, item.id)}
                                             style={{
                                                 padding: '0.6rem 0.8rem',
-                                                background: isSelected ? 'rgba(108, 140, 255, 0.15)' : 'rgba(255,255,255,0.03)',
+                                                background: isSelected ? 'rgba(92, 124, 250, 0.15)' : 'rgba(255,255,255,0.02)',
                                                 border: isSelected ? '2px solid var(--primary)' : '1px solid var(--panel-border)',
-                                                borderRadius: '12px', cursor: 'pointer', color: 'var(--text-main)',
-                                                fontSize: '0.85rem', textAlign: 'left', transition: 'all 0.15s',
+                                                boxShadow: isSelected ? '0 4px 12px rgba(92, 124, 250, 0.2)' : 'none',
+                                                borderRadius: '14px', cursor: 'pointer', color: 'var(--text-main)',
+                                                fontSize: '0.85rem', textAlign: 'left', transition: 'var(--transition-smooth)',
                                                 fontFamily: 'inherit', fontWeight: isSelected ? 500 : 400,
                                                 display: 'flex', alignItems: 'center', gap: '0.4rem'
                                             }}
@@ -312,12 +314,15 @@ export default function GoalWizard({ onClose, apiKeys, selectedApiKey, onSetGoal
                             {msg.role === 'user' ? '👤' : '🎯'}
                         </div>
                         <div style={{
-                            background: msg.role === 'user' ? 'var(--primary)' : 'rgba(255,255,255,0.04)',
+                            background: msg.role === 'user' ? 'linear-gradient(135deg, var(--primary) 0%, #748ffc 100%)' : 'rgba(20, 23, 30, 0.45)',
                             color: msg.role === 'user' ? 'white' : 'var(--text-main)',
-                            padding: '0.75rem 1rem',
-                            borderRadius: msg.role === 'user' ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
-                            border: msg.role === 'ai' ? '1px solid var(--panel-border)' : 'none',
-                            maxWidth: '85%', fontSize: '0.9rem'
+                            padding: '0.8rem 1.25rem',
+                            borderRadius: msg.role === 'user' ? '20px 20px 4px 20px' : '20px 20px 20px 4px',
+                            border: msg.role === 'ai' ? '1px solid var(--panel-border)' : '1px solid rgba(255,255,255,0.1)',
+                            boxShadow: msg.role === 'user' ? '0 4px 15px rgba(92, 124, 250, 0.25)' : 'var(--shadow-sm)',
+                            maxWidth: '85%', fontSize: '0.92rem', lineHeight: 1.75,
+                            backdropFilter: msg.role === 'ai' ? 'blur(20px)' : 'none',
+                            WebkitBackdropFilter: msg.role === 'ai' ? 'blur(20px)' : 'none'
                         }}>
                             {msg.role === 'ai' ? renderAIMessage(msg.content, idx) : msg.content}
                         </div>
@@ -335,8 +340,8 @@ export default function GoalWizard({ onClose, apiKeys, selectedApiKey, onSetGoal
                 <div ref={messagesEndRef} />
             </div>
 
-            <div style={{ padding: '1rem 1.5rem', borderTop: '1px solid var(--panel-border)' }}>
-                <div style={{ display: 'flex', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--panel-border)', borderRadius: '20px', overflow: 'hidden', padding: '0.2rem 0.2rem 0.2rem 0.9rem', alignItems: 'flex-end', maxWidth: '780px', margin: '0 auto' }}>
+            <div style={{ padding: '1.25rem 2rem', borderTop: '1px solid var(--panel-border)' }}>
+                <div style={{ display: 'flex', background: 'rgba(20, 23, 30, 0.65)', backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)', border: '1px solid var(--panel-border)', boxShadow: '0 8px 32px rgba(0,0,0,0.3)', borderRadius: '28px', overflow: 'hidden', padding: '0.35rem 0.35rem 0.35rem 1.25rem', alignItems: 'flex-end', maxWidth: '780px', margin: '0 auto', transition: 'var(--transition-smooth)', minHeight: '56px' }}>
                     <textarea value={input} onChange={e => setInput(e.target.value)}
                         onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
                         placeholder={t('goal.placeholder')}
