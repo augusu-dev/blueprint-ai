@@ -85,6 +85,7 @@ const translations = {
         'chat.branchNum': '分岐',
         'chat.switchToNodes': 'ノードビュー',
         'chat.switchToChat': 'チャットに戻る',
+        'chat.actionCompleted': '指示に従い、システムがアクションを実行しました。',
 
         // Goal Wizard
         'goal.title': '🎯 目標を決める',
@@ -187,6 +188,7 @@ const translations = {
         'chat.branchNum': 'Branch',
         'chat.switchToNodes': 'Node View',
         'chat.switchToChat': 'Back to Chat',
+        'chat.actionCompleted': 'The system has executed the requested actions.',
 
         'goal.title': '🎯 Set Goal',
         'goal.back': 'Back to Chat',
@@ -286,6 +288,7 @@ const translations = {
         'chat.branchNum': '分支',
         'chat.switchToNodes': '节点视图',
         'chat.switchToChat': '返回聊天',
+        'chat.actionCompleted': '系统已执行请求的操作。',
 
         'goal.title': '🎯 设定目标',
         'goal.back': '返回聊天',

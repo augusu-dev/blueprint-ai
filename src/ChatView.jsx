@@ -108,10 +108,40 @@ export default function ChatView({
         if (!retryContent) setInput('');
         setIsLoading(true);
 
-        const reply = await callAI(updatedHistory, node.data?.systemPrompt);
-        const finalHistory = [...updatedHistory, { role: 'ai', content: reply }];
+        // Inject node control abilities into system prompt
+        const controlInstructions = `
+\n\n---
+[システム指示]
+あなたはチャットを通じてノードシステムを構築・制御することができます。ユーザーから「ノードを追加して」「分岐して」「ループをオンにして」などの指示があった場合、以下のタグを含めて返信することでシステムが自動で処理します。
+1. ノードを分岐・追加したい場合: [ACTION: CREATE_NODE] と返信のどこかに含める。
+2. このノードのループ機能(自己繰り返し)をオンにしたい場合: [ACTION: TOGGLE_LOOP_ON] と含める。
+3. ループ機能をオフにしたい場合: [ACTION: TOGGLE_LOOP_OFF] と含める。
+※ 実行したいアクションタグをテキストに含めるだけで有効になります。複数同時の使用も可能です。
+---
+`;
+        const activeSystemPrompt = (node.data?.systemPrompt || '') + controlInstructions;
+
+        let displayReply = reply || '';
+        displayReply = displayReply.replace(/\[ACTION: CREATE_NODE\]/g, '').trim();
+        displayReply = displayReply.replace(/\[ACTION: TOGGLE_LOOP_ON\]/g, '').trim();
+        displayReply = displayReply.replace(/\[ACTION: TOGGLE_LOOP_OFF\]/g, '').trim();
+
+        if (!displayReply) displayReply = t('chat.actionCompleted') || 'Action completed.';
+
+        const finalHistory = [...updatedHistory, { role: 'ai', content: displayReply }];
         setChatHistory(finalHistory);
         onUpdateNodeData(node.id, 'chatHistory', finalHistory);
+
+        // Process AI actions
+        if (reply.includes('[ACTION: CREATE_NODE]') && onBranchFromChat) {
+            onBranchFromChat(node.id);
+        }
+        if (reply.includes('[ACTION: TOGGLE_LOOP_ON]')) {
+            onUpdateNodeData(node.id, 'isLooping', true);
+        }
+        if (reply.includes('[ACTION: TOGGLE_LOOP_OFF]')) {
+            onUpdateNodeData(node.id, 'isLooping', false);
+        }
 
         // Auto title on first message
         if (chatHistory.length === 0 && spaceId && !retryContent) {

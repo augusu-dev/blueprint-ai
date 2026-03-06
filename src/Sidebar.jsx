@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { supabase } from './lib/supabase';
-import { Plus, X, Search, MessageSquare, Trash2 } from 'lucide-react';
+import { Plus, X, Search, MessageSquare, Trash2, Settings } from 'lucide-react';
 import { useLanguage } from './i18n';
 
 export default function Sidebar({ isOpen, onClose }) {
@@ -178,8 +178,8 @@ export default function Sidebar({ isOpen, onClose }) {
                     )}
                 </div>
 
-                {/* Bottom search button */}
-                <div style={{ padding: '0.5rem 0.65rem', borderTop: '1px solid var(--panel-border)', minWidth: '220px' }}>
+                {/* Bottom section */}
+                <div style={{ padding: '0.5rem 0.65rem', borderTop: '1px solid var(--panel-border)', minWidth: '220px', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
                     <button onClick={() => { document.querySelector('.sidebar-drawer input, div[style*="220px"] input')?.focus(); }}
                         style={{
                             width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--panel-border)',
@@ -189,6 +189,18 @@ export default function Sidebar({ isOpen, onClose }) {
                         }}>
                         <Search size={11} /> {t('sidebar.searchBtn')}
                     </button>
+
+                    {onOpenSettings && (
+                        <button onClick={onOpenSettings}
+                            style={{
+                                width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--panel-border)',
+                                padding: '0.4rem', borderRadius: '6px', fontSize: '0.75rem', color: 'var(--text-muted)',
+                                cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                gap: '0.3rem', transition: 'all 0.2s', fontFamily: 'inherit'
+                            }}>
+                            <Settings size={11} /> {t('editor.settings')}
+                        </button>
+                    )}
                 </div>
             </div>
         </>

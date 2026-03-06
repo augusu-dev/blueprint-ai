@@ -303,8 +303,8 @@ function EditorContent() {
     const activeNode = nodesWithData.find(n => n.id === activeChatNodeId);
 
     return (
-        <div className="editor-layout" style={{ display: 'flex', flexDirection: 'row' }}>
-            <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
+        <div className="editor-layout" style={{ display: 'flex', flexDirection: 'row', height: '100vh', width: '100vw', overflow: 'hidden' }}>
+            <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} onOpenSettings={() => setShowSettings(true)} />
 
             {/* Left icon bar (always visible) */}
             <div style={{
@@ -373,16 +373,6 @@ function EditorContent() {
                                 {direction === 'LR' ? t('editor.ltr') : t('editor.ttb')}
                             </button>
                         )}
-
-                        <button onClick={() => setShowSettings(true)}
-                            style={{
-                                background: 'rgba(255,255,255,0.04)', fontSize: '0.78rem', padding: '0.3rem 0.7rem',
-                                border: '1px solid var(--panel-border)', borderRadius: '20px',
-                                display: 'flex', alignItems: 'center', gap: '0.3rem', color: 'var(--text-main)',
-                                cursor: 'pointer', fontFamily: 'inherit'
-                            }}>
-                            <Settings size={13} color="var(--primary)" /> {t('editor.settings')}
-                        </button>
                     </div>
                 </div>
 
