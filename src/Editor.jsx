@@ -21,8 +21,16 @@ import ChatView from './ChatView';
 import SequenceNode from './nodes/SequenceNode';
 import LoopNode from './nodes/LoopNode';
 import BranchNode from './nodes/BranchNode';
+import GoalNode from './nodes/GoalNode';
+import DeleteEdge from './nodes/DeleteEdge';
 
 const initialNodes = [
+    {
+        id: 'goal-1',
+        type: 'goalNode',
+        position: { x: -320, y: 120 },
+        data: {},
+    },
     {
         id: '1',
         type: 'sequenceNode',
@@ -31,12 +39,19 @@ const initialNodes = [
     },
 ];
 
-const initialEdges = [];
+const initialEdges = [
+    { id: 'e-goal-1', source: 'goal-1', sourceHandle: 'goal', target: '1', targetHandle: 'left', animated: true, type: 'deleteEdge' }
+];
 
 const nodeTypes = {
     sequenceNode: SequenceNode,
     loopNode: LoopNode,
     branchNode: BranchNode,
+    goalNode: GoalNode,
+};
+
+const edgeTypes = {
+    deleteEdge: DeleteEdge,
 };
 
 function EditorContent() {
@@ -216,7 +231,7 @@ function EditorContent() {
             let px = direction === 'LR' ? 350 : (num * 240 - 120);
             let py = direction === 'TB' ? 350 : (num * 200 - 100);
             const newNode = { id: newId, type, position: { x: sourceNode.position.x + px, y: sourceNode.position.y + py }, data: { dir: direction, prompt: '' } };
-            setTimeout(() => { setEdges(eds => addEdge({ id: `e-${sourceId}-${newId}`, source: sourceId, target: newId }, eds)); }, 50);
+            setTimeout(() => { setEdges(eds => addEdge({ id: `e-${sourceId}-${newId}`, source: sourceId, target: newId, type: 'deleteEdge' }, eds)); }, 50);
             return [...nds, newNode];
         });
     }, [direction, edges, setNodes, setEdges, t]);
@@ -241,7 +256,7 @@ function EditorContent() {
                     selectedApiKey: sourceNode.data?.selectedApiKey || 0
                 }
             };
-            setTimeout(() => { setEdges(eds => addEdge({ id: `e-${sourceNodeId}-${newId}`, source: sourceNodeId, target: newId }, eds)); }, 50);
+            setTimeout(() => { setEdges(eds => addEdge({ id: `e-${sourceNodeId}-${newId}`, source: sourceNodeId, target: newId, type: 'deleteEdge' }, eds)); }, 50);
             return [...nds, newNode];
         });
         return true;
@@ -265,13 +280,24 @@ function EditorContent() {
     const onConnect = useCallback((params) => {
         // Prevent self-loops
         if (params.source === params.target) return;
-        setEdges((eds) => addEdge(params, eds));
+        setEdges((eds) => addEdge({ ...params, type: 'deleteEdge' }, eds));
+    }, [setEdges]);
+
+    const onDeleteEdge = useCallback((edgeId) => {
+        setEdges(eds => eds.filter(e => e.id !== edgeId));
     }, [setEdges]);
 
     const onEdgeClick = useCallback((event, edge) => {
         event.stopPropagation();
-        setEdges(eds => eds.filter(e => e.id !== edge.id));
-    }, [setEdges]);
+        onDeleteEdge(edge.id);
+    }, [onDeleteEdge]);
+
+    const edgesWithData = useMemo(() => {
+        return edges.map(e => ({
+            ...e,
+            data: { ...e.data, onDelete: onDeleteEdge }
+        }));
+    }, [edges, onDeleteEdge]);
 
     const nodesWithData = useMemo(() => {
         // Get goal/systemPrompt from starter node
@@ -284,10 +310,18 @@ function EditorContent() {
                 systemPrompt: n.data?.isStarter ? n.data.systemPrompt : (n.data?.systemPrompt || sharedGoal),
                 onChange: updateNodeData, onAddBranch, onQuickAdd, onDeleteNode,
                 onOpenChat: (nodeId) => { setActiveChatNodeId(nodeId); setViewMode('chat'); },
+                onSetGoalFromNode: (goalNodeId, goalText) => {
+                    const outgoingEdge = edges.find(e => e.source === goalNodeId);
+                    if (outgoingEdge) {
+                        updateNodeData(outgoingEdge.target, 'systemPrompt', goalText);
+                    } else if (starterNode) {
+                        updateNodeData(starterNode.id, 'systemPrompt', goalText);
+                    }
+                },
                 apiKeys
             }
         }));
-    }, [nodes, direction, updateNodeData, onAddBranch, onQuickAdd, onDeleteNode, apiKeys]);
+    }, [nodes, edges, direction, updateNodeData, onAddBranch, onQuickAdd, onDeleteNode, apiKeys]);
 
     const toggleDirection = () => setDirection(d => d === 'LR' ? 'TB' : 'LR');
 
@@ -391,12 +425,13 @@ function EditorContent() {
                     <div style={{ flex: 1, position: 'relative' }}>
                         <ReactFlow
                             nodes={nodesWithData}
-                            edges={edges}
+                            edges={edgesWithData}
                             onNodesChange={onNodesChange}
                             onEdgesChange={onEdgesChange}
                             onConnect={onConnect}
                             onEdgeClick={onEdgeClick}
                             nodeTypes={nodeTypes}
+                            edgeTypes={edgeTypes}
                             fitView
                             colorMode="system"
                         >

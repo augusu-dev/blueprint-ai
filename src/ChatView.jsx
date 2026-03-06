@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Bot, User, Copy, Check, RefreshCw, GitBranch, ExternalLink, ChevronLeft, ChevronRight, Target } from 'lucide-react';
+import { Send, Bot, User, Copy, Check, RefreshCw, GitBranch, ExternalLink, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useLanguage } from './i18n';
-import GoalWizard from './GoalWizard';
 
 export default function ChatView({
     node,
@@ -17,7 +16,6 @@ export default function ChatView({
     const [chatHistory, setChatHistory] = useState([]);
     const [isLoading, setIsLoading] = useState(false);
     const [copiedIdx, setCopiedIdx] = useState(null);
-    const [showGoalWizard, setShowGoalWizard] = useState(false);
     const [activeBranchView, setActiveBranchView] = useState(0);
     const messagesEndRef = useRef(null);
 
@@ -112,36 +110,43 @@ export default function ChatView({
         const controlInstructions = `
 \n\n---
 [システム指示]
-あなたはチャットを通じてノードシステムを構築・制御することができます。ユーザーから「ノードを追加して」「分岐して」「ループをオンにして」などの指示があった場合、以下のタグを含めて返信することでシステムが自動で処理します。
-1. ノードを分岐・追加したい場合: [ACTION: CREATE_NODE] と返信のどこかに含める。
-2. このノードのループ機能(自己繰り返し)をオンにしたい場合: [ACTION: TOGGLE_LOOP_ON] と含める。
-3. ループ機能をオフにしたい場合: [ACTION: TOGGLE_LOOP_OFF] と含める。
-※ 実行したいアクションタグをテキストに含めるだけで有効になります。複数同時の使用も可能です。
+あなたはチャットを通じてノードシステムを構築・制御することができます。ユーザーから指示があった場合や、状況に応じてあなたが必要だと判断した場合は、以下のタグを含めて返信することで、ユーザーにアクションの実行を提案できます。
+1. 新たにノードを派生・分岐させるべき話題になった場合: [ACTION: CREATE_NODE] と返信のどこかに含める。
+2. このノード自身にループ機能(自動的反復処理)を行わせるべき話題になった場合: [ACTION: TOGGLE_LOOP_ON] と含める。
+3. ループ機能を停止させるべき場合: [ACTION: TOGGLE_LOOP_OFF] と含める。
+※ アクションタグを含めるだけで、システムが自動的に抽出してユーザーへ提案UIを表示します。
 ---
 `;
         const activeSystemPrompt = (node.data?.systemPrompt || '') + controlInstructions;
 
         let displayReply = reply || '';
-        displayReply = displayReply.replace(/\[ACTION: CREATE_NODE\]/g, '').trim();
-        displayReply = displayReply.replace(/\[ACTION: TOGGLE_LOOP_ON\]/g, '').trim();
-        displayReply = displayReply.replace(/\[ACTION: TOGGLE_LOOP_OFF\]/g, '').trim();
+        let pendingAction = null;
 
-        if (!displayReply) displayReply = t('chat.actionCompleted') || 'Action completed.';
+        if (displayReply.includes('[ACTION: CREATE_NODE]')) {
+            pendingAction = 'CREATE_NODE';
+            displayReply = displayReply.replace(/\[ACTION: CREATE_NODE\]/g, '').trim();
+        } else if (displayReply.includes('[ACTION: TOGGLE_LOOP_ON]')) {
+            pendingAction = 'TOGGLE_LOOP_ON';
+            displayReply = displayReply.replace(/\[ACTION: TOGGLE_LOOP_ON\]/g, '').trim();
+        } else if (displayReply.includes('[ACTION: TOGGLE_LOOP_OFF]')) {
+            pendingAction = 'TOGGLE_LOOP_OFF';
+            displayReply = displayReply.replace(/\[ACTION: TOGGLE_LOOP_OFF\]/g, '').trim();
+        }
 
-        const finalHistory = [...updatedHistory, { role: 'ai', content: displayReply }];
+        if (!displayReply && pendingAction) {
+            displayReply = t('chat.actionCompleted') || 'Action completed.';
+        }
+
+        const aiMsgObj = {
+            role: 'ai',
+            content: displayReply,
+            pendingAction: pendingAction,
+            actionStatus: pendingAction ? 'pending' : null
+        };
+
+        const finalHistory = [...updatedHistory, aiMsgObj];
         setChatHistory(finalHistory);
         onUpdateNodeData(node.id, 'chatHistory', finalHistory);
-
-        // Process AI actions
-        if (reply.includes('[ACTION: CREATE_NODE]') && onBranchFromChat) {
-            onBranchFromChat(node.id);
-        }
-        if (reply.includes('[ACTION: TOGGLE_LOOP_ON]')) {
-            onUpdateNodeData(node.id, 'isLooping', true);
-        }
-        if (reply.includes('[ACTION: TOGGLE_LOOP_OFF]')) {
-            onUpdateNodeData(node.id, 'isLooping', false);
-        }
 
         // Auto title on first message
         if (chatHistory.length === 0 && spaceId && !retryContent) {
@@ -227,24 +232,37 @@ export default function ChatView({
         }
     };
 
+    const handleActionApprove = (idx) => {
+        const msg = chatHistory[idx];
+        if (!msg || !msg.pendingAction || msg.actionStatus !== 'pending') return;
 
+        // Execute action
+        if (msg.pendingAction === 'CREATE_NODE' && onBranchFromChat) {
+            onBranchFromChat(node.id, chatHistory.slice(0, idx + 1));
+            const currentBranchCount = node.data?.branchCount || 0;
+            onUpdateNodeData(node.id, 'branchCount', currentBranchCount + 1);
+        } else if (msg.pendingAction === 'TOGGLE_LOOP_ON') {
+            onUpdateNodeData(node.id, 'isLooping', true);
+        } else if (msg.pendingAction === 'TOGGLE_LOOP_OFF') {
+            onUpdateNodeData(node.id, 'isLooping', false);
+        }
 
-    if (showGoalWizard) {
-        return (
-            <GoalWizard
-                onClose={() => setShowGoalWizard(false)}
-                apiKeys={apiKeys}
-                selectedApiKey={node?.data?.selectedApiKey || 0}
-                initialHistory={node?.data?.goalHistory || []}
-                onSaveHistory={(history) => {
-                    if (node) onUpdateNodeData(node.id, 'goalHistory', history);
-                }}
-                onSetGoal={(goalText) => {
-                    if (node) onUpdateNodeData(node.id, 'systemPrompt', goalText);
-                }}
-            />
-        );
-    }
+        // Update status
+        const newHistory = [...chatHistory];
+        newHistory[idx] = { ...msg, actionStatus: 'approved' };
+        setChatHistory(newHistory);
+        onUpdateNodeData(node.id, 'chatHistory', newHistory);
+    };
+
+    const handleActionReject = (idx) => {
+        const msg = chatHistory[idx];
+        if (!msg || !msg.pendingAction || msg.actionStatus !== 'pending') return;
+
+        const newHistory = [...chatHistory];
+        newHistory[idx] = { ...msg, actionStatus: 'rejected' };
+        setChatHistory(newHistory);
+        onUpdateNodeData(node.id, 'chatHistory', newHistory);
+    };
 
     if (!node) return null;
 
@@ -364,6 +382,59 @@ export default function ChatView({
                                     {msg.content}
                                 </div>
                             </div>
+
+                            {/* Pending Action UI */}
+                            {msg.role === 'ai' && msg.pendingAction && (
+                                <div style={{
+                                    marginLeft: '2.5rem',
+                                    marginTop: '0.5rem',
+                                    padding: '0.85rem 1rem',
+                                    background: 'rgba(92, 124, 250, 0.08)',
+                                    border: '1px solid rgba(92, 124, 250, 0.25)',
+                                    borderRadius: '12px',
+                                    display: 'inline-flex',
+                                    flexDirection: 'column',
+                                    gap: '0.6rem',
+                                    maxWidth: '400px',
+                                    animation: 'fadeIn 0.3s ease'
+                                }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-main)', fontSize: '0.85rem', fontWeight: 500 }}>
+                                        <Bot size={14} color="var(--primary)" />
+                                        {msg.pendingAction === 'CREATE_NODE' ? t('chat.aiSuggestsBranch') :
+                                            msg.pendingAction === 'TOGGLE_LOOP_ON' ? t('chat.aiSuggestsLoopOn') :
+                                                'AI Suggests Action'}
+                                    </div>
+
+                                    {msg.actionStatus === 'pending' ? (
+                                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                            <button
+                                                onClick={() => handleActionApprove(idx)}
+                                                style={{
+                                                    padding: '0.4rem 0.8rem', background: 'var(--primary)', color: 'white',
+                                                    border: 'none', borderRadius: '6px', fontSize: '0.8rem', cursor: 'pointer',
+                                                    transition: 'var(--transition-smooth)', fontWeight: 500
+                                                }}>
+                                                <Check size={12} style={{ display: 'inline', marginRight: '4px', verticalAlign: '-2px' }} />
+                                                {t('chat.approve')}
+                                            </button>
+                                            <button
+                                                onClick={() => handleActionReject(idx)}
+                                                style={{
+                                                    padding: '0.4rem 0.8rem', background: 'rgba(255,100,100,0.15)', color: '#ff6b6b',
+                                                    border: '1px solid rgba(255,100,100,0.3)', borderRadius: '6px', fontSize: '0.8rem', cursor: 'pointer',
+                                                    transition: 'var(--transition-smooth)'
+                                                }}>
+                                                {t('chat.reject')}
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <div style={{ color: msg.actionStatus === 'approved' ? 'var(--action)' : 'var(--text-muted)', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                                            {msg.actionStatus === 'approved' ? <Check size={12} /> : null}
+                                            {msg.actionStatus === 'approved' ? t('chat.actionExecuted') : t('chat.actionRejected')}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
 
                             {/* Action buttons for AI messages */}
                             {msg.role === 'ai' && (

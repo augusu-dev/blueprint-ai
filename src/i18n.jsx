@@ -86,6 +86,12 @@ const translations = {
         'chat.switchToNodes': 'ノードビュー',
         'chat.switchToChat': 'チャットに戻る',
         'chat.actionCompleted': '指示に従い、システムがアクションを実行しました。',
+        'chat.aiSuggestsBranch': 'AIがノードの追加(分岐)を提案しています',
+        'chat.aiSuggestsLoopOn': 'AIが自己ループのオンを提案しています',
+        'chat.approve': '承認して実行',
+        'chat.reject': '拒否する',
+        'chat.actionExecuted': 'アクションを実行しました',
+        'chat.actionRejected': 'アクションを破棄しました',
 
         // Goal Wizard
         'goal.title': '🎯 目標を決める',
@@ -189,6 +195,12 @@ const translations = {
         'chat.switchToNodes': 'Node View',
         'chat.switchToChat': 'Back to Chat',
         'chat.actionCompleted': 'The system has executed the requested actions.',
+        'chat.aiSuggestsBranch': 'AI suggests branching a new node',
+        'chat.aiSuggestsLoopOn': 'AI suggests enabling self-loop',
+        'chat.approve': 'Approve & Execute',
+        'chat.reject': 'Reject',
+        'chat.actionExecuted': 'Action executed',
+        'chat.actionRejected': 'Action rejected',
 
         'goal.title': '🎯 Set Goal',
         'goal.back': 'Back to Chat',
@@ -289,6 +301,12 @@ const translations = {
         'chat.switchToNodes': '节点视图',
         'chat.switchToChat': '返回聊天',
         'chat.actionCompleted': '系统已执行请求的操作。',
+        'chat.aiSuggestsBranch': 'AI 建议添加新节点 (分支)',
+        'chat.aiSuggestsLoopOn': 'AI 建议开启自循环',
+        'chat.approve': '批准并执行',
+        'chat.reject': '拒绝',
+        'chat.actionExecuted': '操作已执行',
+        'chat.actionRejected': '操作已拒绝',
 
         'goal.title': '🎯 设定目标',
         'goal.back': '返回聊天',
