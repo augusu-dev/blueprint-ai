@@ -4,7 +4,7 @@ import { supabase } from './lib/supabase';
 import { Plus, X, Search, MessageSquare, Trash2, Settings } from 'lucide-react';
 import { useLanguage } from './i18n';
 
-export default function Sidebar({ isOpen, onClose }) {
+export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
     const { t } = useLanguage();
     const navigate = useNavigate();
     const { id: currentSpaceId } = useParams();
