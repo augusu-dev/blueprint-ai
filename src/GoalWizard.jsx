@@ -314,7 +314,7 @@ export default function GoalWizard({ onClose, apiKeys, selectedApiKey, onSetGoal
                             {msg.role === 'user' ? '👤' : '🎯'}
                         </div>
                         <div style={{
-                            background: msg.role === 'user' ? 'linear-gradient(135deg, var(--primary) 0%, #748ffc 100%)' : 'rgba(20, 23, 30, 0.45)',
+                            background: msg.role === 'user' ? 'linear-gradient(135deg, var(--primary) 0%, #748ffc 100%)' : 'var(--panel-bg)',
                             color: msg.role === 'user' ? 'white' : 'var(--text-main)',
                             padding: '0.8rem 1.25rem',
                             borderRadius: msg.role === 'user' ? '20px 20px 4px 20px' : '20px 20px 20px 4px',
@@ -341,7 +341,7 @@ export default function GoalWizard({ onClose, apiKeys, selectedApiKey, onSetGoal
             </div>
 
             <div style={{ padding: '1.25rem 2rem', borderTop: '1px solid var(--panel-border)' }}>
-                <div style={{ display: 'flex', background: 'rgba(20, 23, 30, 0.65)', backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)', border: '1px solid var(--panel-border)', boxShadow: '0 8px 32px rgba(0,0,0,0.3)', borderRadius: '28px', overflow: 'hidden', padding: '0.35rem 0.35rem 0.35rem 1.25rem', alignItems: 'flex-end', maxWidth: '780px', margin: '0 auto', transition: 'var(--transition-smooth)', minHeight: '56px' }}>
+                <div style={{ display: 'flex', background: 'var(--panel-bg)', backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)', border: '1px solid var(--panel-border)', boxShadow: '0 8px 32px rgba(0,0,0,0.3)', borderRadius: '28px', overflow: 'hidden', padding: '0.35rem 0.35rem 0.35rem 1.25rem', alignItems: 'flex-end', maxWidth: '780px', margin: '0 auto', transition: 'var(--transition-smooth)', minHeight: '56px' }}>
                     <textarea value={input} onChange={e => setInput(e.target.value)}
                         onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
                         placeholder={t('goal.placeholder')}

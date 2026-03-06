@@ -99,7 +99,7 @@ export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
             <div style={{
                 position: 'fixed', top: 0, left: 0, bottom: 0,
                 width: isOpen ? '240px' : '0',
-                background: 'rgba(11, 13, 17, 0.75)',
+                background: 'var(--panel-bg)',
                 backdropFilter: 'blur(30px)',
                 WebkitBackdropFilter: 'blur(30px)',
                 borderRight: isOpen ? '1px solid var(--panel-border)' : 'none',
@@ -187,16 +187,6 @@ export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
 
                 {/* Bottom section */}
                 <div style={{ padding: '0.5rem 0.65rem', borderTop: '1px solid var(--panel-border)', minWidth: '220px', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                    <button onClick={() => { document.querySelector('.sidebar-drawer input, div[style*="220px"] input')?.focus(); }}
-                        style={{
-                            width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--panel-border)',
-                            padding: '0.4rem', borderRadius: '6px', fontSize: '0.75rem', color: 'var(--text-muted)',
-                            cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            gap: '0.3rem', transition: 'all 0.2s', fontFamily: 'inherit'
-                        }}>
-                        <Search size={11} /> {t('sidebar.searchBtn')}
-                    </button>
-
                     {onOpenSettings && (
                         <button onClick={onOpenSettings}
                             style={{

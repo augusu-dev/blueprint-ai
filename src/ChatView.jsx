@@ -350,7 +350,7 @@ export default function ChatView({
                                     {msg.role === 'user' ? <User size={14} color="white" /> : <Bot size={14} />}
                                 </div>
                                 <div style={{
-                                    background: msg.role === 'user' ? 'linear-gradient(135deg, var(--primary) 0%, #748ffc 100%)' : 'rgba(20, 23, 30, 0.45)',
+                                    background: msg.role === 'user' ? 'linear-gradient(135deg, var(--primary) 0%, #748ffc 100%)' : 'var(--panel-bg)',
                                     color: msg.role === 'user' ? 'white' : 'var(--text-main)',
                                     padding: '0.8rem 1.25rem',
                                     borderRadius: msg.role === 'user' ? '20px 20px 4px 20px' : '20px 20px 20px 4px',
@@ -437,7 +437,7 @@ export default function ChatView({
             <div style={{ padding: '1.25rem 2rem', borderTop: '1px solid var(--panel-border)' }}>
                 <div style={{
                     display: 'flex',
-                    background: 'rgba(20, 23, 30, 0.65)',
+                    background: 'var(--panel-bg)',
                     backdropFilter: 'blur(24px)',
                     WebkitBackdropFilter: 'blur(24px)',
                     border: '1px solid var(--panel-border)',
