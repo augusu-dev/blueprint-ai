@@ -40,7 +40,7 @@ const initialNodes = [
 ];
 
 const initialEdges = [
-    { id: 'e-goal-1', source: 'goal-1', sourceHandle: 'goal', target: '1', targetHandle: 'left', animated: true, type: 'deleteEdge' }
+    { id: 'e-goal-1', source: 'goal-1', sourceHandle: 'goal', target: '1', animated: true, type: 'deleteEdge' }
 ];
 
 const nodeTypes = {

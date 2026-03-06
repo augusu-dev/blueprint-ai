@@ -9,14 +9,20 @@ export default function Home() {
     const { t } = useLanguage();
 
     const handleNewSpace = async () => {
-        const initNodes = [{ id: '1', type: 'sequenceNode', position: { x: 100, y: 100 }, data: { isStarter: true, dir: 'LR', prompt: '' } }];
+        const initNodes = [
+            { id: 'goal-1', type: 'goalNode', position: { x: -320, y: 120 }, data: {} },
+            { id: '1', type: 'sequenceNode', position: { x: 100, y: 100 }, data: { isStarter: true, dir: 'LR', prompt: '' } }
+        ];
+        const initEdges = [
+            { id: 'e-goal-1', source: 'goal-1', sourceHandle: 'goal', target: '1', animated: true, type: 'deleteEdge' }
+        ];
         try {
             if (supabase) {
                 const { data: { user } } = await supabase.auth.getUser();
                 if (user) {
                     const { data, error } = await supabase
                         .from('spaces')
-                        .insert([{ user_id: user.id, title: t('editor.untitled'), nodes: initNodes, edges: [] }])
+                        .insert([{ user_id: user.id, title: t('editor.untitled'), nodes: initNodes, edges: initEdges }])
                         .select()
                         .single();
 
@@ -32,7 +38,7 @@ export default function Home() {
 
         // Fallback for local / unauthenticated
         const newId = crypto.randomUUID();
-        const spaceData = { title: t('editor.untitled'), nodes: initNodes, edges: [], updated_at: new Date().toISOString() };
+        const spaceData = { title: t('editor.untitled'), nodes: initNodes, edges: initEdges, updated_at: new Date().toISOString() };
         localStorage.setItem(`blueprint_space_${newId}`, JSON.stringify(spaceData));
         navigate(`/space/${newId}`);
     };
