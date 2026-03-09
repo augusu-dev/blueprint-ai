@@ -17,11 +17,22 @@ export default function Home() {
             if (supabase) {
                 const { data: { user } } = await supabase.auth.getUser();
                 if (user) {
-                    const { data, error } = await supabase
+                    const basePayload = { user_id: user.id, title: spaceData.title, nodes: spaceData.nodes, edges: spaceData.edges };
+                    let insertResult = await supabase
                         .from('spaces')
-                        .insert([{ user_id: user.id, title: spaceData.title, nodes: spaceData.nodes, edges: spaceData.edges }])
+                        .insert([{ ...basePayload, map_state: spaceData.map_state }])
                         .select()
                         .single();
+
+                    if (insertResult.error) {
+                        insertResult = await supabase
+                            .from('spaces')
+                            .insert([basePayload])
+                            .select()
+                            .single();
+                    }
+
+                    const { data, error } = insertResult;
 
                     if (!error && data) {
                         localStorage.setItem(`blueprint_space_${data.id}`, JSON.stringify({

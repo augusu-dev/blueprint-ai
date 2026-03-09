@@ -1,15 +1,34 @@
-function createTileId(x, y) {
+export const MAP_WORLD_SIZE = 100;
+export const MAP_CENTER_INDEX = MAP_WORLD_SIZE / 2;
+export const MAP_HUT_TILES = [
+    { x: MAP_CENTER_INDEX - 1, y: MAP_CENTER_INDEX - 1 },
+    { x: MAP_CENTER_INDEX, y: MAP_CENTER_INDEX - 1 },
+    { x: MAP_CENTER_INDEX - 1, y: MAP_CENTER_INDEX },
+    { x: MAP_CENTER_INDEX, y: MAP_CENTER_INDEX },
+];
+
+export function createTileId(x, y) {
     return `${x},${y}`;
 }
 
 function createDefaultRevealedTiles() {
-    return [
-        createTileId(3, 3),
-        createTileId(3, 2),
-        createTileId(3, 4),
-        createTileId(2, 3),
-        createTileId(4, 3),
-    ];
+    const revealed = new Set();
+
+    for (let y = MAP_CENTER_INDEX - 7; y <= MAP_CENTER_INDEX + 6; y += 1) {
+        for (let x = MAP_CENTER_INDEX - 7; x <= MAP_CENTER_INDEX + 6; x += 1) {
+            revealed.add(createTileId(x, y));
+        }
+    }
+
+    return [...revealed];
+}
+
+function isFiniteCoordinate(value) {
+    return typeof value === 'number' && Number.isFinite(value);
+}
+
+export function clampWorldCoordinate(value) {
+    return Math.max(0, Math.min(MAP_WORLD_SIZE - 0.001, value));
 }
 
 export function createInitialNodes() {
@@ -37,7 +56,8 @@ export function createInitialEdges() {
 
 export function createDefaultMapState() {
     return {
-        player: { x: 3, y: 3 },
+        player: { x: MAP_CENTER_INDEX + 0.48, y: MAP_CENTER_INDEX + 2.7 },
+        camera: { x: MAP_CENTER_INDEX, y: MAP_CENTER_INDEX },
         revealedTileIds: createDefaultRevealedTiles(),
         activeQuestIds: ['goal-quest', 'chat-quest', 'graph-quest', 'explorer-quest'],
         completedQuestIds: [],
@@ -54,8 +74,12 @@ export function normalizeMapState(mapState) {
 
     return {
         player: {
-            x: Number.isInteger(mapState?.player?.x) ? mapState.player.x : defaults.player.x,
-            y: Number.isInteger(mapState?.player?.y) ? mapState.player.y : defaults.player.y,
+            x: isFiniteCoordinate(mapState?.player?.x) ? clampWorldCoordinate(mapState.player.x) : defaults.player.x,
+            y: isFiniteCoordinate(mapState?.player?.y) ? clampWorldCoordinate(mapState.player.y) : defaults.player.y,
+        },
+        camera: {
+            x: isFiniteCoordinate(mapState?.camera?.x) ? clampWorldCoordinate(mapState.camera.x) : defaults.camera.x,
+            y: isFiniteCoordinate(mapState?.camera?.y) ? clampWorldCoordinate(mapState.camera.y) : defaults.camera.y,
         },
         revealedTileIds: Array.isArray(mapState?.revealedTileIds) && mapState.revealedTileIds.length > 0
             ? mapState.revealedTileIds

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { supabase } from './lib/supabase';
 import { Plus, X, Search, MessageSquare, Trash2, Settings } from 'lucide-react';
@@ -15,7 +15,8 @@ export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
     const [searchQuery, setSearchQuery] = useState('');
     const currentMode = isSpaceMode(mode) ? mode : DEFAULT_SPACE_MODE;
 
-    const fetchSpaces = async () => {
+    const fetchSpaces = useCallback(async () => {
+        setLoading(true);
         let allSpaces = [];
         for (let i = 0; i < localStorage.length; i++) {
             const key = localStorage.key(i);
@@ -24,7 +25,9 @@ export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
                     const spaceData = JSON.parse(localStorage.getItem(key));
                     const id = key.replace('blueprint_space_', '');
                     allSpaces.push({ id, title: spaceData.title || t('editor.untitled'), updated_at: spaceData.updated_at || new Date().toISOString() });
-                } catch (e) { }
+                } catch {
+                    // Ignore malformed local snapshots.
+                }
             }
         }
 
@@ -38,23 +41,29 @@ export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
                         else allSpaces.push(remoteSpace);
                     });
                 }
-            } catch (e) { }
+            } catch {
+                // Ignore remote fetch failures and keep local data.
+            }
         }
 
         allSpaces.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
         setSpaces(allSpaces);
         setLoading(false);
-    };
+    }, [t]);
 
     useEffect(() => {
-        if (isOpen) fetchSpaces();
-    }, [isOpen]);
+        if (!isOpen) return undefined;
+        const timer = window.setTimeout(() => {
+            fetchSpaces();
+        }, 0);
+        return () => window.clearTimeout(timer);
+    }, [fetchSpaces, isOpen]);
 
     useEffect(() => {
         const handleTitleUpdate = () => fetchSpaces();
         window.addEventListener('spaceTitleUpdated', handleTitleUpdate);
         return () => window.removeEventListener('spaceTitleUpdated', handleTitleUpdate);
-    }, []);
+    }, [fetchSpaces]);
 
     const handleNewSpace = async () => {
         const spaceData = createSpaceData(t('editor.untitled'));
@@ -62,7 +71,14 @@ export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
             if (supabase) {
                 const { data: { user } } = await supabase.auth.getUser();
                 if (user) {
-                    const { data, error } = await supabase.from('spaces').insert({ user_id: user.id, title: spaceData.title, nodes: spaceData.nodes, edges: spaceData.edges }).select().single();
+                    const basePayload = { user_id: user.id, title: spaceData.title, nodes: spaceData.nodes, edges: spaceData.edges };
+                    let insertResult = await supabase.from('spaces').insert({ ...basePayload, map_state: spaceData.map_state }).select().single();
+
+                    if (insertResult.error) {
+                        insertResult = await supabase.from('spaces').insert(basePayload).select().single();
+                    }
+
+                    const { data, error } = insertResult;
                     if (!error && data) {
                         localStorage.setItem(`blueprint_space_${data.id}`, JSON.stringify({
                             ...spaceData,
@@ -75,7 +91,9 @@ export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
                     }
                 }
             }
-        } catch (err) { }
+        } catch {
+            // Fall back to local-only space creation.
+        }
 
         const newId = crypto.randomUUID();
         localStorage.setItem(`blueprint_space_${newId}`, JSON.stringify(spaceData));
@@ -89,7 +107,9 @@ export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
 
         localStorage.removeItem(`blueprint_space_${spaceId}`);
         if (supabase) {
-            try { await supabase.from('spaces').delete().eq('id', spaceId); } catch (err) { }
+            try { await supabase.from('spaces').delete().eq('id', spaceId); } catch {
+                // Ignore remote delete failures after local removal.
+            }
         }
 
         if (spaceId === currentSpaceId) navigate('/');

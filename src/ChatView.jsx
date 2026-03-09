@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Bot, User, Copy, Check, RefreshCw, GitBranch, ExternalLink, ChevronLeft, ChevronRight, Target } from 'lucide-react';
+import { Send, Bot, User, Copy, Check, RefreshCw, GitBranch, ExternalLink, ChevronLeft, ChevronRight, Target, Sparkles } from 'lucide-react';
 import { useLanguage } from './i18n';
 import GoalWizard from './GoalWizard';
 
@@ -18,13 +18,19 @@ export default function ChatView({
     const [copiedIdx, setCopiedIdx] = useState(null);
     const [activeBranchView, setActiveBranchView] = useState(0);
     const [showGoalWizard, setShowGoalWizard] = useState(false);
+    const [selectionDraft, setSelectionDraft] = useState(null);
+    const [activeExplanation, setActiveExplanation] = useState(null);
+    const [isExplaining, setIsExplaining] = useState(false);
     const messagesEndRef = useRef(null);
+    const messageContentRefs = useRef({});
 
     useEffect(() => {
         if (node) {
             setChatHistory(node.data?.chatHistory || []);
+            setSelectionDraft(null);
+            setActiveExplanation(null);
         }
-    }, [node?.id, node?.data?.chatHistory?.length]);
+    }, [node]);
 
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -86,6 +92,133 @@ export default function ChatView({
             }
         } catch (err) {
             return `Error: ${err.message}`;
+        }
+    };
+
+    const getInlineExplanations = (message) => {
+        if (!Array.isArray(message?.inlineExplanations)) return [];
+        return [...message.inlineExplanations].sort((a, b) => a.start - b.start);
+    };
+
+    const persistChatHistory = (nextHistory) => {
+        setChatHistory(nextHistory);
+        if (node) {
+            onUpdateNodeData(node.id, 'chatHistory', nextHistory);
+        }
+    };
+
+    const truncateInlineExplanation = (text) => {
+        const normalized = (text || '').replace(/\s+/g, ' ').trim();
+        if (normalized.length <= 300) return normalized;
+        return `${normalized.slice(0, 297)}...`;
+    };
+
+    const openExplanation = (messageIndex, explanationId) => {
+        setSelectionDraft(null);
+        setActiveExplanation({ messageIndex, explanationId });
+    };
+
+    const shiftExplanation = (messageIndex, direction) => {
+        const explanations = getInlineExplanations(chatHistory[messageIndex]);
+        if (explanations.length === 0) return;
+
+        const activeIndex = explanations.findIndex((item) => item.id === activeExplanation?.explanationId);
+        const fallbackIndex = activeIndex >= 0 ? activeIndex : 0;
+        const nextIndex = Math.max(0, Math.min(explanations.length - 1, fallbackIndex + direction));
+        setActiveExplanation({ messageIndex, explanationId: explanations[nextIndex].id });
+    };
+
+    const handleTextSelection = (messageIndex) => {
+        const container = messageContentRefs.current[messageIndex];
+        const selection = window.getSelection();
+
+        if (!container || !selection || selection.rangeCount === 0 || selection.isCollapsed) {
+            setSelectionDraft(null);
+            return;
+        }
+
+        const range = selection.getRangeAt(0);
+        if (!container.contains(range.commonAncestorContainer)) {
+            setSelectionDraft(null);
+            return;
+        }
+
+        const rawText = range.toString();
+        const selectedText = rawText.trim();
+        if (!selectedText) {
+            setSelectionDraft(null);
+            return;
+        }
+
+        const prefixRange = range.cloneRange();
+        prefixRange.selectNodeContents(container);
+        prefixRange.setEnd(range.startContainer, range.startOffset);
+
+        const leadingWhitespace = rawText.length - rawText.trimStart().length;
+        const trailingWhitespace = rawText.length - rawText.trimEnd().length;
+        const start = prefixRange.toString().length + leadingWhitespace;
+        const end = start + rawText.length - leadingWhitespace - trailingWhitespace;
+
+        const existing = getInlineExplanations(chatHistory[messageIndex]).find((item) => item.start === start && item.end === end);
+
+        if (existing) {
+            selection.removeAllRanges();
+            openExplanation(messageIndex, existing.id);
+            return;
+        }
+
+        setActiveExplanation(null);
+        setSelectionDraft({ messageIndex, start, end, text: selectedText });
+    };
+
+    const handleCreateExplanation = async () => {
+        if (!selectionDraft || isExplaining) return;
+
+        const sourceMessage = chatHistory[selectionDraft.messageIndex];
+        if (!sourceMessage) return;
+
+        setIsExplaining(true);
+        try {
+            const before = sourceMessage.content.slice(Math.max(0, selectionDraft.start - 120), selectionDraft.start);
+            const after = sourceMessage.content.slice(selectionDraft.end, Math.min(sourceMessage.content.length, selectionDraft.end + 120));
+            const prompt = [
+                '次の文章の選択箇所について、日本語でやさしく説明してください。',
+                '条件:',
+                '- 300字以内',
+                '- 箇条書きにしない',
+                '- その場ですぐ理解できる短さにする',
+                '',
+                `選択箇所:「${selectionDraft.text}」`,
+                '',
+                `前後文:「${before}<<${selectionDraft.text}>>${after}」`,
+            ].join('\n');
+
+            const explanationText = truncateInlineExplanation(await callAI(
+                [{ role: 'user', content: prompt }],
+                'あなたは学習の補助役です。選択された一部分だけを、必ず300字以内の日本語で短く説明してください。余計な前置きは不要です。'
+            ));
+
+            const explanation = {
+                id: crypto.randomUUID(),
+                start: selectionDraft.start,
+                end: selectionDraft.end,
+                text: selectionDraft.text,
+                summary: explanationText,
+            };
+
+            const nextHistory = [...chatHistory];
+            const targetMessage = nextHistory[selectionDraft.messageIndex];
+            const currentExplanations = getInlineExplanations(targetMessage);
+            nextHistory[selectionDraft.messageIndex] = {
+                ...targetMessage,
+                inlineExplanations: [...currentExplanations, explanation],
+            };
+
+            persistChatHistory(nextHistory);
+            setActiveExplanation({ messageIndex: selectionDraft.messageIndex, explanationId: explanation.id });
+            setSelectionDraft(null);
+        } finally {
+            setIsExplaining(false);
         }
     };
 
@@ -266,6 +399,53 @@ export default function ChatView({
         onUpdateNodeData(node.id, 'chatHistory', newHistory);
     };
 
+    const renderMessageContent = (message, messageIndex) => {
+        if (message.role !== 'ai') return message.content;
+
+        const explanations = getInlineExplanations(message);
+        if (explanations.length === 0) return message.content;
+
+        const segments = [];
+        let cursor = 0;
+
+        explanations.forEach((item) => {
+            if (item.start > cursor) {
+                segments.push(
+                    <span key={`${item.id}-text`}>
+                        {message.content.slice(cursor, item.start)}
+                    </span>
+                );
+            }
+
+            segments.push(
+                <span
+                    key={item.id}
+                    onClick={() => openExplanation(messageIndex, item.id)}
+                    style={{
+                        textDecoration: 'underline dotted rgba(126, 216, 255, 0.92)',
+                        textDecorationThickness: '2px',
+                        textUnderlineOffset: '5px',
+                        cursor: 'pointer',
+                    }}
+                >
+                    {message.content.slice(item.start, item.end)}
+                </span>
+            );
+
+            cursor = item.end;
+        });
+
+        if (cursor < message.content.length) {
+            segments.push(
+                <span key={`${messageIndex}-tail`}>
+                    {message.content.slice(cursor)}
+                </span>
+            );
+        }
+
+        return segments;
+    };
+
     if (!node) {
         return (
             <div style={{
@@ -387,41 +567,141 @@ export default function ChatView({
                         <p style={{ fontSize: '1rem', fontWeight: 400 }}>{t('chat.empty')}</p>
                     </div>
                 ) : (
-                    chatHistory.map((msg, idx) => (
-                        <div key={idx} className="chat-msg-wrapper" style={{
-                            display: 'flex',
-                            flexDirection: 'column',
-                            alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start',
-                            animation: 'fadeIn 0.2s ease'
-                        }}>
-                            <div style={{
+                    chatHistory.map((msg, idx) => {
+                        const explanations = getInlineExplanations(msg);
+                        const activeExplanationIndex = explanations.findIndex((item) => item.id === activeExplanation?.explanationId);
+                        const currentExplanation = activeExplanation?.messageIndex === idx && activeExplanationIndex >= 0
+                            ? explanations[activeExplanationIndex]
+                            : null;
+
+                        return (
+                            <div key={idx} className="chat-msg-wrapper" style={{
                                 display: 'flex',
-                                gap: '0.65rem',
-                                flexDirection: msg.role === 'user' ? 'row-reverse' : 'row',
-                                maxWidth: '85%'
+                                flexDirection: 'column',
+                                alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start',
+                                animation: 'fadeIn 0.2s ease'
                             }}>
                                 <div style={{
-                                    width: '30px', height: '30px', borderRadius: '50%', flexShrink: 0,
-                                    background: msg.role === 'user' ? 'var(--primary)' : 'rgba(255,255,255,0.06)',
-                                    display: 'flex', alignItems: 'center', justifyContent: 'center'
+                                    display: 'flex',
+                                    gap: '0.65rem',
+                                    flexDirection: msg.role === 'user' ? 'row-reverse' : 'row',
+                                    maxWidth: '85%'
                                 }}>
-                                    {msg.role === 'user' ? <User size={14} color="white" /> : <Bot size={14} />}
+                                    <div style={{
+                                        width: '30px', height: '30px', borderRadius: '50%', flexShrink: 0,
+                                        background: msg.role === 'user' ? 'var(--primary)' : 'rgba(255,255,255,0.06)',
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center'
+                                    }}>
+                                        {msg.role === 'user' ? <User size={14} color="white" /> : <Bot size={14} />}
+                                    </div>
+                                    <div
+                                        ref={(element) => {
+                                            if (element) messageContentRefs.current[idx] = element;
+                                            else delete messageContentRefs.current[idx];
+                                        }}
+                                        onMouseUp={() => {
+                                            if (msg.role === 'ai') {
+                                                setTimeout(() => handleTextSelection(idx), 0);
+                                            }
+                                        }}
+                                        onTouchEnd={() => {
+                                            if (msg.role === 'ai') {
+                                                setTimeout(() => handleTextSelection(idx), 0);
+                                            }
+                                        }}
+                                        style={{
+                                            background: msg.role === 'user' ? 'linear-gradient(135deg, var(--primary) 0%, #748ffc 100%)' : 'var(--panel-bg)',
+                                            color: msg.role === 'user' ? 'white' : 'var(--text-main)',
+                                            padding: '0.8rem 1.25rem',
+                                            borderRadius: msg.role === 'user' ? '20px 20px 4px 20px' : '20px 20px 20px 4px',
+                                            border: msg.role === 'ai' ? '1px solid var(--panel-border)' : '1px solid rgba(255,255,255,0.1)',
+                                            boxShadow: msg.role === 'user' ? '0 4px 15px rgba(92, 124, 250, 0.25)' : 'var(--shadow-sm)',
+                                            wordBreak: 'break-word', whiteSpace: 'pre-wrap',
+                                            fontSize: '0.92rem', lineHeight: 1.75,
+                                            backdropFilter: msg.role === 'ai' ? 'blur(20px)' : 'none',
+                                            WebkitBackdropFilter: msg.role === 'ai' ? 'blur(20px)' : 'none'
+                                        }}
+                                    >
+                                        {renderMessageContent(msg, idx)}
+                                    </div>
                                 </div>
-                                <div style={{
-                                    background: msg.role === 'user' ? 'linear-gradient(135deg, var(--primary) 0%, #748ffc 100%)' : 'var(--panel-bg)',
-                                    color: msg.role === 'user' ? 'white' : 'var(--text-main)',
-                                    padding: '0.8rem 1.25rem',
-                                    borderRadius: msg.role === 'user' ? '20px 20px 4px 20px' : '20px 20px 20px 4px',
-                                    border: msg.role === 'ai' ? '1px solid var(--panel-border)' : '1px solid rgba(255,255,255,0.1)',
-                                    boxShadow: msg.role === 'user' ? '0 4px 15px rgba(92, 124, 250, 0.25)' : 'var(--shadow-sm)',
-                                    wordBreak: 'break-word', whiteSpace: 'pre-wrap',
-                                    fontSize: '0.92rem', lineHeight: 1.75,
-                                    backdropFilter: msg.role === 'ai' ? 'blur(20px)' : 'none',
-                                    WebkitBackdropFilter: msg.role === 'ai' ? 'blur(20px)' : 'none'
-                                }}>
-                                    {msg.content}
-                                </div>
-                            </div>
+
+                                {selectionDraft?.messageIndex === idx && (
+                                    <div style={{
+                                        marginLeft: '2.5rem',
+                                        marginTop: '0.5rem',
+                                        padding: '0.75rem 0.9rem',
+                                        borderRadius: '14px',
+                                        background: 'rgba(126, 216, 255, 0.08)',
+                                        border: '1px solid rgba(126, 216, 255, 0.2)',
+                                        maxWidth: '440px',
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        gap: '0.65rem'
+                                    }}>
+                                        <div style={{ fontSize: '0.78rem', color: 'var(--text-main)', lineHeight: 1.6 }}>
+                                            <span style={{ color: '#7ed8ff', fontWeight: 600 }}>選択中:</span> 「{selectionDraft.text}」
+                                        </div>
+                                        <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
+                                            <button className="chat-action-btn" onClick={handleCreateExplanation} disabled={isExplaining}>
+                                                <Sparkles size={12} /> {isExplaining ? '説明中...' : '説明する'}
+                                            </button>
+                                            <button className="chat-action-btn" onClick={() => setSelectionDraft(null)}>
+                                                閉じる
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {currentExplanation && (
+                                    <div style={{
+                                        marginLeft: '2.5rem',
+                                        marginTop: '0.5rem',
+                                        padding: '0.85rem 1rem',
+                                        background: 'rgba(92, 124, 250, 0.08)',
+                                        border: '1px solid rgba(92, 124, 250, 0.25)',
+                                        borderRadius: '12px',
+                                        display: 'inline-flex',
+                                        flexDirection: 'column',
+                                        gap: '0.65rem',
+                                        maxWidth: '460px',
+                                        animation: 'fadeIn 0.2s ease'
+                                    }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.7rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                                            <div style={{ fontSize: '0.84rem', color: 'var(--text-main)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                                                <Sparkles size={13} color="#7ed8ff" />
+                                                この部分の説明
+                                            </div>
+                                            {explanations.length > 1 && (
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                                                    <button className="chat-action-btn" disabled={activeExplanationIndex <= 0} onClick={() => shiftExplanation(idx, -1)} style={{ padding: '0.2rem' }}>
+                                                        <ChevronLeft size={12} />
+                                                    </button>
+                                                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', minWidth: '28px', textAlign: 'center' }}>
+                                                        {activeExplanationIndex + 1}/{explanations.length}
+                                                    </span>
+                                                    <button className="chat-action-btn" disabled={activeExplanationIndex >= explanations.length - 1} onClick={() => shiftExplanation(idx, 1)} style={{ padding: '0.2rem' }}>
+                                                        <ChevronRight size={12} />
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </div>
+                                        <div style={{ fontSize: '0.78rem', color: '#8fdfff', lineHeight: 1.6 }}>
+                                            「{currentExplanation.text}」
+                                        </div>
+                                        <div style={{ fontSize: '0.82rem', color: 'var(--text-main)', lineHeight: 1.7 }}>
+                                            {currentExplanation.summary}
+                                        </div>
+                                        <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
+                                            <button className="chat-action-btn" onClick={() => openExplanation(idx, currentExplanation.id)}>
+                                                もう一度
+                                            </button>
+                                            <button className="chat-action-btn" onClick={() => setActiveExplanation(null)}>
+                                                閉じる
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
 
                             {/* Pending Action UI */}
                             {msg.role === 'ai' && msg.pendingAction && (
@@ -528,8 +808,9 @@ export default function ChatView({
                                     )}
                                 </div>
                             )}
-                        </div>
-                    ))
+                            </div>
+                        );
+                    })
                 )}
                 {isLoading && (
                     <div style={{ display: 'flex', gap: '0.65rem', animation: 'pulse 1.5s infinite' }}>
