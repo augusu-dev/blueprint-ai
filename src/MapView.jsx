@@ -20,11 +20,7 @@ import {
     HUT_CENTER,
     KEYBOARD_SPEED,
     LANDMARKS,
-    TILE_DEPTH,
-    TILE_HEIGHT_BASE,
-    TILE_WIDTH_BASE,
     TREE_CLUSTERS,
-    VIEW_RADIUS,
     clampTileIndex,
     collectRevealedTiles,
     deriveQuests,
@@ -32,33 +28,58 @@ import {
     findLandmarkByQuestId,
     getTileCenter,
     getTileKind,
-    getTileLabel,
-    getTilePalette,
     isBlockedTile,
     moveWithCollision,
-    worldToScreen,
 } from './lib/mapWorld';
 import { MAP_WORLD_SIZE, clampWorldCoordinate, createTileId, normalizeMapState } from './lib/space';
 
 const LANDMARK_DISPLAY = {
-    'goal-quest': { label: 'Goal Tower', icon: Flag },
-    'chat-quest': { label: 'Dialogue Plaza', icon: MessageSquare },
-    'graph-quest': { label: 'Graph Studio', icon: GitFork },
-    'explorer-quest': { label: 'Scout Spring', icon: Compass },
+    'goal-quest': { label: 'ゴール塔', icon: Flag },
+    'chat-quest': { label: 'ダイアログ広場', icon: MessageSquare },
+    'graph-quest': { label: 'グラフ工房', icon: GitFork },
+    'explorer-quest': { label: '探索の泉', icon: Compass },
+};
+
+const TILE_LABELS = {
+    courtyard: '拠点',
+    path: '道',
+    water: '水辺',
+    tower: 'ゴール塔',
+    market: 'ダイアログ広場',
+    forge: 'グラフ工房',
+    fountain: '探索の泉',
+    'grass-light': '明るい砂地',
+    'grass-dark': '岩場',
+    meadow: '砂丘',
+    grass: '砂地',
+};
+
+const TOP_DOWN_PALETTES = {
+    courtyard: { top: 'linear-gradient(180deg, #f1d5ab 0%, #e7bc86 100%)', edge: '#c7945d', chip: '#fff7dc' },
+    path: { top: 'linear-gradient(180deg, #f5ead2 0%, #e7d0aa 100%)', edge: '#c6a67a', chip: '#fff8ea' },
+    water: { top: 'linear-gradient(180deg, #71bff4 0%, #458ed7 100%)', edge: '#2d5fa3', chip: '#d8f3ff' },
+    tower: { top: 'linear-gradient(180deg, #efbe87 0%, #de985f 100%)', edge: '#b86f3f', chip: '#ffe07a' },
+    market: { top: 'linear-gradient(180deg, #f0c18e 0%, #dd9a67 100%)', edge: '#b77246', chip: '#ffcfbf' },
+    forge: { top: 'linear-gradient(180deg, #e6b28f 0%, #ce875f 100%)', edge: '#945c4a', chip: '#e2d5ff' },
+    fountain: { top: 'linear-gradient(180deg, #e8bf93 0%, #d29260 100%)', edge: '#a36742', chip: '#c7f1ff' },
+    meadow: { top: 'linear-gradient(180deg, #e6b57f 0%, #d99863 100%)', edge: '#b47348', chip: '#f9deb8' },
+    'grass-light': { top: 'linear-gradient(180deg, #efbd83 0%, #e1a267 100%)', edge: '#ba7649', chip: '#ffe7c3' },
+    'grass-dark': { top: 'linear-gradient(180deg, #cb7f4c 0%, #aa6038 100%)', edge: '#844529', chip: '#f1c197' },
+    grass: { top: 'linear-gradient(180deg, #e5ab73 0%, #d38e58 100%)', edge: '#ac683d', chip: '#f7d9af' },
 };
 
 const dockButtonStyle = {
     width: '42px',
     height: '42px',
     borderRadius: '14px',
-    border: '1px solid rgba(17, 52, 30, 0.14)',
-    background: 'rgba(23, 37, 28, 0.84)',
-    color: '#f9fff6',
+    border: '1px solid rgba(91, 51, 28, 0.16)',
+    background: 'rgba(44, 28, 18, 0.82)',
+    color: '#fff8ef',
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
     cursor: 'pointer',
-    boxShadow: '0 10px 24px rgba(10, 18, 14, 0.18)',
+    boxShadow: '0 10px 24px rgba(59, 28, 10, 0.16)',
     backdropFilter: 'blur(10px)',
     WebkitBackdropFilter: 'blur(10px)',
 };
@@ -67,17 +88,21 @@ const dpadButtonStyle = {
     width: '40px',
     height: '40px',
     borderRadius: '12px',
-    border: '1px solid rgba(17, 52, 30, 0.14)',
-    background: 'rgba(23, 37, 28, 0.84)',
-    color: '#f9fff6',
+    border: '1px solid rgba(91, 51, 28, 0.16)',
+    background: 'rgba(44, 28, 18, 0.82)',
+    color: '#fff8ef',
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
     cursor: 'pointer',
-    boxShadow: '0 10px 24px rgba(10, 18, 14, 0.18)',
+    boxShadow: '0 10px 24px rgba(59, 28, 10, 0.16)',
     backdropFilter: 'blur(10px)',
     WebkitBackdropFilter: 'blur(10px)',
 };
+
+const CELL_BASE_SIZE = 28;
+const CELL_MIN_SIZE = 20;
+const CELL_MAX_SIZE = 34;
 
 function IconDockButton({ icon, title, onClick }) {
     const IconComponent = icon;
@@ -94,6 +119,14 @@ function DPadButton({ label, icon, ...events }) {
             {icon}
         </button>
     );
+}
+
+function getTilePalette(kind) {
+    return TOP_DOWN_PALETTES[kind] || TOP_DOWN_PALETTES.grass;
+}
+
+function getTileLabel(kind) {
+    return TILE_LABELS[kind] || TILE_LABELS.grass;
 }
 
 export default function MapView({ spaceTitle, nodes, mapState, onMapStateChange, onOpenMode }) {
@@ -293,32 +326,38 @@ export default function MapView({ spaceTitle, nodes, mapState, onMapStateChange,
         () => LANDMARKS.find((landmark) => distanceBetween(player, landmark.approach) < 1.25),
         [player],
     );
-    const tileWidth = TILE_WIDTH_BASE * zoom;
-    const tileHeight = TILE_HEIGHT_BASE * zoom;
-    const tileDepth = Math.max(9, Math.round(TILE_DEPTH * 0.68));
+    const cellSize = useMemo(
+        () => Math.max(CELL_MIN_SIZE, Math.min(CELL_MAX_SIZE, Math.round(CELL_BASE_SIZE * zoom))),
+        [zoom],
+    );
+    const visibleRadiusX = useMemo(
+        () => Math.ceil(fieldSize.width / cellSize / 2) + 3,
+        [cellSize, fieldSize.width],
+    );
+    const visibleRadiusY = useMemo(
+        () => Math.ceil(fieldSize.height / cellSize / 2) + 3,
+        [cellSize, fieldSize.height],
+    );
+
+    const worldToPlane = useCallback((worldX, worldY) => ({
+        left: fieldSize.width / 2 + (worldX - camera.x) * cellSize,
+        top: fieldSize.height / 2 + (worldY - camera.y) * cellSize,
+    }), [camera.x, camera.y, cellSize, fieldSize.height, fieldSize.width]);
 
     const visibleTiles = useMemo(() => {
         const tiles = [];
         const centerTileX = Math.floor(camera.x);
         const centerTileY = Math.floor(camera.y);
 
-        for (let y = centerTileY - VIEW_RADIUS; y <= centerTileY + VIEW_RADIUS; y += 1) {
-            for (let x = centerTileX - VIEW_RADIUS; x <= centerTileX + VIEW_RADIUS; x += 1) {
+        for (let y = centerTileY - visibleRadiusY; y <= centerTileY + visibleRadiusY; y += 1) {
+            for (let x = centerTileX - visibleRadiusX; x <= centerTileX + visibleRadiusX; x += 1) {
                 if (x < 0 || y < 0 || x >= MAP_WORLD_SIZE || y >= MAP_WORLD_SIZE) continue;
-                const screen = worldToScreen(
-                    x + 0.5,
-                    y + 0.5,
-                    camera,
-                    fieldSize.width,
-                    fieldSize.height,
-                    tileWidth,
-                    tileHeight,
-                );
+                const screen = worldToPlane(x + 0.5, y + 0.5);
                 if (
-                    screen.left < -tileWidth
-                    || screen.left > fieldSize.width + tileWidth
-                    || screen.top < -tileHeight * 2
-                    || screen.top > fieldSize.height + tileHeight * 2
+                    screen.left < -cellSize
+                    || screen.left > fieldSize.width + cellSize
+                    || screen.top < -cellSize
+                    || screen.top > fieldSize.height + cellSize
                 ) {
                     continue;
                 }
@@ -326,73 +365,49 @@ export default function MapView({ spaceTitle, nodes, mapState, onMapStateChange,
             }
         }
 
-        tiles.sort((a, b) => (a.x + a.y) - (b.x + b.y) || a.y - b.y);
+        tiles.sort((a, b) => a.y - b.y || a.x - b.x);
         return tiles;
-    }, [camera, fieldSize.height, fieldSize.width, tileHeight, tileWidth]);
+    }, [camera.x, camera.y, cellSize, fieldSize.height, fieldSize.width, visibleRadiusX, visibleRadiusY, worldToPlane]);
 
     const landmarkScreens = useMemo(() => (
         LANDMARKS.map((landmark) => ({
             ...landmark,
             quest: quests.find((quest) => quest.id === landmark.id),
             display: LANDMARK_DISPLAY[landmark.id] || { label: landmark.badge, icon: Flag },
-            screen: worldToScreen(
-                landmark.x + 0.5,
-                landmark.y + 0.5,
-                camera,
-                fieldSize.width,
-                fieldSize.height,
-                tileWidth,
-                tileHeight,
-            ),
+            screen: worldToPlane(landmark.x + 0.5, landmark.y + 0.5),
         })).filter((landmark) => (
-            landmark.screen.left > -120
-            && landmark.screen.left < fieldSize.width + 120
-            && landmark.screen.top > -180
-            && landmark.screen.top < fieldSize.height + 180
+            landmark.screen.left > -140
+            && landmark.screen.left < fieldSize.width + 140
+            && landmark.screen.top > -140
+            && landmark.screen.top < fieldSize.height + 160
         ))
-    ), [camera, fieldSize.height, fieldSize.width, quests, tileHeight, tileWidth]);
+    ), [fieldSize.height, fieldSize.width, quests, worldToPlane]);
 
     const treeScreens = useMemo(() => (
         TREE_CLUSTERS.map((tree, index) => ({
             ...tree,
             key: `tree-${index}`,
-            screen: worldToScreen(
-                tree.x + 0.5,
-                tree.y + 0.5,
-                camera,
-                fieldSize.width,
-                fieldSize.height,
-                tileWidth,
-                tileHeight,
-            ),
+            screen: worldToPlane(tree.x + 0.5, tree.y + 0.5),
         })).filter((tree) => (
             tree.screen.left > -100
             && tree.screen.left < fieldSize.width + 100
-            && tree.screen.top > -140
-            && tree.screen.top < fieldSize.height + 140
+            && tree.screen.top > -100
+            && tree.screen.top < fieldSize.height + 120
         ))
-    ), [camera, fieldSize.height, fieldSize.width, tileHeight, tileWidth]);
+    ), [fieldSize.height, fieldSize.width, worldToPlane]);
 
     const hutScreen = useMemo(
-        () => worldToScreen(HUT_CENTER.x, HUT_CENTER.y, camera, fieldSize.width, fieldSize.height, tileWidth, tileHeight),
-        [camera, fieldSize.height, fieldSize.width, tileHeight, tileWidth],
+        () => worldToPlane(HUT_CENTER.x, HUT_CENTER.y),
+        [worldToPlane],
     );
     const playerScreen = useMemo(
-        () => worldToScreen(player.x, player.y, camera, fieldSize.width, fieldSize.height, tileWidth, tileHeight),
-        [camera, fieldSize.height, fieldSize.width, player.x, player.y, tileHeight, tileWidth],
+        () => worldToPlane(player.x, player.y),
+        [player.x, player.y, worldToPlane],
     );
     const destinationScreen = useMemo(() => {
         if (!destinationMarker) return null;
-        return worldToScreen(
-            destinationMarker.x,
-            destinationMarker.y,
-            camera,
-            fieldSize.width,
-            fieldSize.height,
-            tileWidth,
-            tileHeight,
-        );
-    }, [camera, destinationMarker, fieldSize.height, fieldSize.width, tileHeight, tileWidth]);
+        return worldToPlane(destinationMarker.x, destinationMarker.y);
+    }, [destinationMarker, worldToPlane]);
 
     const setDestination = useCallback((point) => {
         destinationRef.current = point;
@@ -417,7 +432,7 @@ export default function MapView({ spaceTitle, nodes, mapState, onMapStateChange,
     const handleZoom = useCallback((event) => {
         event.preventDefault();
         const direction = event.deltaY > 0 ? -0.05 : 0.05;
-        setZoom((currentZoom) => Math.max(0.88, Math.min(1.14, currentZoom + direction)));
+        setZoom((currentZoom) => Math.max(0.85, Math.min(1.2, currentZoom + direction)));
     }, []);
 
     const moveToBase = useCallback(() => {
@@ -471,16 +486,25 @@ export default function MapView({ spaceTitle, nodes, mapState, onMapStateChange,
                     minHeight: '680px',
                     borderRadius: '30px',
                     overflow: 'hidden',
-                    border: '1px solid rgba(47, 117, 55, 0.28)',
-                    background: 'linear-gradient(180deg, #69c85e 0%, #59b952 100%)',
-                    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.16), 0 24px 48px rgba(12, 23, 14, 0.18)',
+                    border: '1px solid rgba(126, 77, 39, 0.24)',
+                    background: 'linear-gradient(180deg, #d9a170 0%, #cc8556 100%)',
+                    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.16), 0 24px 48px rgba(48, 22, 8, 0.18)',
                 }}
             >
                 <div
                     style={{
                         position: 'absolute',
                         inset: 0,
-                        background: 'radial-gradient(circle at top left, rgba(255,255,255,0.18), transparent 30%), linear-gradient(180deg, rgba(255,255,255,0.05), rgba(0,0,0,0.04))',
+                        background: 'radial-gradient(circle at top left, rgba(255,255,255,0.22), transparent 32%), linear-gradient(180deg, rgba(255,255,255,0.04), rgba(0,0,0,0.04))',
+                        pointerEvents: 'none',
+                    }}
+                />
+                <div
+                    style={{
+                        position: 'absolute',
+                        inset: 0,
+                        backgroundImage: 'linear-gradient(rgba(110, 66, 38, 0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(110, 66, 38, 0.1) 1px, transparent 1px)',
+                        backgroundSize: `${cellSize}px ${cellSize}px`,
                         pointerEvents: 'none',
                     }}
                 />
@@ -495,18 +519,18 @@ export default function MapView({ spaceTitle, nodes, mapState, onMapStateChange,
                         gap: '0.8rem',
                         padding: '0.58rem 0.9rem',
                         borderRadius: '14px',
-                        background: 'rgba(36, 40, 44, 0.78)',
-                        color: '#f5faf5',
-                        boxShadow: '0 10px 24px rgba(10, 18, 14, 0.16)',
+                        background: 'rgba(44, 28, 18, 0.78)',
+                        color: '#fff8ef',
+                        boxShadow: '0 10px 24px rgba(59, 28, 10, 0.16)',
                         fontSize: '0.8rem',
                         backdropFilter: 'blur(10px)',
                         WebkitBackdropFilter: 'blur(10px)',
                     }}
                 >
-                    <span style={{ fontWeight: 600 }}>Tool: Move</span>
-                    <span style={{ opacity: 0.8 }}>World: 100 x 100</span>
+                    <span style={{ fontWeight: 600 }}>操作: 移動</span>
+                    <span style={{ opacity: 0.82 }}>ワールド: 100 x 100</span>
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
-                        <Sparkles size={13} color="#70d7ff" />
+                        <Sparkles size={13} color="#7fd5ff" />
                         {rewards.xp}
                     </span>
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
@@ -517,17 +541,17 @@ export default function MapView({ spaceTitle, nodes, mapState, onMapStateChange,
                         <KeyRound size={13} color="#bcff97" />
                         {rewards.keys}
                     </span>
-                    <span style={{ opacity: 0.8 }}>Quests: {completedQuestIds.length}</span>
+                    <span style={{ opacity: 0.82 }}>完了: {completedQuestIds.length}</span>
                 </div>
                 <div style={{ position: 'absolute', top: '1rem', right: '1rem', zIndex: 20, display: 'flex', gap: '0.55rem' }}>
-                    <IconDockButton icon={MessageSquare} title="Open chat" onClick={() => onOpenMode('chat')} />
-                    <IconDockButton icon={GitFork} title="Open graph" onClick={() => onOpenMode('graph')} />
-                    <IconDockButton icon={Compass} title="Return to base" onClick={moveToBase} />
+                    <IconDockButton icon={MessageSquare} title="チャットへ" onClick={() => onOpenMode('chat')} />
+                    <IconDockButton icon={GitFork} title="グラフへ" onClick={() => onOpenMode('graph')} />
+                    <IconDockButton icon={Compass} title="スタート地点へ" onClick={moveToBase} />
                 </div>
 
                 <div style={{ position: 'absolute', inset: 0 }}>
                     {visibleTiles.map((tile) => {
-                        const palette = getTilePalette(tile.kind, true);
+                        const palette = getTilePalette(tile.kind);
                         const landmark = LANDMARKS.find((item) => item.x === tile.x && item.y === tile.y);
                         const isStartTile = tile.x >= HUT_CENTER.x - 1 && tile.x <= HUT_CENTER.x && tile.y >= HUT_CENTER.y - 1 && tile.y <= HUT_CENTER.y;
 
@@ -539,34 +563,26 @@ export default function MapView({ spaceTitle, nodes, mapState, onMapStateChange,
                                 aria-label={`${tile.x},${tile.y}`}
                                 style={{
                                     position: 'absolute',
-                                    left: tile.screen.left,
-                                    top: tile.screen.top,
-                                    width: `${tileWidth}px`,
-                                    height: `${tileHeight + tileDepth}px`,
-                                    transform: 'translate(-50%, -50%)',
+                                    left: tile.screen.left - (cellSize / 2),
+                                    top: tile.screen.top - (cellSize / 2),
+                                    width: `${cellSize}px`,
+                                    height: `${cellSize}px`,
                                     border: 'none',
-                                    background: 'transparent',
+                                    borderRadius: '6px',
+                                    background: palette.top,
+                                    boxShadow: `inset 0 1px 0 rgba(255,255,255,0.1), 0 0 0 1px ${palette.edge}`,
                                     padding: 0,
                                     cursor: isBlockedTile(tile.x, tile.y) ? 'default' : 'pointer',
-                                    zIndex: tile.x + tile.y,
+                                    zIndex: 1,
                                 }}
                             >
-                                <div
-                                    style={{
-                                        position: 'absolute',
-                                        inset: 0,
-                                        clipPath: 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)',
-                                        background: palette.top,
-                                        boxShadow: `0 ${tileDepth}px 0 ${palette.edge}, inset 0 1px 0 rgba(255,255,255,0.1), 0 0 0 1px rgba(43, 110, 47, 0.18)`,
-                                    }}
-                                />
                                 {isStartTile && (
                                     <div
                                         style={{
                                             position: 'absolute',
-                                            inset: '7px',
-                                            clipPath: 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)',
-                                            border: '2px solid rgba(98, 161, 255, 0.85)',
+                                            inset: '2px',
+                                            borderRadius: '5px',
+                                            border: '2px solid rgba(93, 150, 255, 0.9)',
                                         }}
                                     />
                                 )}
@@ -576,12 +592,12 @@ export default function MapView({ spaceTitle, nodes, mapState, onMapStateChange,
                                             position: 'absolute',
                                             left: '50%',
                                             top: '50%',
-                                            transform: 'translate(-50%, -54%) rotate(45deg)',
-                                            width: landmark ? '13px' : '11px',
-                                            height: landmark ? '13px' : '11px',
-                                            borderRadius: '3px',
-                                            background: tile.kind === 'path' ? '#f5ebc9' : palette.chip,
-                                            boxShadow: landmark ? `0 0 0 5px ${landmark.accent}18` : 'none',
+                                            transform: 'translate(-50%, -50%)',
+                                            width: landmark ? '12px' : '10px',
+                                            height: landmark ? '12px' : '10px',
+                                            borderRadius: '999px',
+                                            background: tile.kind === 'path' ? '#fff5df' : palette.chip,
+                                            boxShadow: landmark ? `0 0 0 6px ${landmark.accent}22` : 'none',
                                         }}
                                     />
                                 )}
@@ -595,26 +611,26 @@ export default function MapView({ spaceTitle, nodes, mapState, onMapStateChange,
                             style={{
                                 position: 'absolute',
                                 left: tree.screen.left,
-                                top: tree.screen.top - tileHeight * 0.82,
+                                top: tree.screen.top - cellSize * 0.78,
                                 transform: 'translate(-50%, -50%)',
-                                zIndex: tree.x + tree.y + 20,
+                                zIndex: 8,
                                 pointerEvents: 'none',
                             }}
                         >
-                            <LandmarkSprite type="tree" size={80 + tree.radius * 10} />
+                            <LandmarkSprite type="tree" size={72 + tree.radius * 8} />
                         </div>
                     ))}
 
-                    <div style={{ position: 'absolute', left: hutScreen.left, top: hutScreen.top - tileHeight * 1.35, transform: 'translate(-50%, -50%)', zIndex: 980, pointerEvents: 'none' }}>
-                        <HutSprite size={150 * zoom} />
+                    <div style={{ position: 'absolute', left: hutScreen.left, top: hutScreen.top - cellSize * 1.5, transform: 'translate(-50%, -50%)', zIndex: 12, pointerEvents: 'none' }}>
+                        <HutSprite size={132 * zoom} />
                     </div>
                     <div
                         style={{
                             position: 'absolute',
                             left: hutScreen.left,
-                            top: hutScreen.top - tileHeight * 1.95,
+                            top: hutScreen.top - cellSize * 2.1,
                             transform: 'translate(-50%, -50%)',
-                            zIndex: 990,
+                            zIndex: 13,
                             display: 'inline-flex',
                             alignItems: 'center',
                             gap: '0.3rem',
@@ -642,21 +658,21 @@ export default function MapView({ spaceTitle, nodes, mapState, onMapStateChange,
                                 style={{
                                     position: 'absolute',
                                     left: landmark.screen.left,
-                                    top: landmark.screen.top - tileHeight * 0.98,
+                                    top: landmark.screen.top - cellSize * 0.9,
                                     transform: 'translate(-50%, -50%)',
-                                    zIndex: landmark.x + landmark.y + 34,
+                                    zIndex: 10,
                                     textAlign: 'center',
                                 }}
                             >
                                 <div style={{ pointerEvents: 'none' }}>
-                                    <LandmarkSprite type={landmark.type} size={72 * zoom} />
+                                    <LandmarkSprite type={landmark.type} size={68 * zoom} />
                                 </div>
                                 <button
                                     type="button"
                                     onClick={() => handleLandmarkAction(landmark)}
-                                    title={isCompleted ? `${landmark.display.label} done` : landmark.display.label}
+                                    title={isCompleted ? `${landmark.display.label} 完了` : landmark.display.label}
                                     style={{
-                                        marginTop: '-0.35rem',
+                                        marginTop: '-0.2rem',
                                         display: 'inline-flex',
                                         alignItems: 'center',
                                         gap: '0.32rem',
@@ -683,14 +699,14 @@ export default function MapView({ spaceTitle, nodes, mapState, onMapStateChange,
                             style={{
                                 position: 'absolute',
                                 left: destinationScreen.left,
-                                top: destinationScreen.top - tileHeight * 0.08,
+                                top: destinationScreen.top,
                                 transform: 'translate(-50%, -50%)',
-                                width: `${tileWidth * 0.22}px`,
-                                height: `${tileWidth * 0.22}px`,
+                                width: `${Math.max(14, cellSize * 0.56)}px`,
+                                height: `${Math.max(14, cellSize * 0.56)}px`,
                                 borderRadius: '999px',
                                 border: '2px solid rgba(255,255,255,0.92)',
                                 boxShadow: '0 0 0 8px rgba(255,255,255,0.16)',
-                                zIndex: 1000,
+                                zIndex: 14,
                             }}
                         />
                     )}
@@ -699,13 +715,13 @@ export default function MapView({ spaceTitle, nodes, mapState, onMapStateChange,
                         style={{
                             position: 'absolute',
                             left: playerScreen.left,
-                            top: playerScreen.top - tileHeight * 1.1,
+                            top: playerScreen.top - cellSize * 1.1,
                             transform: 'translate(-50%, -50%)',
-                            zIndex: 1001,
+                            zIndex: 15,
                             pointerEvents: 'none',
                         }}
                     >
-                        <LionScoutSprite size={74 * zoom} />
+                        <LionScoutSprite size={62 * zoom} />
                     </div>
                 </div>
 
@@ -720,24 +736,24 @@ export default function MapView({ spaceTitle, nodes, mapState, onMapStateChange,
                         gap: '0.65rem',
                         padding: '0.55rem 0.8rem',
                         borderRadius: '14px',
-                        background: 'rgba(36, 40, 44, 0.78)',
-                        color: '#f5faf5',
+                        background: 'rgba(44, 28, 18, 0.78)',
+                        color: '#fff8ef',
                         fontSize: '0.78rem',
-                        boxShadow: '0 10px 24px rgba(10, 18, 14, 0.16)',
+                        boxShadow: '0 10px 24px rgba(59, 28, 10, 0.16)',
                         backdropFilter: 'blur(10px)',
                         WebkitBackdropFilter: 'blur(10px)',
                     }}
                 >
-                    <span>{spaceTitle || 'Untitled Space'}</span>
-                    <span style={{ opacity: 0.76 }}>{currentTileLabel}</span>
-                    <span style={{ opacity: 0.76 }}>{currentTileX + 1}, {currentTileY + 1}</span>
+                    <span>{spaceTitle || '無題のスペース'}</span>
+                    <span style={{ opacity: 0.8 }}>{currentTileLabel}</span>
+                    <span style={{ opacity: 0.8 }}>{currentTileX + 1}, {currentTileY + 1}</span>
                     {currentLandmark && <span style={{ opacity: 0.92 }}>{(LANDMARK_DISPLAY[currentLandmark.id] || {}).label}</span>}
                 </div>
 
                 <div style={{ position: 'absolute', right: '1rem', bottom: '1rem', zIndex: 20, display: 'grid', gap: '0.38rem' }}>
                     <div style={{ display: 'flex', justifyContent: 'center' }}>
                         <DPadButton
-                            label="Move up"
+                            label="上へ移動"
                             icon={<ChevronUp size={16} />}
                             onMouseDown={() => holdDirection('ArrowUp', true)}
                             onMouseUp={() => holdDirection('ArrowUp', false)}
@@ -748,7 +764,7 @@ export default function MapView({ spaceTitle, nodes, mapState, onMapStateChange,
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.38rem' }}>
                         <DPadButton
-                            label="Move left"
+                            label="左へ移動"
                             icon={<ChevronLeft size={16} />}
                             onMouseDown={() => holdDirection('ArrowLeft', true)}
                             onMouseUp={() => holdDirection('ArrowLeft', false)}
@@ -756,9 +772,9 @@ export default function MapView({ spaceTitle, nodes, mapState, onMapStateChange,
                             onTouchStart={() => holdDirection('ArrowLeft', true)}
                             onTouchEnd={() => holdDirection('ArrowLeft', false)}
                         />
-                        <DPadButton label="Return to base" icon={<Compass size={16} />} onClick={moveToBase} />
+                        <DPadButton label="スタート地点へ" icon={<Compass size={16} />} onClick={moveToBase} />
                         <DPadButton
-                            label="Move right"
+                            label="右へ移動"
                             icon={<ChevronRight size={16} />}
                             onMouseDown={() => holdDirection('ArrowRight', true)}
                             onMouseUp={() => holdDirection('ArrowRight', false)}
@@ -769,7 +785,7 @@ export default function MapView({ spaceTitle, nodes, mapState, onMapStateChange,
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'center' }}>
                         <DPadButton
-                            label="Move down"
+                            label="下へ移動"
                             icon={<ChevronDown size={16} />}
                             onMouseDown={() => holdDirection('ArrowDown', true)}
                             onMouseUp={() => holdDirection('ArrowDown', false)}
