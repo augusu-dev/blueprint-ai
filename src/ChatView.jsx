@@ -141,6 +141,7 @@ export default function ChatView({
     const [input, setInput] = useState('');
     const [chatHistory, setChatHistory] = useState([]);
     const [isLoading, setIsLoading] = useState(false);
+    const [generatingPromptIndex, setGeneratingPromptIndex] = useState(null);
     const [copiedIdx, setCopiedIdx] = useState(null);
     const [activeBranchView, setActiveBranchView] = useState(0);
     const [showGoalWizard, setShowGoalWizard] = useState(false);
@@ -153,6 +154,7 @@ export default function ChatView({
     useEffect(() => {
         if (!node) return;
         setChatHistory(normalizeHistory(node.data?.chatHistory || []));
+        setGeneratingPromptIndex(null);
         setSelectionDraft(null);
         setActiveExplanation(null);
     }, [node]);
@@ -479,34 +481,13 @@ export default function ChatView({
         }
     };
 
-    const handleSend = async () => {
+    const handleQueuePrompt = () => {
         const messageText = input.trim();
         if (!messageText || !node) return;
-
-        const wasFirstUserMessage = !chatHistory.some((message) => message.role === 'user');
         const nextHistory = normalizeHistory([...chatHistory, { role: 'user', content: messageText }]);
 
         setInput('');
-        setChatHistory(nextHistory);
-        setIsLoading(true);
-
-        try {
-            const reply = await callAI(nextHistory, (node.data?.systemPrompt || '') + getControlInstructions());
-            const parsedReply = parseAiReply(reply, t('chat.actionCompleted') || 'Action completed.');
-            const aiMessage = syncAiMessage(
-                { role: 'ai', collapsed: false },
-                [createResponseVariant(parsedReply)],
-                0,
-            );
-            const finalHistory = [...nextHistory, aiMessage];
-            persistChatHistory(finalHistory);
-
-            if (wasFirstUserMessage && spaceId) {
-                await generateSpaceTitle(messageText);
-            }
-        } finally {
-            setIsLoading(false);
-        }
+        persistChatHistory(nextHistory);
     };
 
     const handleCopy = async (content, idx) => {
@@ -536,6 +517,58 @@ export default function ChatView({
         }
     };
 
+    const handleGeneratePrompt = async (userIndex, options = {}) => {
+        if (!node || isLoading) return;
+
+        const userMessage = chatHistory[userIndex];
+        if (!userMessage || userMessage.role !== 'user') return;
+
+        const existingReplyIndex = chatHistory[userIndex + 1]?.role === 'ai' ? userIndex + 1 : -1;
+        const shouldAppendVariant = Boolean(options.appendVariant && existingReplyIndex >= 0);
+        const wasFirstGeneratedReply = !chatHistory.some((message) => message.role === 'ai');
+        const historyForReply = normalizeHistory(chatHistory.slice(0, userIndex + 1));
+
+        setSelectionDraft(null);
+        setActiveExplanation(null);
+        setGeneratingPromptIndex(userIndex);
+        setIsLoading(true);
+
+        try {
+            const reply = await callAI(historyForReply, (node.data?.systemPrompt || '') + getControlInstructions());
+            const parsedReply = parseAiReply(reply, t('chat.actionCompleted') || 'Action completed.');
+            const nextHistory = [...chatHistory];
+
+            if (existingReplyIndex >= 0) {
+                nextHistory[existingReplyIndex] = shouldAppendVariant
+                    ? appendResponseVariant(nextHistory[existingReplyIndex], createResponseVariant(parsedReply))
+                    : syncAiMessage(
+                        { ...normalizeAiMessage(nextHistory[existingReplyIndex]), collapsed: false },
+                        [createResponseVariant(parsedReply)],
+                        0,
+                    );
+            } else {
+                nextHistory.splice(
+                    userIndex + 1,
+                    0,
+                    syncAiMessage(
+                        { role: 'ai', collapsed: false },
+                        [createResponseVariant(parsedReply)],
+                        0,
+                    ),
+                );
+            }
+
+            persistChatHistory(nextHistory);
+
+            if (wasFirstGeneratedReply && spaceId) {
+                await generateSpaceTitle(userMessage.content);
+            }
+        } finally {
+            setGeneratingPromptIndex(null);
+            setIsLoading(false);
+        }
+    };
+
     const handleRetry = async (idx) => {
         if (isLoading || !node) return;
         const targetMessage = chatHistory[idx];
@@ -550,22 +583,7 @@ export default function ChatView({
         }
         if (userIndex < 0) return;
 
-        setSelectionDraft(null);
-        setActiveExplanation(null);
-        setIsLoading(true);
-
-        try {
-            const historyForRetry = normalizeHistory(chatHistory.slice(0, userIndex + 1));
-            const reply = await callAI(historyForRetry, (node.data?.systemPrompt || '') + getControlInstructions());
-            const nextHistory = [...chatHistory];
-            nextHistory[idx] = appendResponseVariant(
-                targetMessage,
-                createResponseVariant(parseAiReply(reply, t('chat.actionCompleted') || 'Action completed.')),
-            );
-            persistChatHistory(nextHistory);
-        } finally {
-            setIsLoading(false);
-        }
+        await handleGeneratePrompt(userIndex, { appendVariant: true });
     };
 
     const handleSwitchResponseVariant = (idx, direction) => {
@@ -819,6 +837,8 @@ export default function ChatView({
                         const activeResponseVariantIndex = message.role === 'ai' ? message.activeVariantIndex : 0;
                         const linkedReplyIndex = message.role === 'user' && chatHistory[idx + 1]?.role === 'ai' ? idx + 1 : null;
                         const linkedReplyCollapsed = linkedReplyIndex !== null ? isReplyCollapsed(chatHistory[linkedReplyIndex]) : false;
+                        const canGeneratePrompt = message.role === 'user' && linkedReplyIndex === null;
+                        const isGeneratingPrompt = generatingPromptIndex === idx;
                         const explanations = getInlineExplanations(message);
                         const activeExplanationIndex = explanations.findIndex((item) => item.id === activeExplanation?.explanationId);
                         const currentExplanation = activeExplanation?.messageIndex === idx && activeExplanationIndex >= 0
@@ -896,31 +916,67 @@ export default function ChatView({
                                     </div>
                                 </div>
 
-                                {message.role === 'user' && linkedReplyIndex !== null && (
-                                    <button
-                                        onClick={() => handleToggleReplyCollapse(linkedReplyIndex)}
+                                {message.role === 'user' && (
+                                    <div
                                         style={{
                                             marginTop: '0.35rem',
                                             marginRight: '2.55rem',
                                             alignSelf: 'flex-end',
-                                            display: 'inline-flex',
+                                            display: 'flex',
                                             alignItems: 'center',
-                                            gap: '0.28rem',
-                                            padding: '0.18rem 0.55rem',
-                                            borderRadius: '999px',
-                                            border: '1px solid rgba(255,255,255,0.08)',
-                                            background: 'rgba(255,255,255,0.04)',
-                                            color: 'var(--text-muted)',
-                                            fontSize: '0.72rem',
-                                            lineHeight: 1,
-                                            cursor: 'pointer',
-                                            transition: 'var(--transition-smooth)',
+                                            gap: '0.45rem',
+                                            flexWrap: 'wrap',
                                         }}
-                                        title={linkedReplyCollapsed ? '回答を表示' : '回答を折り畳む'}
                                     >
-                                        {linkedReplyCollapsed ? <ChevronDown size={11} /> : <ChevronUp size={11} />}
-                                        {linkedReplyCollapsed ? '回答を表示' : '回答を折り畳む'}
-                                    </button>
+                                        {linkedReplyIndex !== null && (
+                                            <button
+                                                onClick={() => handleToggleReplyCollapse(linkedReplyIndex)}
+                                                style={{
+                                                    display: 'inline-flex',
+                                                    alignItems: 'center',
+                                                    gap: '0.28rem',
+                                                    padding: '0.18rem 0.55rem',
+                                                    borderRadius: '999px',
+                                                    border: '1px solid rgba(255,255,255,0.08)',
+                                                    background: 'rgba(255,255,255,0.04)',
+                                                    color: 'var(--text-muted)',
+                                                    fontSize: '0.72rem',
+                                                    lineHeight: 1,
+                                                    cursor: 'pointer',
+                                                    transition: 'var(--transition-smooth)',
+                                                }}
+                                                title={linkedReplyCollapsed ? '回答を表示' : '回答を折り畳む'}
+                                            >
+                                                {linkedReplyCollapsed ? <ChevronDown size={11} /> : <ChevronUp size={11} />}
+                                                {linkedReplyCollapsed ? '回答を表示' : '回答を折り畳む'}
+                                            </button>
+                                        )}
+
+                                        {canGeneratePrompt && (
+                                            <button
+                                                onClick={() => handleGeneratePrompt(idx)}
+                                                disabled={isLoading}
+                                                style={{
+                                                    display: 'inline-flex',
+                                                    alignItems: 'center',
+                                                    gap: '0.3rem',
+                                                    padding: '0.22rem 0.65rem',
+                                                    borderRadius: '999px',
+                                                    border: '1px solid rgba(108,140,255,0.28)',
+                                                    background: 'rgba(108,140,255,0.12)',
+                                                    color: '#dce7ff',
+                                                    fontSize: '0.72rem',
+                                                    lineHeight: 1,
+                                                    cursor: isLoading ? 'default' : 'pointer',
+                                                    transition: 'var(--transition-smooth)',
+                                                }}
+                                                title="このプロンプトで回答を生成"
+                                            >
+                                                <Sparkles size={11} />
+                                                {isGeneratingPrompt ? '生成中...' : '生成する'}
+                                            </button>
+                                        )}
+                                    </div>
                                 )}
 
                                 {selectionDraft?.messageIndex === idx && (
@@ -1197,7 +1253,7 @@ export default function ChatView({
                         onKeyDown={(event) => {
                             if (event.key === 'Enter' && !event.shiftKey) {
                                 event.preventDefault();
-                                handleSend();
+                                handleQueuePrompt();
                             }
                         }}
                         placeholder={t('chat.placeholder')}
@@ -1218,8 +1274,8 @@ export default function ChatView({
                         rows={1}
                     />
                     <button
-                        onClick={handleSend}
-                        disabled={isLoading || !input.trim()}
+                        onClick={handleQueuePrompt}
+                        disabled={!input.trim()}
                         style={{
                             width: '38px',
                             height: '38px',
@@ -1239,7 +1295,7 @@ export default function ChatView({
                     </button>
                 </div>
                 <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textAlign: 'center', marginTop: '0.4rem' }}>
-                    {t('chat.shiftEnter')}
+                    Enterでプロンプト追加 / 生成は各メッセージから
                 </div>
             </div>
         </div>
