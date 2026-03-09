@@ -705,8 +705,8 @@ export default function ChatView({
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    background: 'var(--bg-dark)',
-                    color: 'var(--text-muted)',
+                    background: 'linear-gradient(180deg, #f7f4f7 0%, #f1eff3 100%)',
+                    color: '#7a8091',
                     padding: '2rem',
                     textAlign: 'center',
                 }}
@@ -715,7 +715,7 @@ export default function ChatView({
                     <div style={{ fontSize: '0.76rem', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.5rem' }}>
                         Session Loading
                     </div>
-                    <div style={{ fontSize: '0.96rem', color: 'var(--text-main)' }}>
+                    <div style={{ fontSize: '0.96rem', color: '#2d3342' }}>
                         Preparing your chat workspace...
                     </div>
                 </div>
@@ -740,22 +740,82 @@ export default function ChatView({
     }
 
     const branchCount = node.data?.branchCount || 0;
-
+    const iconActionStyle = {
+        width: '30px',
+        height: '30px',
+        padding: 0,
+        gap: 0,
+        border: '1px solid rgba(68, 76, 95, 0.12)',
+        borderRadius: '999px',
+        background: 'rgba(255, 255, 255, 0.82)',
+        color: '#707789',
+        boxShadow: '0 6px 12px rgba(31, 35, 45, 0.08)',
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        cursor: 'pointer',
+        fontSize: 0,
+        lineHeight: 0,
+    };
+    const actionStripStyle = {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '0.28rem',
+        flexWrap: 'wrap',
+    };
+    const counterTextStyle = {
+        fontSize: 0,
+        color: '#8b91a1',
+        minWidth: '8px',
+        textAlign: 'center',
+    };
+    const cardActionStyle = {
+        padding: '0.42rem 0.82rem',
+        borderRadius: '999px',
+        border: '1px solid rgba(123, 145, 190, 0.22)',
+        background: 'rgba(255,255,255,0.76)',
+        color: '#53617c',
+        fontSize: '0.76rem',
+        cursor: 'pointer',
+    };
+    const userBubbleStyle = {
+        background: 'linear-gradient(180deg, #ebe2f9 0%, #e3d7f5 100%)',
+        color: '#4f396f',
+        padding: '0.78rem 1.2rem',
+        borderRadius: '22px',
+        boxShadow: '0 10px 22px rgba(174, 150, 223, 0.22)',
+        wordBreak: 'break-word',
+        whiteSpace: 'pre-wrap',
+        fontSize: '0.94rem',
+        lineHeight: 1.72,
+        border: '1px solid rgba(190, 174, 224, 0.5)',
+    };
+    const assistantBubbleStyle = {
+        background: '#ffffff',
+        color: '#22252f',
+        padding: '0.9rem 1.15rem',
+        borderRadius: '22px',
+        boxShadow: '0 14px 30px rgba(30, 34, 44, 0.12)',
+        wordBreak: 'break-word',
+        whiteSpace: 'pre-wrap',
+        fontSize: '0.94rem',
+        lineHeight: 1.78,
+        border: '1px solid rgba(34, 37, 47, 0.06)',
+    };
     return (
         <div
             style={{
                 flex: 1,
                 display: 'flex',
                 flexDirection: 'column',
-                background: 'var(--bg-dark)',
+                background: 'linear-gradient(180deg, #f7f4f7 0%, #f1eff3 100%)',
                 height: '100%',
                 position: 'relative',
             }}
         >
             <div
                 style={{
-                    padding: '0.5rem 1.5rem',
-                    borderBottom: '1px solid var(--panel-border)',
+                    padding: '0.9rem 1.7rem 0.35rem',
                     display: 'flex',
                     justifyContent: 'space-between',
                     alignItems: 'center',
@@ -766,11 +826,11 @@ export default function ChatView({
                         <button
                             onClick={() => setShowGoalWizard(true)}
                             style={{
-                                background: node.data?.systemPrompt ? 'rgba(52, 211, 153, 0.08)' : 'rgba(108, 140, 255, 0.08)',
-                                color: node.data?.systemPrompt ? 'var(--action)' : 'var(--primary)',
-                                border: `1px solid ${node.data?.systemPrompt ? 'rgba(52, 211, 153, 0.2)' : 'rgba(108, 140, 255, 0.2)'}`,
-                                borderRadius: '18px',
-                                padding: '0.35rem 0.85rem',
+                                background: '#ffffff',
+                                color: node.data?.systemPrompt ? '#278f66' : '#5f58a8',
+                                border: `1px solid ${node.data?.systemPrompt ? 'rgba(39,143,102,0.18)' : 'rgba(119,104,188,0.16)'}`,
+                                borderRadius: '999px',
+                                padding: '0.42rem 0.92rem',
                                 fontSize: '0.8rem',
                                 fontWeight: 500,
                                 cursor: 'pointer',
@@ -779,6 +839,7 @@ export default function ChatView({
                                 gap: '0.3rem',
                                 transition: 'all 0.2s',
                                 fontFamily: 'inherit',
+                                boxShadow: '0 8px 20px rgba(28, 33, 45, 0.06)',
                             }}
                         >
                             <Target size={13} />
@@ -790,7 +851,7 @@ export default function ChatView({
                     className="node-select-sm"
                     value={node.data?.selectedApiKey || 0}
                     onChange={(event) => onUpdateNodeData(node.id, 'selectedApiKey', parseInt(event.target.value, 10))}
-                    style={{ maxWidth: '130px' }}
+                    style={{ maxWidth: '148px', background: '#ffffff', color: '#4f5565', border: '1px solid rgba(31, 41, 55, 0.08)', boxShadow: '0 8px 20px rgba(28, 33, 45, 0.06)' }}
                     title={t('chat.modelSelect')}
                 >
                     {apiKeys?.map((item, index) => (
@@ -805,11 +866,11 @@ export default function ChatView({
                 style={{
                     flex: 1,
                     overflowY: 'auto',
-                    padding: '1.5rem',
+                    padding: '1.25rem 1.6rem 0.8rem',
                     display: 'flex',
                     flexDirection: 'column',
-                    gap: '1rem',
-                    maxWidth: '820px',
+                    gap: '1.5rem',
+                    maxWidth: '920px',
                     width: '100%',
                     margin: '0 auto',
                 }}
@@ -819,12 +880,12 @@ export default function ChatView({
                         style={{
                             margin: 'auto',
                             textAlign: 'center',
-                            color: 'var(--text-muted)',
+                            color: '#7a8091',
                             animation: 'fadeSlideUp 0.5s ease',
                         }}
                     >
-                        <Bot size={48} style={{ opacity: 0.3, marginBottom: '1rem' }} />
-                        <p style={{ fontSize: '1rem', fontWeight: 400 }}>{t('chat.empty')}</p>
+                        <Bot size={40} style={{ opacity: 0.22, marginBottom: '0.9rem' }} />
+                        <p style={{ fontSize: '0.96rem', fontWeight: 400 }}>{t('chat.empty')}</p>
                     </div>
                 ) : (
                     chatHistory.map((rawMessage, idx) => {
@@ -861,27 +922,28 @@ export default function ChatView({
                                 }}
                             >
                                 <div
-                                    style={{
-                                        display: 'flex',
-                                        gap: '0.65rem',
-                                        flexDirection: message.role === 'user' ? 'row-reverse' : 'row',
-                                        maxWidth: '85%',
-                                    }}
-                                >
-                                    <div
                                         style={{
-                                            width: '30px',
-                                            height: '30px',
-                                            borderRadius: '50%',
-                                            flexShrink: 0,
-                                            background: message.role === 'user' ? 'var(--primary)' : 'rgba(255,255,255,0.06)',
                                             display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
+                                            gap: '0.65rem',
+                                            flexDirection: message.role === 'user' ? 'row-reverse' : 'row',
+                                            maxWidth: message.role === 'user' ? '78%' : '72%',
                                         }}
                                     >
-                                        {message.role === 'user' ? <User size={14} color="white" /> : <Bot size={14} />}
-                                    </div>
+                                        <div
+                                            style={{
+                                                width: '34px',
+                                                height: '34px',
+                                                borderRadius: '50%',
+                                                flexShrink: 0,
+                                                background: message.role === 'user' ? '#eadff8' : '#ffffff',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                boxShadow: message.role === 'user' ? '0 8px 20px rgba(174, 150, 223, 0.2)' : '0 10px 20px rgba(29, 33, 44, 0.08)',
+                                            }}
+                                        >
+                                            {message.role === 'user' ? <User size={14} color="#664b8d" /> : <Bot size={14} color="#6f7688" />}
+                                        </div>
                                     <div
                                         ref={(element) => {
                                             if (element) messageContentRefs.current[idx] = element;
@@ -898,18 +960,7 @@ export default function ChatView({
                                             }
                                         }}
                                         style={{
-                                            background: message.role === 'user' ? 'linear-gradient(135deg, var(--primary) 0%, #748ffc 100%)' : 'var(--panel-bg)',
-                                            color: message.role === 'user' ? 'white' : 'var(--text-main)',
-                                            padding: '0.8rem 1.25rem',
-                                            borderRadius: message.role === 'user' ? '20px 20px 4px 20px' : '20px 20px 20px 4px',
-                                            border: message.role === 'ai' ? '1px solid var(--panel-border)' : '1px solid rgba(255,255,255,0.1)',
-                                            boxShadow: message.role === 'user' ? '0 4px 15px rgba(92, 124, 250, 0.25)' : 'var(--shadow-sm)',
-                                            wordBreak: 'break-word',
-                                            whiteSpace: 'pre-wrap',
-                                            fontSize: '0.92rem',
-                                            lineHeight: 1.75,
-                                            backdropFilter: message.role === 'ai' ? 'blur(20px)' : 'none',
-                                            WebkitBackdropFilter: message.role === 'ai' ? 'blur(20px)' : 'none',
+                                            ...(message.role === 'user' ? userBubbleStyle : assistantBubbleStyle),
                                         }}
                                     >
                                         {renderMessageContent(message, idx)}
@@ -922,29 +973,14 @@ export default function ChatView({
                                             marginTop: '0.35rem',
                                             marginRight: '2.55rem',
                                             alignSelf: 'flex-end',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            gap: '0.45rem',
-                                            flexWrap: 'wrap',
+                                            ...actionStripStyle,
+                                            justifyContent: 'flex-end',
                                         }}
                                     >
                                         {linkedReplyIndex !== null && (
                                             <button
                                                 onClick={() => handleToggleReplyCollapse(linkedReplyIndex)}
-                                                style={{
-                                                    display: 'inline-flex',
-                                                    alignItems: 'center',
-                                                    gap: '0.28rem',
-                                                    padding: '0.18rem 0.55rem',
-                                                    borderRadius: '999px',
-                                                    border: '1px solid rgba(255,255,255,0.08)',
-                                                    background: 'rgba(255,255,255,0.04)',
-                                                    color: 'var(--text-muted)',
-                                                    fontSize: '0.72rem',
-                                                    lineHeight: 1,
-                                                    cursor: 'pointer',
-                                                    transition: 'var(--transition-smooth)',
-                                                }}
+                                                style={iconActionStyle}
                                                 title={linkedReplyCollapsed ? '回答を表示' : '回答を折り畳む'}
                                             >
                                                 {linkedReplyCollapsed ? <ChevronDown size={11} /> : <ChevronUp size={11} />}
@@ -956,20 +992,7 @@ export default function ChatView({
                                             <button
                                                 onClick={() => handleGeneratePrompt(idx)}
                                                 disabled={isLoading}
-                                                style={{
-                                                    display: 'inline-flex',
-                                                    alignItems: 'center',
-                                                    gap: '0.3rem',
-                                                    padding: '0.22rem 0.65rem',
-                                                    borderRadius: '999px',
-                                                    border: '1px solid rgba(108,140,255,0.28)',
-                                                    background: 'rgba(108,140,255,0.12)',
-                                                    color: '#dce7ff',
-                                                    fontSize: '0.72rem',
-                                                    lineHeight: 1,
-                                                    cursor: isLoading ? 'default' : 'pointer',
-                                                    transition: 'var(--transition-smooth)',
-                                                }}
+                                                style={iconActionStyle}
                                                 title="このプロンプトで回答を生成"
                                             >
                                                 <Sparkles size={11} />
@@ -1003,10 +1026,10 @@ export default function ChatView({
                                             「{selectionDraft.text}」
                                         </div>
                                         <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
-                                            <button className="chat-action-btn" onClick={handleCreateExplanation} disabled={isExplaining}>
+                                            <button style={cardActionStyle} onClick={handleCreateExplanation} disabled={isExplaining}>
                                                 <Sparkles size={12} /> {isExplaining ? '説明中...' : '説明する'}
                                             </button>
-                                            <button className="chat-action-btn" onClick={() => setSelectionDraft(null)}>
+                                            <button style={cardActionStyle} onClick={() => setSelectionDraft(null)}>
                                                 閉じる
                                             </button>
                                         </div>
@@ -1037,13 +1060,13 @@ export default function ChatView({
                                             </div>
                                             {explanations.length > 1 && (
                                                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                                                    <button className="chat-action-btn" disabled={activeExplanationIndex <= 0} onClick={() => shiftExplanation(idx, -1)} style={{ padding: '0.2rem' }}>
+                                                    <button style={iconActionStyle} disabled={activeExplanationIndex <= 0} onClick={() => shiftExplanation(idx, -1)} aria-label="Previous explanation">
                                                         <ChevronLeft size={12} />
                                                     </button>
                                                     <span style={{ fontSize: '0.72rem', color: '#63779a', minWidth: '36px', textAlign: 'center' }}>
                                                         {activeExplanationIndex + 1}/{explanations.length}
                                                     </span>
-                                                    <button className="chat-action-btn" disabled={activeExplanationIndex >= explanations.length - 1} onClick={() => shiftExplanation(idx, 1)} style={{ padding: '0.2rem' }}>
+                                                    <button style={iconActionStyle} disabled={activeExplanationIndex >= explanations.length - 1} onClick={() => shiftExplanation(idx, 1)} aria-label="Next explanation">
                                                         <ChevronRight size={12} />
                                                     </button>
                                                 </div>
@@ -1056,10 +1079,10 @@ export default function ChatView({
                                             {currentExplanation.summary}
                                         </div>
                                         <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
-                                            <button className="chat-action-btn" onClick={() => openExplanation(idx, currentExplanation.id)}>
+                                            <button style={cardActionStyle} onClick={() => openExplanation(idx, currentExplanation.id)}>
                                                 もう一度
                                             </button>
-                                            <button className="chat-action-btn" onClick={() => setActiveExplanation(null)}>
+                                            <button style={cardActionStyle} onClick={() => setActiveExplanation(null)}>
                                                 閉じる
                                             </button>
                                         </div>
@@ -1136,73 +1159,72 @@ export default function ChatView({
                                 )}
 
                                 {message.role === 'ai' && (
-                                    <div className="chat-actions" style={{ marginLeft: '2.6rem', marginTop: '0.4rem' }}>
-                                        <button className="chat-action-btn" onClick={() => handleCopy(displayedContent, idx)} title={copiedIdx === idx ? t('chat.copied') : t('chat.copy')}>
-                                            {copiedIdx === idx ? <Check size={12} /> : <Copy size={12} />}
-                                            {copiedIdx === idx ? t('chat.copied') : t('chat.copy')}
+                                    <div className="chat-actions" style={{ marginLeft: '2.6rem', marginTop: '0.4rem', ...actionStripStyle }}>
+                                        <button style={iconActionStyle} onClick={() => handleCopy(displayedContent, idx)} title={copiedIdx === idx ? t('chat.copied') : t('chat.copy')} aria-label={copiedIdx === idx ? t('chat.copied') : t('chat.copy')}>
+                                            {copiedIdx === idx ? <Check size={14} /> : <Copy size={14} />}
                                         </button>
-                                        <button className="chat-action-btn" onClick={() => handleRetry(idx)} disabled={isLoading} title={t('chat.retry')}>
-                                            <RefreshCw size={12} /> {t('chat.retry')}
+                                        <button style={iconActionStyle} onClick={() => handleRetry(idx)} disabled={isLoading} title={t('chat.retry')} aria-label={t('chat.retry')}>
+                                            <RefreshCw size={14} />
                                         </button>
 
                                         {responseVariantCount > 1 && (
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.2rem', borderLeft: '1px solid var(--panel-border)', paddingLeft: '0.5rem' }}>
+                                            <div style={{ ...actionStripStyle, paddingLeft: '0.28rem', marginLeft: '0.08rem', borderLeft: '1px solid rgba(68, 76, 95, 0.12)' }}>
                                                 <button
-                                                    className="chat-action-btn"
+                                                    style={iconActionStyle}
                                                     disabled={activeResponseVariantIndex <= 0}
                                                     onClick={() => handleSwitchResponseVariant(idx, -1)}
-                                                    style={{ padding: '0.2rem' }}
+                                                    aria-label="Previous reply"
                                                 >
-                                                    <ChevronLeft size={12} />
+                                                    <ChevronLeft size={14} />
                                                 </button>
-                                                <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', minWidth: '54px', textAlign: 'center' }}>
+                                                <span style={{ ...counterTextStyle, minWidth: '44px' }}>
                                                     回答 {activeResponseVariantIndex + 1}/{responseVariantCount}
                                                 </span>
                                                 <button
-                                                    className="chat-action-btn"
+                                                    style={iconActionStyle}
                                                     disabled={activeResponseVariantIndex >= responseVariantCount - 1}
                                                     onClick={() => handleSwitchResponseVariant(idx, 1)}
-                                                    style={{ padding: '0.2rem' }}
+                                                    aria-label="Next reply"
                                                 >
-                                                    <ChevronRight size={12} />
+                                                    <ChevronRight size={14} />
                                                 </button>
                                             </div>
                                         )}
 
-                                        <button className="chat-action-btn" onClick={() => handleBranch(idx)} disabled={branchCount >= 10} title={branchCount >= 10 ? t('chat.branchMax') : t('chat.branch')}>
-                                            <GitBranch size={12} /> {t('chat.branch')} {branchCount > 0 && `(${branchCount}/10)`}
+                                        <button style={iconActionStyle} onClick={() => handleBranch(idx)} disabled={branchCount >= 10} title={branchCount >= 10 ? t('chat.branchMax') : t('chat.branch')} aria-label={branchCount >= 10 ? t('chat.branchMax') : t('chat.branch')}>
+                                            <GitBranch size={14} />
                                         </button>
 
                                         {branchCount > 0 && (
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.2rem', marginLeft: '0.3rem', borderLeft: '1px solid var(--panel-border)', paddingLeft: '0.5rem' }}>
+                                            <div style={{ ...actionStripStyle, paddingLeft: '0.28rem', marginLeft: '0.08rem', borderLeft: '1px solid rgba(68, 76, 95, 0.12)' }}>
                                                 <button
-                                                    className="chat-action-btn"
+                                                    style={iconActionStyle}
                                                     disabled={activeBranchView <= 0}
                                                     onClick={() => setActiveBranchView((value) => Math.max(0, value - 1))}
-                                                    style={{ padding: '0.2rem' }}
+                                                    aria-label="Previous branch"
                                                 >
-                                                    <ChevronLeft size={12} />
+                                                    <ChevronLeft size={14} />
                                                 </button>
-                                                <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', minWidth: '20px', textAlign: 'center' }}>
+                                                <span style={{ ...counterTextStyle, minWidth: '20px' }}>
                                                     {activeBranchView + 1}
                                                 </span>
                                                 <button
-                                                    className="chat-action-btn"
+                                                    style={iconActionStyle}
                                                     disabled={activeBranchView >= branchCount}
                                                     onClick={() => setActiveBranchView((value) => Math.min(branchCount, value + 1))}
-                                                    style={{ padding: '0.2rem' }}
+                                                    aria-label="Next branch"
                                                 >
-                                                    <ChevronRight size={12} />
+                                                    <ChevronRight size={14} />
                                                 </button>
 
                                                 {activeBranchView > 0 && onNavigateToBranch && (
                                                     <button
-                                                        className="chat-action-btn"
+                                                        style={iconActionStyle}
                                                         onClick={() => onNavigateToBranch(node.id, activeBranchView)}
-                                                        style={{ marginLeft: '0.2rem' }}
                                                         title={t('chat.moveTo')}
+                                                        aria-label={t('chat.moveTo')}
                                                     >
-                                                        <ExternalLink size={12} /> {t('chat.moveTo')}
+                                                        <ExternalLink size={14} />
                                                     </button>
                                                 )}
                                             </div>
@@ -1215,11 +1237,11 @@ export default function ChatView({
                 )}
 
                 {isLoading && (
-                    <div style={{ display: 'flex', gap: '0.65rem', animation: 'pulse 1.5s infinite' }}>
-                        <div style={{ width: '30px', height: '30px', borderRadius: '50%', background: 'rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                            <Bot size={14} />
+                    <div style={{ display: 'flex', gap: '0.65rem', animation: 'pulse 1.5s infinite', marginLeft: '0.2rem' }}>
+                        <div style={{ width: '30px', height: '30px', borderRadius: '50%', background: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, boxShadow: '0 10px 20px rgba(29, 33, 44, 0.08)' }}>
+                            <Bot size={14} color="#6f7688" />
                         </div>
-                        <div style={{ padding: '0.7rem 1.1rem', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
+                        <div style={{ padding: '0.78rem 1.08rem', color: '#6f7688', fontSize: '0.88rem', background: '#ffffff', borderRadius: '18px', boxShadow: '0 14px 28px rgba(29, 33, 44, 0.08)' }}>
                             {t('chat.generating')}
                         </div>
                     </div>
@@ -1228,22 +1250,19 @@ export default function ChatView({
                 <div ref={messagesEndRef} />
             </div>
 
-            <div style={{ padding: '1.25rem 2rem', borderTop: '1px solid var(--panel-border)' }}>
+            <div style={{ padding: '1rem 1.5rem 1.3rem' }}>
                 <div
                     style={{
                         display: 'flex',
-                        background: 'var(--panel-bg)',
-                        backdropFilter: 'blur(24px)',
-                        WebkitBackdropFilter: 'blur(24px)',
-                        border: '1px solid var(--panel-border)',
-                        boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
+                        background: 'rgba(255,255,255,0.96)',
+                        border: '1px solid rgba(38, 43, 53, 0.08)',
+                        boxShadow: '0 16px 34px rgba(29, 33, 44, 0.08)',
                         borderRadius: '28px',
                         overflow: 'hidden',
-                        padding: '0.35rem 0.35rem 0.35rem 1.25rem',
+                        padding: '0.45rem 0.45rem 0.45rem 1.15rem',
                         alignItems: 'flex-end',
                         maxWidth: '820px',
                         margin: '0 auto',
-                        transition: 'var(--transition-smooth)',
                         minHeight: '56px',
                     }}
                 >
@@ -1261,7 +1280,7 @@ export default function ChatView({
                             flex: 1,
                             background: 'transparent',
                             border: 'none',
-                            color: 'var(--text-main)',
+                            color: '#232734',
                             resize: 'none',
                             outline: 'none',
                             padding: '0.5rem 0',
@@ -1277,24 +1296,23 @@ export default function ChatView({
                         onClick={handleQueuePrompt}
                         disabled={!input.trim()}
                         style={{
-                            width: '38px',
-                            height: '38px',
+                            width: '40px',
+                            height: '40px',
                             borderRadius: '50%',
-                            background: input.trim() ? 'var(--primary)' : 'rgba(255,255,255,0.05)',
-                            color: input.trim() ? 'white' : 'var(--text-muted)',
+                            background: input.trim() ? '#8f7fe8' : '#ece7f6',
+                            color: input.trim() ? 'white' : '#a09ab4',
                             border: 'none',
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
                             cursor: input.trim() ? 'pointer' : 'default',
                             transition: 'all 0.2s',
-                            marginBottom: '4px',
                         }}
                     >
                         <Send size={16} />
                     </button>
                 </div>
-                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textAlign: 'center', marginTop: '0.4rem' }}>
+                <div style={{ display: 'none' }}>
                     Enterでプロンプト追加 / 生成は各メッセージから
                 </div>
             </div>
