@@ -493,7 +493,11 @@ function EditorContent() {
             data: {
                 ...n.data, dir: direction,
                 systemPrompt: n.data?.isStarter ? n.data.systemPrompt : (n.data?.systemPrompt || sharedGoal),
-                onChange: updateNodeData, onAddBranch, onQuickAdd, onDeleteNode,
+                onChange: updateNodeData,
+                onUpdateNodeData: updateNodeData,
+                onAddBranch,
+                onQuickAdd,
+                onDeleteNode,
                 onOpenChat: (nodeId) => {
                     setActiveChatNodeId(nodeId);
                     if (isDraft) {

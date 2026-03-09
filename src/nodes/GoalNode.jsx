@@ -1,9 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Handle, Position, useUpdateNodeInternals } from '@xyflow/react';
-import { Send, CheckSquare, Square, Target, Bot, User } from 'lucide-react';
+import { Bot, Check, CheckSquare, Send, Square, Target, User } from 'lucide-react';
 import { useLanguage } from '../i18n';
 
-// Parse AI response for interactive elements
 function parseInteractiveContent(text) {
     const parts = [];
     const lines = text.split('\n');
@@ -12,25 +11,22 @@ function parseInteractiveContent(text) {
     let optionGroup = { type: null, items: [], title: '' };
 
     const flushText = () => {
-        if (currentText.trim()) {
-            parts.push({ type: 'text', content: currentText.trim() });
-            currentText = '';
-        }
+        if (!currentText.trim()) return;
+        parts.push({ type: 'text', content: currentText.trim() });
+        currentText = '';
     };
 
     const flushOptions = () => {
-        if (optionGroup.items.length > 0) {
-            parts.push({ ...optionGroup });
-            optionGroup = { type: null, items: [], title: '' };
-            inOptions = false;
-        }
+        if (optionGroup.items.length === 0) return;
+        parts.push({ ...optionGroup });
+        optionGroup = { type: null, items: [], title: '' };
+        inOptions = false;
     };
 
     for (const line of lines) {
         const trimmed = line.trim();
-        const cbMatch = trimmed.match(/^[□☐\-\*]?\s*[\[（(]?\s*[\]）)]?\s*(.+)$/);
-        const isCheckbox = trimmed.startsWith('□') || trimmed.startsWith('☐') || trimmed.match(/^-\s*\[\s*\]/);
-        const numMatch = trimmed.match(/^([1-9A-D][.)\]）])\s*(.+)$/);
+        const isCheckbox = /^-\s*\[\s*\]/.test(trimmed) || /^[-*]\s+/.test(trimmed);
+        const selectMatch = trimmed.match(/^([1-9A-D][.)\]])\s*(.+)$/);
 
         if (isCheckbox) {
             if (!inOptions || optionGroup.type !== 'checkbox') {
@@ -39,47 +35,63 @@ function parseInteractiveContent(text) {
                 inOptions = true;
                 optionGroup = { type: 'checkbox', items: [], title: '' };
             }
-            const label = trimmed.replace(/^[□☐\-\*]\s*[\[（(]?\s*[\]）)]?\s*/, '').trim();
-            optionGroup.items.push({ label, checked: false, id: `cb-${Math.random().toString(36).substr(2, 5)}` });
-        } else if (numMatch && inOptions && optionGroup.type === 'select') {
-            optionGroup.items.push({ label: numMatch[2], value: numMatch[1], id: `sel-${Math.random().toString(36).substr(2, 5)}` });
-        } else if (numMatch && !inOptions) {
-            flushText();
-            inOptions = true;
-            optionGroup = { type: 'select', items: [{ label: numMatch[2], value: numMatch[1], id: `sel-${Math.random().toString(36).substr(2, 5)}` }], title: '' };
-        } else {
-            if (inOptions) {
-                if (trimmed.includes('選んで') || trimmed.includes('select') || trimmed.includes('choose') || trimmed.includes('该当') || trimmed.includes('チェック')) {
-                    flushOptions();
-                    flushText();
-                    optionGroup.title = trimmed;
-                } else if (trimmed === '') {
-                } else {
-                    flushOptions();
-                    currentText += line + '\n';
-                }
-            } else {
-                currentText += line + '\n';
-            }
+            const label = trimmed.replace(/^[-*]\s*(\[\s*\])?\s*/, '').trim();
+            optionGroup.items.push({
+                label,
+                checked: false,
+                id: `cb-${Math.random().toString(36).slice(2, 7)}`,
+            });
+            continue;
         }
+
+        if (selectMatch) {
+            if (!inOptions || optionGroup.type !== 'select') {
+                flushText();
+                flushOptions();
+                inOptions = true;
+                optionGroup = { type: 'select', items: [], title: '' };
+            }
+            optionGroup.items.push({
+                label: selectMatch[2],
+                value: selectMatch[1],
+                id: `sel-${Math.random().toString(36).slice(2, 7)}`,
+            });
+            continue;
+        }
+
+        if (inOptions) {
+            const looksLikeOptionTitle = trimmed.includes('select') || trimmed.includes('choose') || trimmed.includes('選ん');
+            if (looksLikeOptionTitle) {
+                flushOptions();
+                flushText();
+                optionGroup.title = trimmed;
+                continue;
+            }
+
+            if (trimmed !== '') {
+                flushOptions();
+                currentText += `${line}\n`;
+            }
+            continue;
+        }
+
+        currentText += `${line}\n`;
     }
+
     flushText();
     flushOptions();
     return parts;
 }
 
-const GOAL_SYSTEM_PROMPT = `あなたはワークスペースの目標設定アシスタントです。ユーザーがこの作業の目的や目標を定義するのを対話形式でサポートしてください。
+const GOAL_SYSTEM_PROMPT = `あなたはワークスペースの目標設定アシスタントです。
+ユーザーがこのセッションの目的を明確にできるよう、短い対話で支援してください。
 
-重要なルール:
-1. **一度に1つの質問だけ**を聞いてください。複数の質問を同時に出さないでください。
-2. ユーザーの回答を受けて、次の1つの質問を出してください
-3. 質問形式は以下をランダムに使ってください（一問一答で）:
-   - チェックボックス形式 (複数選択可): 該当するものを選んでくださいの後に、□で始まる選択肢を各行に
-   - 番号選択形式 (単一選択): 最適なものを選んでくださいの後に、1. 2. 3. 4. で始まる選択肢を各行に
-   - 自由回答: 具体的な質問文を書くだけ（選択肢なし）
-4. 4〜6往復の会話で切りの良いところでまとめてください
-5. まとめる時は「[GOAL_COMPLETE]」マーカーをつけて、「このチャットの目標:」から始まる簡潔なまとめを書いてください
-6. 対話は自然で温かみのあるトーンで`;
+ルール:
+1. 一度に質問は1つだけにしてください。
+2. 回答を踏まえて次の1問を返してください。
+3. 必要なら選択肢やチェックリストを使ってください。
+4. 目標が固まったら [GOAL_COMPLETE] を先頭につけて、簡潔な目標文を返してください。
+5. 日本語で自然に返答してください。`;
 
 export default function GoalNode({ data, id }) {
     const { t } = useLanguage();
@@ -88,8 +100,11 @@ export default function GoalNode({ data, id }) {
         apiKeys = [],
         selectedApiKey = 0,
         goalHistory = [],
-        onUpdateNodeData
+        onUpdateNodeData,
+        onChange,
+        onSetGoalFromNode,
     } = data;
+    const persistNodeData = onUpdateNodeData || onChange;
 
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
@@ -99,20 +114,21 @@ export default function GoalNode({ data, id }) {
 
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [goalHistory]);
+    }, [goalHistory, isLoading]);
 
     useEffect(() => {
         const frameId = window.requestAnimationFrame(() => {
             updateNodeInternals(id);
         });
         return () => window.cancelAnimationFrame(frameId);
-    }, [goalHistory.length, id, updateNodeInternals]);
+    }, [goalHistory.length, id, isLoading, updateNodeInternals]);
 
     const callAI = async (history) => {
         const apiKeyObj = apiKeys?.[selectedApiKey || 0];
         const keyToUse = apiKeyObj?.key?.trim();
         const provider = apiKeyObj?.provider || 'openai';
         const userModel = apiKeyObj?.model;
+
         if (!keyToUse) return t('chat.noApiKey');
 
         try {
@@ -120,126 +136,184 @@ export default function GoalNode({ data, id }) {
                 const modelToUse = userModel || 'gemini-3.1-pro-preview';
                 const contents = [
                     { role: 'user', parts: [{ text: GOAL_SYSTEM_PROMPT }] },
-                    { role: 'model', parts: [{ text: 'はい、目標設定をお手伝いします。' }] }
+                    { role: 'model', parts: [{ text: '承知しました。目標を一緒に整理しましょう。' }] },
                 ];
-                history.forEach(m => contents.push({ role: m.role === 'user' ? 'user' : 'model', parts: [{ text: m.content }] }));
-                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelToUse}:generateContent?key=${keyToUse}`, {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ contents })
+                history.forEach((message) => {
+                    contents.push({
+                        role: message.role === 'user' ? 'user' : 'model',
+                        parts: [{ text: message.content }],
+                    });
                 });
+
+                const response = await fetch(
+                    `https://generativelanguage.googleapis.com/v1beta/models/${modelToUse}:generateContent?key=${keyToUse}`,
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ contents }),
+                    },
+                );
                 const resData = await response.json();
                 if (!response.ok) throw new Error(resData.error?.message || 'Gemini Error');
                 return resData.candidates?.[0]?.content?.parts?.[0]?.text || 'No response.';
-            } else if (provider === 'anthropic') {
+            }
+
+            if (provider === 'anthropic') {
                 const modelToUse = userModel || 'claude-sonnet-4-6';
-                const msgs = history.map(m => ({ role: m.role === 'ai' ? 'assistant' : 'user', content: m.content }));
+                const messages = history.map((message) => ({
+                    role: message.role === 'ai' ? 'assistant' : 'user',
+                    content: message.content,
+                }));
+
                 const response = await fetch('https://api.anthropic.com/v1/messages', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'x-api-key': keyToUse, 'anthropic-version': '2023-06-01', 'anthropic-dangerously-allow-browser': 'true' },
-                    body: JSON.stringify({ model: modelToUse, max_tokens: 2048, system: GOAL_SYSTEM_PROMPT, messages: msgs })
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'x-api-key': keyToUse,
+                        'anthropic-version': '2023-06-01',
+                        'anthropic-dangerously-allow-browser': 'true',
+                    },
+                    body: JSON.stringify({
+                        model: modelToUse,
+                        max_tokens: 2048,
+                        system: GOAL_SYSTEM_PROMPT,
+                        messages,
+                    }),
                 });
                 const resData = await response.json();
                 if (!response.ok) throw new Error(resData.error?.message || 'Anthropic Error');
                 return resData.content?.[0]?.text || 'No response.';
-            } else {
-                const modelToUse = userModel || (provider === 'openai' ? 'gpt-5.3-chat-latest' : provider === 'openrouter' ? 'google/gemini-3.1-pro-preview' : 'glm-4-plus');
-                const endpoint = provider === 'openrouter' ? 'https://openrouter.ai/api/v1/chat/completions' :
-                    provider === 'glm' ? 'https://open.bigmodel.cn/api/paas/v4/chat/completions' : 'https://api.openai.com/v1/chat/completions';
-                const msgs = [{ role: 'system', content: GOAL_SYSTEM_PROMPT }];
-                history.forEach(m => msgs.push({ role: m.role === 'ai' ? 'assistant' : 'user', content: m.content }));
-                const response = await fetch(endpoint, {
-                    method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${keyToUse}` },
-                    body: JSON.stringify({ model: modelToUse, messages: msgs })
-                });
-                const resData = await response.json();
-                if (!response.ok) throw new Error(resData.error?.message || 'LLM Error');
-                return resData.choices?.[0]?.message?.content || 'No response.';
             }
-        } catch (err) {
-            return `Error: ${err.message}`;
+
+            const modelToUse = userModel || (
+                provider === 'openai'
+                    ? 'gpt-5.3-chat-latest'
+                    : provider === 'openrouter'
+                        ? 'google/gemini-3.1-pro-preview'
+                        : 'glm-4-plus'
+            );
+            const endpoint = provider === 'openrouter'
+                ? 'https://openrouter.ai/api/v1/chat/completions'
+                : provider === 'glm'
+                    ? 'https://open.bigmodel.cn/api/paas/v4/chat/completions'
+                    : 'https://api.openai.com/v1/chat/completions';
+            const messages = [{ role: 'system', content: GOAL_SYSTEM_PROMPT }];
+            history.forEach((message) => {
+                messages.push({
+                    role: message.role === 'ai' ? 'assistant' : 'user',
+                    content: message.content,
+                });
+            });
+
+            const response = await fetch(endpoint, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${keyToUse}`,
+                },
+                body: JSON.stringify({ model: modelToUse, messages }),
+            });
+            const resData = await response.json();
+            if (!response.ok) throw new Error(resData.error?.message || 'LLM Error');
+            return resData.choices?.[0]?.message?.content || 'No response.';
+        } catch (error) {
+            return `Error: ${error.message}`;
         }
     };
 
     const handleSend = async (overrideText = null) => {
         const text = overrideText || input.trim();
-        if (!text || isLoading) return;
+        if (!text || isLoading || !persistNodeData) return;
 
-        const userMsg = { role: 'user', content: text };
-        const updatedHistory = [...(goalHistory || []), userMsg];
-        onUpdateNodeData(id, 'goalHistory', updatedHistory);
+        const userMessage = { role: 'user', content: text };
+        const updatedHistory = [...goalHistory, userMessage];
+        persistNodeData(id, 'goalHistory', updatedHistory);
 
         if (!overrideText) setInput('');
         setIsLoading(true);
 
         const reply = await callAI(updatedHistory);
-        const aiMsg = { role: 'ai', content: reply };
-        const finalHistory = [...updatedHistory, aiMsg];
-        onUpdateNodeData(id, 'goalHistory', finalHistory);
+        const aiMessage = { role: 'ai', content: reply };
+        const finalHistory = [...updatedHistory, aiMessage];
+        persistNodeData(id, 'goalHistory', finalHistory);
         setIsLoading(false);
 
-        if (reply.includes('[GOAL_COMPLETE]') && data.onSetGoalFromNode) {
+        if (reply.includes('[GOAL_COMPLETE]') && onSetGoalFromNode) {
             const goalText = reply.replace('[GOAL_COMPLETE]', '').trim();
-            // This is passed from Editor to trigger the update on the main sequence node
-            data.onSetGoalFromNode(id, goalText);
+            onSetGoalFromNode(id, goalText);
         }
     };
 
-    const toggleCheckbox = (msgIdx, itemId) => {
-        setInteractiveStates(prev => {
-            const key = `${msgIdx}-${itemId}`;
-            return { ...prev, [key]: !prev[key] };
+    const toggleCheckbox = (messageIndex, itemId) => {
+        setInteractiveStates((previous) => {
+            const key = `${messageIndex}-${itemId}`;
+            return { ...previous, [key]: !previous[key] };
         });
     };
 
-    const selectOption = (msgIdx, itemId) => {
-        setSelectedOptions(prev => ({
-            ...prev,
-            [msgIdx]: itemId
-        }));
+    const selectOption = (messageIndex, itemId) => {
+        setSelectedOptions((previous) => ({ ...previous, [messageIndex]: itemId }));
     };
 
-    const submitInteractive = (msgIdx, parsed) => {
+    const submitInteractive = (messageIndex, parsed) => {
         let responseText = '';
-        parsed.forEach(part => {
+        parsed.forEach((part) => {
             if (part.type === 'checkbox') {
-                const selected = part.items.filter(item => interactiveStates[`${msgIdx}-${item.id}`]);
-                if (selected.length > 0) responseText += selected.map(s => s.label).join('、') + '\n';
-            } else if (part.type === 'select') {
-                const selId = selectedOptions[msgIdx];
-                const sel = part.items.find(it => it.id === selId);
-                if (sel) responseText += sel.label + '\n';
+                const selected = part.items.filter((item) => interactiveStates[`${messageIndex}-${item.id}`]);
+                if (selected.length > 0) responseText += `${selected.map((item) => item.label).join(', ')}\n`;
+            }
+
+            if (part.type === 'select') {
+                const selectedId = selectedOptions[messageIndex];
+                const selected = part.items.find((item) => item.id === selectedId);
+                if (selected) responseText += `${selected.label}\n`;
             }
         });
+
         if (responseText.trim()) handleSend(responseText.trim());
     };
 
-    const renderAIMessage = (content, msgIdx) => {
+    const renderAIMessage = (content, messageIndex) => {
         const cleanContent = content.replace('[GOAL_COMPLETE]', '').trim();
         const parsed = parseInteractiveContent(cleanContent);
-        const hasInteractive = parsed.some(p => p.type === 'checkbox' || p.type === 'select');
+        const hasInteractive = parsed.some((part) => part.type === 'checkbox' || part.type === 'select');
 
         return (
             <div>
-                {parsed.map((part, pi) => {
+                {parsed.map((part, partIndex) => {
                     if (part.type === 'text') {
-                        return <div key={pi} style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{part.content}</div>;
+                        return (
+                            <div key={partIndex} style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
+                                {part.content}
+                            </div>
+                        );
                     }
+
                     if (part.type === 'checkbox') {
                         return (
-                            <div key={pi} className="nodrag nopan" style={{ margin: '0.4rem 0' }}>
-                                {part.items.map(item => {
-                                    const checked = !!interactiveStates[`${msgIdx}-${item.id}`];
+                            <div key={partIndex} className="nodrag nopan" style={{ margin: '0.4rem 0' }}>
+                                {part.items.map((item) => {
+                                    const checked = Boolean(interactiveStates[`${messageIndex}-${item.id}`]);
                                     return (
-                                        <div key={item.id}
-                                            onClick={() => toggleCheckbox(msgIdx, item.id)}
+                                        <div
+                                            key={item.id}
+                                            onClick={() => toggleCheckbox(messageIndex, item.id)}
                                             style={{
-                                                display: 'flex', alignItems: 'center', gap: '0.5rem',
-                                                width: '100%', padding: '0.4rem 0.6rem', marginBottom: '0.2rem',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                gap: '0.5rem',
+                                                width: '100%',
+                                                padding: '0.4rem 0.6rem',
+                                                marginBottom: '0.2rem',
                                                 background: checked ? 'rgba(92, 124, 250, 0.15)' : 'rgba(255,255,255,0.02)',
                                                 border: checked ? '1px solid rgba(92, 124, 250, 0.4)' : '1px solid var(--panel-border)',
                                                 boxShadow: checked ? '0 2px 8px rgba(92, 124, 250, 0.15)' : 'none',
-                                                borderRadius: '8px', cursor: 'pointer', color: 'var(--text-main)',
-                                                fontSize: '0.75rem', textAlign: 'left', transition: 'var(--transition-smooth)'
+                                                borderRadius: '8px',
+                                                cursor: 'pointer',
+                                                color: 'var(--text-main)',
+                                                fontSize: '0.75rem',
+                                                textAlign: 'left',
+                                                transition: 'var(--transition-smooth)',
                                             }}
                                         >
                                             {checked ? <CheckSquare size={14} color="var(--primary)" /> : <Square size={14} color="var(--text-muted)" />}
@@ -250,32 +324,48 @@ export default function GoalNode({ data, id }) {
                             </div>
                         );
                     }
+
                     if (part.type === 'select') {
                         return (
-                            <div key={pi} className="nodrag nopan" style={{ margin: '0.4rem 0', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                                {part.items.map(item => {
-                                    const isSelected = selectedOptions[msgIdx] === item.id;
+                            <div key={partIndex} className="nodrag nopan" style={{ margin: '0.4rem 0', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                                {part.items.map((item) => {
+                                    const isSelected = selectedOptions[messageIndex] === item.id;
                                     return (
-                                        <div key={item.id}
-                                            onClick={() => selectOption(msgIdx, item.id)}
+                                        <div
+                                            key={item.id}
+                                            onClick={() => selectOption(messageIndex, item.id)}
                                             style={{
                                                 padding: '0.4rem 0.6rem',
                                                 background: isSelected ? 'rgba(92, 124, 250, 0.15)' : 'rgba(255,255,255,0.02)',
                                                 border: isSelected ? '1px solid var(--primary)' : '1px solid var(--panel-border)',
                                                 boxShadow: isSelected ? '0 2px 8px rgba(92, 124, 250, 0.2)' : 'none',
-                                                borderRadius: '8px', cursor: 'pointer', color: 'var(--text-main)',
-                                                fontSize: '0.75rem', textAlign: 'left', transition: 'var(--transition-smooth)',
-                                                display: 'flex', alignItems: 'center', gap: '0.3rem'
+                                                borderRadius: '8px',
+                                                cursor: 'pointer',
+                                                color: 'var(--text-main)',
+                                                fontSize: '0.75rem',
+                                                textAlign: 'left',
+                                                transition: 'var(--transition-smooth)',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                gap: '0.3rem',
                                             }}
                                         >
-                                            <span style={{
-                                                width: '18px', height: '18px', borderRadius: '50%', flexShrink: 0,
-                                                background: isSelected ? 'var(--primary)' : 'rgba(255,255,255,0.06)',
-                                                color: isSelected ? 'white' : 'var(--text-muted)',
-                                                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                                fontSize: '0.65rem', fontWeight: 600
-                                            }}>
-                                                {item.value.replace(/[.)）\]]/g, '')}
+                                            <span
+                                                style={{
+                                                    width: '18px',
+                                                    height: '18px',
+                                                    borderRadius: '50%',
+                                                    flexShrink: 0,
+                                                    background: isSelected ? 'var(--primary)' : 'rgba(255,255,255,0.06)',
+                                                    color: isSelected ? 'white' : 'var(--text-muted)',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                    fontSize: '0.65rem',
+                                                    fontWeight: 600,
+                                                }}
+                                            >
+                                                {item.value.replace(/[.)\]]/g, '')}
                                             </span>
                                             {item.label}
                                         </div>
@@ -284,90 +374,166 @@ export default function GoalNode({ data, id }) {
                             </div>
                         );
                     }
+
                     return null;
                 })}
-                {hasInteractive && msgIdx === (goalHistory || []).length - 1 && !content.includes('[GOAL_COMPLETE]') && (
+
+                {hasInteractive && messageIndex === goalHistory.length - 1 && !content.includes('[GOAL_COMPLETE]') && (
                     <button
                         className="nodrag nopan"
-                        onClick={() => submitInteractive(msgIdx, parsed)}
+                        onClick={() => submitInteractive(messageIndex, parsed)}
                         style={{
-                            marginTop: '0.4rem', padding: '0.35rem 0.8rem', background: 'var(--primary)',
-                            color: 'white', border: 'none', borderRadius: '12px', cursor: 'pointer',
-                            fontSize: '0.75rem', fontWeight: 500, transition: 'var(--transition-smooth)'
+                            marginTop: '0.4rem',
+                            padding: '0.35rem 0.8rem',
+                            background: 'var(--primary)',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '12px',
+                            cursor: 'pointer',
+                            fontSize: '0.75rem',
+                            fontWeight: 500,
+                            transition: 'var(--transition-smooth)',
                         }}
                     >
-                        回答を送信 →
+                        選択を送信
                     </button>
                 )}
             </div>
         );
     };
 
+    const hasCompletedGoal = goalHistory.some((message) => message.content.includes('[GOAL_COMPLETE]'));
+
     return (
-        <div className="glass-panel" style={{
-            width: '380px',
-            height: '460px',
-            display: 'flex',
-            flexDirection: 'column',
-            overflow: 'visible',
-            position: 'relative',
-            borderRadius: '16px',
-            border: '1px solid var(--primary)', // Highlight to show it's special
-            boxShadow: '0 8px 32px rgba(92, 124, 250, 0.15)'
-        }}>
-            {/* Header */}
-            <div className="editor-header" style={{
-                padding: '0.6rem 1rem', display: 'flex', alignItems: 'center', gap: '0.5rem',
-                background: 'linear-gradient(135deg, rgba(92,124,250,0.1), transparent)'
-            }}>
-                <div style={{ width: '28px', height: '28px', borderRadius: '8px', background: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white' }}>
+        <div
+            className="glass-panel"
+            style={{
+                width: '380px',
+                height: '460px',
+                display: 'flex',
+                flexDirection: 'column',
+                overflow: 'visible',
+                position: 'relative',
+                borderRadius: '16px',
+                border: '1px solid var(--primary)',
+                boxShadow: '0 8px 32px rgba(92, 124, 250, 0.15)',
+            }}
+        >
+            <div
+                className="editor-header"
+                style={{
+                    flexShrink: 0,
+                    padding: '0.6rem 1rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    background: 'linear-gradient(135deg, rgba(92,124,250,0.1), transparent)',
+                }}
+            >
+                <div
+                    style={{
+                        width: '28px',
+                        height: '28px',
+                        borderRadius: '8px',
+                        background: 'var(--primary)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: 'white',
+                    }}
+                >
                     <Target size={14} />
                 </div>
                 <div>
                     <h3 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-main)' }}>{t('goal.title')}</h3>
-                    <p style={{ margin: 0, fontSize: '0.65rem', color: 'var(--text-muted)' }}>ワークスペースの目的を設定します</p>
+                    <p style={{ margin: 0, fontSize: '0.65rem', color: 'var(--text-muted)' }}>固定サイズのまま、内部スクロールで使えます</p>
                 </div>
             </div>
 
-            {/* Content / Chat */}
-            <div className="nodrag nowheel" style={{
-                flex: 1, overflowY: 'auto', padding: '0.8rem', display: 'flex', flexDirection: 'column', gap: '0.75rem'
-            }}>
-                {(!goalHistory || goalHistory.length === 0) && (
+            <div
+                className="nodrag nowheel"
+                style={{
+                    flex: 1,
+                    minHeight: 0,
+                    overflowY: 'auto',
+                    padding: '0.8rem',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.75rem',
+                }}
+            >
+                {goalHistory.length === 0 && (
                     <div style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
                         <Bot size={24} style={{ opacity: 0.3, marginBottom: '0.4rem' }} />
-                        <p style={{ margin: 0 }}>右のノードでチャットを始める前に、ここで目的を定めましょう。</p>
+                        <p style={{ margin: 0 }}>ここで目標を会話形式で決められます。</p>
                     </div>
                 )}
-                {(goalHistory || []).map((msg, idx) => (
-                    <div key={idx} style={{
-                        display: 'flex', gap: '0.5rem',
-                        flexDirection: msg.role === 'user' ? 'row-reverse' : 'row'
-                    }}>
-                        <div style={{ width: '24px', height: '24px', borderRadius: '50%', flexShrink: 0, background: msg.role === 'user' ? 'var(--primary)' : 'rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.7rem' }}>
-                            {msg.role === 'user' ? <User size={12} color="white" /> : <Target size={12} color="var(--primary)" />}
+
+                {goalHistory.map((message, messageIndex) => (
+                    <div
+                        key={messageIndex}
+                        style={{
+                            display: 'flex',
+                            gap: '0.5rem',
+                            flexDirection: message.role === 'user' ? 'row-reverse' : 'row',
+                        }}
+                    >
+                        <div
+                            style={{
+                                width: '24px',
+                                height: '24px',
+                                borderRadius: '50%',
+                                flexShrink: 0,
+                                background: message.role === 'user' ? 'var(--primary)' : 'rgba(255,255,255,0.06)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontSize: '0.7rem',
+                            }}
+                        >
+                            {message.role === 'user' ? <User size={12} color="white" /> : <Target size={12} color="var(--primary)" />}
                         </div>
-                        <div style={{
-                            background: msg.role === 'user' ? 'linear-gradient(135deg, var(--primary) 0%, #748ffc 100%)' : 'var(--panel-bg)',
-                            color: msg.role === 'user' ? 'white' : 'var(--text-main)',
-                            padding: '0.55rem 0.8rem',
-                            borderRadius: msg.role === 'user' ? '12px 12px 2px 12px' : '12px 12px 12px 2px',
-                            border: msg.role === 'ai' ? '1px solid var(--panel-border)' : '1px solid rgba(255,255,255,0.1)',
-                            boxShadow: msg.role === 'user' ? '0 2px 8px rgba(92, 124, 250, 0.2)' : 'var(--shadow-sm)',
-                            maxWidth: '88%', fontSize: '0.82rem', lineHeight: 1.6
-                        }}>
-                            {msg.role === 'ai' ? renderAIMessage(msg.content, idx) : msg.content}
+                        <div
+                            style={{
+                                background: message.role === 'user' ? 'linear-gradient(135deg, var(--primary) 0%, #748ffc 100%)' : 'var(--panel-bg)',
+                                color: message.role === 'user' ? 'white' : 'var(--text-main)',
+                                padding: '0.55rem 0.8rem',
+                                borderRadius: message.role === 'user' ? '12px 12px 2px 12px' : '12px 12px 12px 2px',
+                                border: message.role === 'ai' ? '1px solid var(--panel-border)' : '1px solid rgba(255,255,255,0.1)',
+                                boxShadow: message.role === 'user' ? '0 2px 8px rgba(92, 124, 250, 0.2)' : 'var(--shadow-sm)',
+                                maxWidth: '88%',
+                                fontSize: '0.82rem',
+                                lineHeight: 1.6,
+                            }}
+                        >
+                            {message.role === 'ai' ? renderAIMessage(message.content, messageIndex) : message.content}
                         </div>
                     </div>
                 ))}
+
                 {isLoading && (
                     <div style={{ display: 'flex', gap: '0.5rem', animation: 'pulse 1.5s infinite' }}>
-                        <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: 'rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Target size={12} color="var(--primary)" /></div>
+                        <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: 'rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <Target size={12} color="var(--primary)" />
+                        </div>
                         <div style={{ padding: '0.55rem 0.8rem', color: 'var(--text-muted)', fontSize: '0.8rem' }}>{t('goal.thinking')}</div>
                     </div>
                 )}
-                {(goalHistory || []).some(m => m.content.includes('[GOAL_COMPLETE]')) && (
-                    <div style={{ textAlign: 'center', color: 'var(--action)', fontSize: '0.8rem', fontWeight: 500, padding: '0.5rem', animation: 'fadeIn 0.5s', border: '1px solid rgba(52, 211, 153, 0.2)', borderRadius: '8px', background: 'rgba(52, 211, 153, 0.05)' }}>
+
+                {hasCompletedGoal && (
+                    <div
+                        style={{
+                            textAlign: 'center',
+                            color: 'var(--action)',
+                            fontSize: '0.8rem',
+                            fontWeight: 500,
+                            padding: '0.5rem',
+                            animation: 'fadeIn 0.5s',
+                            border: '1px solid rgba(52, 211, 153, 0.2)',
+                            borderRadius: '8px',
+                            background: 'rgba(52, 211, 153, 0.05)',
+                        }}
+                    >
                         <Check size={14} style={{ display: 'inline', marginRight: '4px', verticalAlign: '-2px' }} />
                         {t('goal.complete')}
                     </div>
@@ -375,25 +541,70 @@ export default function GoalNode({ data, id }) {
                 <div ref={messagesEndRef} />
             </div>
 
-            {/* Input */}
-            <div className="nodrag nopan" style={{ padding: '0.6rem', borderTop: '1px solid var(--panel-border)', background: 'rgba(0,0,0,0.1)' }}>
+            <div className="nodrag nopan" style={{ flexShrink: 0, padding: '0.6rem', borderTop: '1px solid var(--panel-border)', background: 'rgba(0,0,0,0.1)' }}>
                 <div style={{ display: 'flex', background: 'var(--panel-bg)', border: '1px solid var(--panel-border)', borderRadius: '20px', padding: '0.2rem 0.2rem 0.2rem 0.6rem', alignItems: 'center' }}>
                     <textarea
-                        value={input} onChange={e => setInput(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+                        value={input}
+                        onChange={(event) => setInput(event.target.value)}
+                        onKeyDown={(event) => {
+                            if (event.key === 'Enter' && !event.shiftKey) {
+                                event.preventDefault();
+                                handleSend();
+                            }
+                        }}
                         placeholder={t('goal.placeholder')}
-                        style={{ flex: 1, background: 'transparent', border: 'none', color: 'var(--text-main)', resize: 'none', outline: 'none', padding: '0.4rem 0', minHeight: '24px', maxHeight: '80px', fontSize: '0.8rem', fontFamily: 'inherit' }}
+                        style={{
+                            flex: 1,
+                            background: 'transparent',
+                            border: 'none',
+                            color: 'var(--text-main)',
+                            resize: 'none',
+                            outline: 'none',
+                            padding: '0.4rem 0',
+                            minHeight: '24px',
+                            maxHeight: '80px',
+                            fontSize: '0.8rem',
+                            fontFamily: 'inherit',
+                        }}
                         rows={1}
                     />
-                    <button onClick={() => handleSend()} disabled={isLoading || !input.trim()}
-                        style={{ width: '28px', height: '28px', borderRadius: '50%', background: input.trim() ? 'var(--primary)' : 'rgba(255,255,255,0.05)', color: input.trim() ? 'white' : 'var(--text-muted)', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: input.trim() ? 'pointer' : 'default', transition: 'all 0.2s', flexShrink: 0 }}>
+                    <button
+                        onClick={() => handleSend()}
+                        disabled={isLoading || !input.trim() || !persistNodeData}
+                        style={{
+                            width: '28px',
+                            height: '28px',
+                            borderRadius: '50%',
+                            background: input.trim() ? 'var(--primary)' : 'rgba(255,255,255,0.05)',
+                            color: input.trim() ? 'white' : 'var(--text-muted)',
+                            border: 'none',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            cursor: input.trim() ? 'pointer' : 'default',
+                            transition: 'all 0.2s',
+                            flexShrink: 0,
+                        }}
+                    >
                         <Send size={12} />
                     </button>
                 </div>
             </div>
 
-            {/* Connection Handle to next node */}
-            <Handle type="source" position={Position.Right} id="goal" style={{ right: -10, width: 16, height: 16, background: 'var(--primary)', border: '2px solid var(--bg-dark)', boxShadow: '0 0 0 5px rgba(92, 124, 250, 0.18)', zIndex: 20 }} />
+            <Handle
+                type="source"
+                position={Position.Right}
+                id="goal"
+                style={{
+                    right: -10,
+                    width: 16,
+                    height: 16,
+                    background: 'var(--primary)',
+                    border: '2px solid var(--bg-dark)',
+                    boxShadow: '0 0 0 5px rgba(92, 124, 250, 0.18)',
+                    zIndex: 20,
+                }}
+            />
         </div>
     );
 }
