@@ -454,11 +454,13 @@ export default function MapView({ spaceTitle, nodes, mapState, onMapStateChange,
                         const palette = getTilePalette(tile.kind, revealed);
                         const landmark = LANDMARKS.find((item) => item.x === tile.x && item.y === tile.y);
                         const isPlayerTile = currentTileX === tile.x && currentTileY === tile.y;
+                        const isStartTile = tile.x >= HUT_CENTER.x - 1 && tile.x <= HUT_CENTER.x && tile.y >= HUT_CENTER.y - 1 && tile.y <= HUT_CENTER.y;
 
                         return (
                             <button type="button" key={tile.id} onClick={() => handleTileClick(tile.x, tile.y)} style={{ position: 'absolute', left: tile.screen.left, top: tile.screen.top, width: `${tileWidth}px`, height: `${tileHeight + TILE_DEPTH}px`, transform: 'translate(-50%, -50%)', border: 'none', background: 'transparent', padding: 0, cursor: isBlockedTile(tile.x, tile.y) ? 'default' : 'pointer', zIndex: tile.x + tile.y }} aria-label={`${tile.x},${tile.y}`}>
                                 <div style={{ position: 'absolute', left: 0, top: `${tileHeight / 2}px`, width: 0, height: 0, borderTop: `${TILE_DEPTH}px solid ${palette.edge}`, borderLeft: `${tileWidth / 2}px solid transparent`, borderRight: `${tileWidth / 2}px solid transparent`, filter: 'brightness(0.82)' }} />
                                 <div style={{ position: 'absolute', inset: 0, clipPath: 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)', background: palette.top, boxShadow: revealed ? `0 6px 0 ${palette.edge}, inset 0 1px 0 rgba(255,255,255,0.18), 0 0 0 1px ${palette.outline}` : `0 6px 0 ${palette.edge}, inset 0 1px 0 rgba(255,255,255,0.06), 0 0 0 1px ${palette.outline}`, opacity: revealed ? 1 : 0.9 }} />
+                                {isStartTile && <div style={{ position: 'absolute', inset: '6px', clipPath: 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)', border: '2px solid rgba(99, 215, 255, 0.92)', boxShadow: '0 0 0 6px rgba(99, 215, 255, 0.12)' }} />}
                                 {(tile.kind === 'path' || landmark) && <div style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -55%)', width: landmark ? '18px' : '14px', height: landmark ? '18px' : '14px', borderRadius: '6px', background: palette.chip, boxShadow: landmark ? `0 0 20px ${landmark.accent}55` : 'none' }} />}
                                 {isPlayerTile && <div style={{ position: 'absolute', inset: '10px', clipPath: 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)', border: '2px solid rgba(255,255,255,0.75)', background: 'rgba(255,255,255,0.08)' }} />}
                             </button>
@@ -473,6 +475,10 @@ export default function MapView({ spaceTitle, nodes, mapState, onMapStateChange,
 
                     <div style={{ position: 'absolute', left: hutScreen.left, top: hutScreen.top - tileHeight * 1.55, transform: 'translate(-50%, -50%)', zIndex: 999 }}>
                         <HutSprite size={190 * zoom} />
+                    </div>
+                    <div style={{ position: 'absolute', left: hutScreen.left, top: hutScreen.top - tileHeight * 2.25, transform: 'translate(-50%, -50%)', zIndex: 1000, display: 'inline-flex', alignItems: 'center', gap: '0.35rem', padding: '0.32rem 0.65rem', borderRadius: '999px', background: 'rgba(7, 18, 33, 0.86)', border: '1px solid rgba(99, 215, 255, 0.45)', color: '#f7fbff', fontSize: '0.74rem', fontWeight: 700, boxShadow: '0 12px 24px rgba(99, 215, 255, 0.22)' }}>
+                        <Sparkles size={12} color="#63d7ff" />
+                        START
                     </div>
 
                     {landmarkScreens.map((landmark) => (
