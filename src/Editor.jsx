@@ -444,14 +444,33 @@ function EditorContent() {
     const onConnect = useCallback((params) => {
         // Prevent self-loops
         if (params.source === params.target) return;
-        setEdges((eds) => addEdge({ ...params, type: 'deleteEdge' }, eds));
+        const sourceNode = nodes.find((node) => node.id === params.source);
+        setEdges((eds) => {
+            const baseEdges = sourceNode?.type === 'goalNode'
+                ? eds.filter((edge) => edge.source !== params.source)
+                : eds;
+            return addEdge({
+                ...params,
+                sourceHandle: params.sourceHandle || (sourceNode?.type === 'goalNode' ? 'goal' : params.sourceHandle),
+                type: 'deleteEdge',
+            }, baseEdges);
+        });
+        window.requestAnimationFrame(() => {
+            if (params.source) updateNodeInternals(params.source);
+            if (params.target) updateNodeInternals(params.target);
+        });
         markDraftDirty();
-    }, [markDraftDirty, setEdges]);
+    }, [markDraftDirty, nodes, setEdges, updateNodeInternals]);
 
     const onDeleteEdge = useCallback((edgeId) => {
+        const edgeToDelete = edges.find((edge) => edge.id === edgeId);
         setEdges(eds => eds.filter(e => e.id !== edgeId));
+        window.requestAnimationFrame(() => {
+            if (edgeToDelete?.source) updateNodeInternals(edgeToDelete.source);
+            if (edgeToDelete?.target) updateNodeInternals(edgeToDelete.target);
+        });
         markDraftDirty();
-    }, [markDraftDirty, setEdges]);
+    }, [edges, markDraftDirty, setEdges, updateNodeInternals]);
 
     const onEdgeClick = useCallback((event, edge) => {
         event.stopPropagation();

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Handle, Position } from '@xyflow/react';
+import { Handle, Position, useUpdateNodeInternals } from '@xyflow/react';
 import { Send, CheckSquare, Square, Target, Bot, User } from 'lucide-react';
 import { useLanguage } from '../i18n';
 
@@ -83,6 +83,7 @@ const GOAL_SYSTEM_PROMPT = `あなたはワークスペースの目標設定ア�
 
 export default function GoalNode({ data, id }) {
     const { t } = useLanguage();
+    const updateNodeInternals = useUpdateNodeInternals();
     const {
         apiKeys = [],
         selectedApiKey = 0,
@@ -99,6 +100,13 @@ export default function GoalNode({ data, id }) {
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [goalHistory]);
+
+    useEffect(() => {
+        const frameId = window.requestAnimationFrame(() => {
+            updateNodeInternals(id);
+        });
+        return () => window.cancelAnimationFrame(frameId);
+    }, [goalHistory.length, id, updateNodeInternals]);
 
     const callAI = async (history) => {
         const apiKeyObj = apiKeys?.[selectedApiKey || 0];
@@ -301,7 +309,8 @@ export default function GoalNode({ data, id }) {
             height: '460px',
             display: 'flex',
             flexDirection: 'column',
-            overflow: 'hidden',
+            overflow: 'visible',
+            position: 'relative',
             borderRadius: '16px',
             border: '1px solid var(--primary)', // Highlight to show it's special
             boxShadow: '0 8px 32px rgba(92, 124, 250, 0.15)'
@@ -384,7 +393,7 @@ export default function GoalNode({ data, id }) {
             </div>
 
             {/* Connection Handle to next node */}
-            <Handle type="source" position={Position.Right} id="goal" style={{ right: -8, width: 14, height: 14, background: 'var(--primary)', border: '2px solid var(--bg-dark)' }} />
+            <Handle type="source" position={Position.Right} id="goal" style={{ right: -10, width: 16, height: 16, background: 'var(--primary)', border: '2px solid var(--bg-dark)', boxShadow: '0 0 0 5px rgba(92, 124, 250, 0.18)', zIndex: 20 }} />
         </div>
     );
 }

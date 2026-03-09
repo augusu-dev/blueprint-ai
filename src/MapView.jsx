@@ -42,7 +42,7 @@ import {
     moveWithCollision,
     worldToScreen,
 } from './lib/mapWorld';
-import { MAP_WORLD_SIZE, clampWorldCoordinate, createTileId, normalizeMapState } from './lib/space';
+import { MAP_CENTER_INDEX, MAP_WORLD_SIZE, clampWorldCoordinate, createTileId, normalizeMapState } from './lib/space';
 
 function DPadButton({ label, icon, onMouseDown, onMouseUp, onMouseLeave, onTouchStart, onTouchEnd }) {
     return (
@@ -71,6 +71,108 @@ function DPadButton({ label, icon, onMouseDown, onMouseUp, onMouseLeave, onTouch
         >
             {icon}
         </button>
+    );
+}
+
+function WorldOverviewCard({ player, currentLandmark, onMoveToBase }) {
+    const tilePercent = 100 / MAP_WORLD_SIZE;
+    const startLeft = (MAP_CENTER_INDEX - 1) * tilePercent;
+    const startTop = (MAP_CENTER_INDEX - 1) * tilePercent;
+
+    return (
+        <div style={{ borderRadius: '22px', padding: '0.95rem', background: 'linear-gradient(180deg, rgba(16,32,58,0.95) 0%, rgba(10,20,37,0.95) 100%)', border: '1px solid rgba(255,255,255,0.08)', boxShadow: '0 22px 40px rgba(0,0,0,0.22)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', marginBottom: '0.8rem' }}>
+                <div>
+                    <div style={{ fontSize: '0.72rem', letterSpacing: '0.12em', textTransform: 'uppercase', color: '#9bb0c7' }}>World Overview</div>
+                    <div style={{ fontSize: '1rem', fontWeight: 700, color: '#f8fbff', marginTop: '0.18rem' }}>100 x 100 Map</div>
+                </div>
+                <button type="button" className="chat-action-btn" onClick={onMoveToBase}>
+                    <Compass size={12} />
+                    スタートへ
+                </button>
+            </div>
+
+            <div style={{ position: 'relative', aspectRatio: '1 / 1', borderRadius: '22px', overflow: 'hidden', border: '1px solid rgba(111, 164, 255, 0.18)', background: 'linear-gradient(180deg, #1c7d3a 0%, #0f4f24 100%)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06), 0 20px 36px rgba(0,0,0,0.24)' }}>
+                <div
+                    style={{
+                        position: 'absolute',
+                        inset: 0,
+                        backgroundImage: `
+                            linear-gradient(rgba(255,255,255,0.04) 1px, transparent 1px),
+                            linear-gradient(90deg, rgba(255,255,255,0.04) 1px, transparent 1px),
+                            linear-gradient(rgba(7,18,33,0.16) 1px, transparent 1px),
+                            linear-gradient(90deg, rgba(7,18,33,0.16) 1px, transparent 1px)
+                        `,
+                        backgroundSize: `${tilePercent}% ${tilePercent}%, ${tilePercent}% ${tilePercent}%, 10% 10%, 10% 10%`,
+                        backgroundPosition: '0 0',
+                    }}
+                />
+                <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(circle at 50% 28%, rgba(255,255,255,0.16), transparent 34%), linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(2,8,14,0.16) 100%)' }} />
+
+                <div
+                    style={{
+                        position: 'absolute',
+                        left: `${startLeft}%`,
+                        top: `${startTop}%`,
+                        width: `${tilePercent * 2}%`,
+                        height: `${tilePercent * 2}%`,
+                        border: '2px solid rgba(99, 215, 255, 0.95)',
+                        background: 'rgba(99, 215, 255, 0.16)',
+                        boxShadow: '0 0 0 8px rgba(99, 215, 255, 0.12)',
+                    }}
+                />
+
+                {LANDMARKS.map((landmark) => (
+                    <div
+                        key={landmark.id}
+                        style={{
+                            position: 'absolute',
+                            left: `${((landmark.x + 0.5) / MAP_WORLD_SIZE) * 100}%`,
+                            top: `${((landmark.y + 0.5) / MAP_WORLD_SIZE) * 100}%`,
+                            transform: 'translate(-50%, -50%)',
+                            width: '10px',
+                            height: '10px',
+                            borderRadius: '999px',
+                            background: landmark.accent,
+                            boxShadow: `0 0 0 4px ${landmark.accent}22, 0 0 18px ${landmark.accent}66`,
+                        }}
+                    />
+                ))}
+
+                <div style={{ position: 'absolute', left: `${(HUT_CENTER.x / MAP_WORLD_SIZE) * 100}%`, top: `${(HUT_CENTER.y / MAP_WORLD_SIZE) * 100}%`, transform: 'translate(-50%, -72%)', filter: 'drop-shadow(0 10px 14px rgba(0,0,0,0.22))' }}>
+                    <HutSprite size={50} />
+                </div>
+
+                <div style={{ position: 'absolute', left: `${(player.x / MAP_WORLD_SIZE) * 100}%`, top: `${(player.y / MAP_WORLD_SIZE) * 100}%`, transform: 'translate(-50%, -74%)', filter: 'drop-shadow(0 12px 18px rgba(0,0,0,0.24))' }}>
+                    <LionScoutSprite size={34} />
+                </div>
+
+                <div style={{ position: 'absolute', left: '0.85rem', top: '0.85rem', display: 'inline-flex', alignItems: 'center', gap: '0.4rem', padding: '0.35rem 0.55rem', borderRadius: '999px', background: 'rgba(7,18,33,0.78)', border: '1px solid rgba(255,255,255,0.08)', color: '#f7fbff', fontSize: '0.72rem', fontWeight: 700 }}>
+                    <Sparkles size={12} color="#63d7ff" />
+                    中央4マス開始
+                </div>
+
+                <div style={{ position: 'absolute', right: '0.85rem', bottom: '0.85rem', display: 'inline-flex', alignItems: 'center', gap: '0.35rem', padding: '0.35rem 0.55rem', borderRadius: '999px', background: 'rgba(7,18,33,0.8)', border: '1px solid rgba(255,255,255,0.08)', color: '#f7fbff', fontSize: '0.72rem', fontWeight: 700 }}>
+                    <Flag size={12} color={currentLandmark?.accent || '#7ed8ff'} />
+                    {currentLandmark ? currentLandmark.badge : 'Field'}
+                </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '0.45rem', marginTop: '0.75rem' }}>
+                <div style={{ padding: '0.58rem 0.62rem', borderRadius: '14px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                    <div style={{ fontSize: '0.66rem', color: '#8ea7c2', letterSpacing: '0.08em', textTransform: 'uppercase' }}>Player</div>
+                    <div style={{ fontSize: '0.84rem', fontWeight: 700, color: '#f5fbff', marginTop: '0.18rem' }}>{Math.floor(player.x) + 1}, {Math.floor(player.y) + 1}</div>
+                </div>
+                <div style={{ padding: '0.58rem 0.62rem', borderRadius: '14px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                    <div style={{ fontSize: '0.66rem', color: '#8ea7c2', letterSpacing: '0.08em', textTransform: 'uppercase' }}>Start</div>
+                    <div style={{ fontSize: '0.84rem', fontWeight: 700, color: '#f5fbff', marginTop: '0.18rem' }}>50 / 50</div>
+                </div>
+                <div style={{ padding: '0.58rem 0.62rem', borderRadius: '14px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                    <div style={{ fontSize: '0.66rem', color: '#8ea7c2', letterSpacing: '0.08em', textTransform: 'uppercase' }}>Quest</div>
+                    <div style={{ fontSize: '0.84rem', fontWeight: 700, color: '#f5fbff', marginTop: '0.18rem' }}>{currentLandmark ? currentLandmark.badge : '探索中'}</div>
+                </div>
+            </div>
+        </div>
     );
 }
 
@@ -371,8 +473,11 @@ export default function MapView({ spaceTitle, nodes, mapState, onMapStateChange,
 
     const currentTileLabel = getTileLabel(getTileKind(currentTileX, currentTileY));
     const isCompactLayout = viewportWidth < 1180;
+    const showLegacyPilotCard = false;
     const leftPanel = (
         <div className="glass-panel" style={{ borderRadius: '28px', padding: '1rem', background: 'linear-gradient(180deg, rgba(7,18,36,0.96) 0%, rgba(5,13,24,0.96) 100%)', border: '1px solid rgba(111, 164, 255, 0.14)', display: 'flex', flexDirection: 'column', gap: '1rem', overflow: 'auto' }}>
+            <WorldOverviewCard player={player} currentLandmark={currentLandmark} onMoveToBase={moveToBase} />
+            {showLegacyPilotCard && (
             <div style={{ borderRadius: '22px', padding: '0.95rem', background: 'linear-gradient(180deg, rgba(16,32,58,0.95) 0%, rgba(10,20,37,0.95) 100%)', border: '1px solid rgba(255,255,255,0.08)', boxShadow: '0 22px 40px rgba(0,0,0,0.22)' }}>
                 <div style={{ fontSize: '0.72rem', letterSpacing: '0.12em', textTransform: 'uppercase', color: '#9bb0c7', marginBottom: '0.7rem' }}>Session Pilot</div>
                 <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '0.5rem' }}>
@@ -383,6 +488,7 @@ export default function MapView({ spaceTitle, nodes, mapState, onMapStateChange,
                     このライオンが学習の進行役です。移動しながらクエストを開き、chat と graph に戻ります。
                 </div>
             </div>
+            )}
 
             <div style={{ borderRadius: '22px', padding: '0.95rem', background: 'linear-gradient(180deg, rgba(14,27,49,0.94) 0%, rgba(8,15,28,0.95) 100%)', border: '1px solid rgba(255,255,255,0.08)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
@@ -440,7 +546,7 @@ export default function MapView({ spaceTitle, nodes, mapState, onMapStateChange,
                 </div>
             </div>
 
-            <div ref={fieldRef} onWheel={handleZoom} style={{ position: 'relative', flex: 1, minHeight: 0, borderRadius: '34px', overflow: 'hidden', border: '1px solid rgba(111, 164, 255, 0.18)', background: 'linear-gradient(180deg, #134d28 0%, #1d8038 100%)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06), 0 30px 60px rgba(0,0,0,0.24)' }}>
+            <div ref={fieldRef} onWheel={handleZoom} style={{ position: 'relative', flex: isCompactLayout ? '0 0 auto' : 1, minHeight: isCompactLayout ? '560px' : 0, height: isCompactLayout ? '68vh' : undefined, borderRadius: '34px', overflow: 'hidden', border: '1px solid rgba(111, 164, 255, 0.18)', background: 'linear-gradient(180deg, #134d28 0%, #1d8038 100%)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06), 0 30px 60px rgba(0,0,0,0.24)' }}>
                 <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(circle at top, rgba(255,255,255,0.12), transparent 45%), radial-gradient(circle at bottom, rgba(0,0,0,0.22), transparent 40%)' }} />
                 <div style={{ position: 'absolute', top: '0.9rem', left: '1rem', zIndex: 10, display: 'inline-flex', alignItems: 'center', gap: '0.65rem', padding: '0.55rem 0.8rem', borderRadius: '16px', background: 'rgba(8,18,33,0.74)', border: '1px solid rgba(255,255,255,0.08)', color: '#f4fbff', fontSize: '0.8rem' }}>
                     <span>World 100 x 100</span>
@@ -577,8 +683,8 @@ export default function MapView({ spaceTitle, nodes, mapState, onMapStateChange,
 
     return (
         <div style={{ flex: 1, minHeight: 0, background: 'linear-gradient(180deg, #071327 0%, #04101d 100%)', display: 'grid', gridTemplateColumns: isCompactLayout ? '1fr' : '260px minmax(0, 1fr) 290px', gap: '1rem', padding: '1rem', overflow: isCompactLayout ? 'auto' : 'hidden' }}>
-            {leftPanel}
-            {centerPanel}
+            {isCompactLayout ? centerPanel : leftPanel}
+            {isCompactLayout ? leftPanel : centerPanel}
             {rightPanel}
         </div>
     );
