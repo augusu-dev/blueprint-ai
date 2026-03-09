@@ -434,6 +434,22 @@ function EditorContent() {
         }
     }, [edges]);
 
+    const handleStartNewProject = useCallback(() => {
+        if (isDraft) {
+            setSpaceTitle(t('editor.untitled'));
+            setNodes(createInitialNodes());
+            setEdges(createInitialEdges());
+            setMapState(createDefaultMapState());
+            setActiveChatNodeId('1');
+            setDraftMode(DEFAULT_SPACE_MODE);
+            setDraftDirty(false);
+            promoteDraftPromiseRef.current = null;
+            return;
+        }
+
+        navigate('/');
+    }, [isDraft, navigate, setEdges, setNodes, t]);
+
     const onDeleteNode = useCallback((nodeId) => {
         setNodes(nds => nds.filter(n => n.id !== nodeId));
         setEdges(eds => eds.filter(e => e.source !== nodeId && e.target !== nodeId));
@@ -554,13 +570,13 @@ function EditorContent() {
     ];
 
     return (
-        <div className="editor-layout" style={{ display: 'flex', flexDirection: 'row', height: '100vh', width: '100vw', overflow: 'hidden' }}>
+        <div className="editor-layout" style={{ display: 'flex', flexDirection: 'row', height: '100dvh', width: '100vw', overflow: 'hidden' }}>
             <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} onOpenSettings={() => setShowSettings(true)} />
 
             {/* Left icon bar (always visible) */}
             <div style={{
                 width: '52px', background: 'var(--bg-dark)', borderRight: '1px solid var(--panel-border)',
-                display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: '0.75rem', gap: '0.5rem', zIndex: 50
+                display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 'calc(env(safe-area-inset-top, 0px) + 0.75rem)', gap: '0.5rem', zIndex: 50
             }}>
                 <button onClick={() => setIsSidebarOpen(true)} className="btn-icon" style={{ width: '36px', height: '36px' }} title={t('sidebar.title')}>
                     <Menu size={18} />
@@ -571,7 +587,7 @@ function EditorContent() {
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative' }}>
                 {/* Top Header (always) */}
                 <div style={{
-                    padding: '0.45rem 1rem', borderBottom: '1px solid var(--panel-border)',
+                    padding: 'calc(env(safe-area-inset-top, 0px) + 0.45rem) 1rem 0.45rem', borderBottom: '1px solid var(--panel-border)',
                     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                     background: 'var(--bg-dark)', zIndex: 50
                 }}>
@@ -672,6 +688,7 @@ function EditorContent() {
                         onUpdateNodeData={updateNodeData}
                         onBranchFromChat={onBranchFromChat}
                         onNavigateToBranch={onNavigateToBranch}
+                        onStartNewProject={handleStartNewProject}
                         spaceId={spaceId}
                     />
                 ) : currentMode === 'map' ? (

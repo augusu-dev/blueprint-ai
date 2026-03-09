@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
     Bot,
     Check,
@@ -8,11 +8,14 @@ import {
     ChevronUp,
     Copy,
     ExternalLink,
+    FolderPlus,
     GitBranch,
+    Pin,
     RefreshCw,
     Send,
     Sparkles,
     Target,
+    Trash2,
     User,
 } from 'lucide-react';
 import { useLanguage } from './i18n';
@@ -31,6 +34,14 @@ function createResponseVariant({
         pendingAction,
         actionStatus,
         inlineExplanations: Array.isArray(inlineExplanations) ? inlineExplanations : [],
+    };
+}
+
+function ensureMessageId(message) {
+    if (!message) return message;
+    return {
+        ...message,
+        id: message.id || crypto.randomUUID(),
     };
 }
 
@@ -56,26 +67,29 @@ function syncAiMessage(message, responseVariants, requestedActiveIndex = 0) {
 function normalizeAiMessage(message) {
     if (!message || message.role !== 'ai') return message;
 
-    const responseVariants = Array.isArray(message.responseVariants) && message.responseVariants.length > 0
-        ? message.responseVariants.map((variant) => createResponseVariant(variant))
+    const baseMessage = ensureMessageId(message);
+
+    const responseVariants = Array.isArray(baseMessage.responseVariants) && baseMessage.responseVariants.length > 0
+        ? baseMessage.responseVariants.map((variant) => createResponseVariant(variant))
         : [createResponseVariant({
-            content: message.content ?? '',
-            pendingAction: message.pendingAction ?? null,
-            actionStatus: message.actionStatus ?? null,
-            inlineExplanations: message.inlineExplanations,
+            content: baseMessage.content ?? '',
+            pendingAction: baseMessage.pendingAction ?? null,
+            actionStatus: baseMessage.actionStatus ?? null,
+            inlineExplanations: baseMessage.inlineExplanations,
         })];
 
     return syncAiMessage(
-        message,
+        baseMessage,
         responseVariants,
-        Number.isInteger(message.activeVariantIndex) ? message.activeVariantIndex : 0,
+        Number.isInteger(baseMessage.activeVariantIndex) ? baseMessage.activeVariantIndex : 0,
     );
 }
 
 function normalizeHistory(history) {
-    return (history || []).map((message) => (
-        message?.role === 'ai' ? normalizeAiMessage(message) : message
-    ));
+    return (history || []).map((message) => {
+        const baseMessage = ensureMessageId(message);
+        return baseMessage?.role === 'ai' ? normalizeAiMessage(baseMessage) : baseMessage;
+    });
 }
 
 function getActiveResponseVariant(message) {
@@ -135,6 +149,7 @@ export default function ChatView({
     onUpdateNodeData,
     onBranchFromChat,
     onNavigateToBranch,
+    onStartNewProject,
     spaceId,
 }) {
     const { t } = useLanguage();
@@ -162,6 +177,22 @@ export default function ChatView({
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [chatHistory, isLoading]);
+
+    const pinnedMessageIds = useMemo(
+        () => (Array.isArray(node?.data?.pinnedMessageIds) ? node.data.pinnedMessageIds : []),
+        [node?.data?.pinnedMessageIds],
+    );
+
+    useEffect(() => {
+        if (!node || pinnedMessageIds.length === 0) return;
+
+        const validMessageIds = new Set(chatHistory.map((message) => message.id));
+        const nextPinnedIds = pinnedMessageIds.filter((messageId) => validMessageIds.has(messageId));
+
+        if (nextPinnedIds.length !== pinnedMessageIds.length) {
+            onUpdateNodeData(node.id, 'pinnedMessageIds', nextPinnedIds);
+        }
+    }, [chatHistory, node, onUpdateNodeData, pinnedMessageIds]);
 
     const persistChatHistory = (nextHistory) => {
         const normalized = normalizeHistory(nextHistory);
@@ -490,6 +521,39 @@ export default function ChatView({
         persistChatHistory(nextHistory);
     };
 
+    const handleDeletePrompt = (messageIndex) => {
+        const targetMessage = chatHistory[messageIndex];
+        if (!targetMessage || targetMessage.role !== 'user') return;
+
+        const nextMessage = chatHistory[messageIndex + 1];
+        const removeCount = nextMessage?.role === 'ai' ? 2 : 1;
+        const nextHistory = normalizeHistory(
+            chatHistory.filter((_, index) => index < messageIndex || index >= messageIndex + removeCount),
+        );
+
+        if (generatingPromptIndex !== null) {
+            if (generatingPromptIndex === messageIndex) {
+                setGeneratingPromptIndex(null);
+            } else if (generatingPromptIndex > messageIndex) {
+                setGeneratingPromptIndex(Math.max(0, generatingPromptIndex - removeCount));
+            }
+        }
+
+        setSelectionDraft(null);
+        setActiveExplanation(null);
+        persistChatHistory(nextHistory);
+    };
+
+    const handleTogglePinnedMessage = (messageId) => {
+        if (!node || !messageId) return;
+
+        const nextPinnedIds = pinnedMessageIds.includes(messageId)
+            ? pinnedMessageIds.filter((currentId) => currentId !== messageId)
+            : [...pinnedMessageIds, messageId];
+
+        onUpdateNodeData(node.id, 'pinnedMessageIds', nextPinnedIds);
+    };
+
     const handleCopy = async (content, idx) => {
         try {
             await navigator.clipboard.writeText(content);
@@ -740,6 +804,9 @@ export default function ChatView({
     }
 
     const branchCount = node.data?.branchCount || 0;
+    const pinnedMessages = pinnedMessageIds
+        .map((messageId) => chatHistory.find((message) => message.id === messageId))
+        .filter(Boolean);
     const iconActionStyle = {
         width: '30px',
         height: '30px',
@@ -846,6 +913,26 @@ export default function ChatView({
                             {t('goal.title')}
                         </button>
                     )}
+                    <button
+                        onClick={onStartNewProject}
+                        style={{
+                            width: '38px',
+                            height: '38px',
+                            borderRadius: '999px',
+                            border: '1px solid rgba(31, 41, 55, 0.08)',
+                            background: '#ffffff',
+                            color: '#667085',
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            boxShadow: '0 8px 20px rgba(28, 33, 45, 0.06)',
+                        }}
+                        title="新しいプロジェクト"
+                        aria-label="新しいプロジェクト"
+                    >
+                        <FolderPlus size={15} />
+                    </button>
                 </div>
                 <select
                     className="node-select-sm"
@@ -875,6 +962,50 @@ export default function ChatView({
                     margin: '0 auto',
                 }}
             >
+                {pinnedMessages.length > 0 && (
+                    <div
+                        style={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '0.55rem',
+                            marginBottom: '0.25rem',
+                        }}
+                    >
+                        <div style={{ fontSize: '0.72rem', color: '#8b91a1', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                            ピン留め
+                        </div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.55rem' }}>
+                            {pinnedMessages.map((message) => (
+                                <button
+                                    key={message.id}
+                                    type="button"
+                                    onClick={() => handleTogglePinnedMessage(message.id)}
+                                    style={{
+                                        maxWidth: '260px',
+                                        textAlign: 'left',
+                                        padding: '0.72rem 0.9rem',
+                                        borderRadius: '18px',
+                                        border: '1px solid rgba(38, 43, 53, 0.08)',
+                                        background: '#ffffff',
+                                        color: '#3a4152',
+                                        boxShadow: '0 12px 28px rgba(29, 33, 44, 0.08)',
+                                        cursor: 'pointer',
+                                    }}
+                                    title="ピンを外す"
+                                >
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', marginBottom: '0.28rem', color: '#8b91a1', fontSize: '0.72rem' }}>
+                                        <Pin size={12} />
+                                        {message.role === 'user' ? 'プロンプト' : '回答'}
+                                    </div>
+                                    <div style={{ fontSize: '0.82rem', lineHeight: 1.55, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                        {message.content}
+                                    </div>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
                 {chatHistory.length === 0 ? (
                     <div
                         style={{
@@ -999,6 +1130,27 @@ export default function ChatView({
                                                 {isGeneratingPrompt ? '生成中...' : '生成する'}
                                             </button>
                                         )}
+                                        <button
+                                            onClick={() => handleDeletePrompt(idx)}
+                                            style={iconActionStyle}
+                                            title="このプロンプトを削除"
+                                            aria-label="このプロンプトを削除"
+                                        >
+                                            <Trash2 size={14} />
+                                        </button>
+                                        <button
+                                            onClick={() => handleTogglePinnedMessage(message.id)}
+                                            style={{
+                                                ...iconActionStyle,
+                                                color: pinnedMessageIds.includes(message.id) ? '#7c5cff' : '#707789',
+                                                borderColor: pinnedMessageIds.includes(message.id) ? 'rgba(124, 92, 255, 0.24)' : 'rgba(68, 76, 95, 0.12)',
+                                                background: pinnedMessageIds.includes(message.id) ? 'rgba(238, 233, 255, 0.96)' : 'rgba(255, 255, 255, 0.82)',
+                                            }}
+                                            title={pinnedMessageIds.includes(message.id) ? 'ピンを外す' : 'ピン止めする'}
+                                            aria-label={pinnedMessageIds.includes(message.id) ? 'ピンを外す' : 'ピン止めする'}
+                                        >
+                                            <Pin size={14} />
+                                        </button>
                                     </div>
                                 )}
 
@@ -1180,6 +1332,9 @@ export default function ChatView({
                                                 <span style={{ ...counterTextStyle, minWidth: '44px' }}>
                                                     回答 {activeResponseVariantIndex + 1}/{responseVariantCount}
                                                 </span>
+                                                <span style={{ fontSize: '0.7rem', color: '#8b91a1', minWidth: '44px', textAlign: 'center' }}>
+                                                    {activeResponseVariantIndex + 1}/{responseVariantCount}
+                                                </span>
                                                 <button
                                                     style={iconActionStyle}
                                                     disabled={activeResponseVariantIndex >= responseVariantCount - 1}
@@ -1194,6 +1349,19 @@ export default function ChatView({
                                         <button style={iconActionStyle} onClick={() => handleBranch(idx)} disabled={branchCount >= 10} title={branchCount >= 10 ? t('chat.branchMax') : t('chat.branch')} aria-label={branchCount >= 10 ? t('chat.branchMax') : t('chat.branch')}>
                                             <GitBranch size={14} />
                                         </button>
+                                        <button
+                                            style={{
+                                                ...iconActionStyle,
+                                                color: pinnedMessageIds.includes(message.id) ? '#7c5cff' : '#707789',
+                                                borderColor: pinnedMessageIds.includes(message.id) ? 'rgba(124, 92, 255, 0.24)' : 'rgba(68, 76, 95, 0.12)',
+                                                background: pinnedMessageIds.includes(message.id) ? 'rgba(238, 233, 255, 0.96)' : 'rgba(255, 255, 255, 0.82)',
+                                            }}
+                                            onClick={() => handleTogglePinnedMessage(message.id)}
+                                            title={pinnedMessageIds.includes(message.id) ? 'ピンを外す' : 'ピン止めする'}
+                                            aria-label={pinnedMessageIds.includes(message.id) ? 'ピンを外す' : 'ピン止めする'}
+                                        >
+                                            <Pin size={14} />
+                                        </button>
 
                                         {branchCount > 0 && (
                                             <div style={{ ...actionStripStyle, paddingLeft: '0.28rem', marginLeft: '0.08rem', borderLeft: '1px solid rgba(68, 76, 95, 0.12)' }}>
@@ -1205,7 +1373,7 @@ export default function ChatView({
                                                 >
                                                     <ChevronLeft size={14} />
                                                 </button>
-                                                <span style={{ ...counterTextStyle, minWidth: '20px' }}>
+                                                <span style={{ fontSize: '0.7rem', color: '#8b91a1', minWidth: '20px', textAlign: 'center' }}>
                                                     {activeBranchView + 1}
                                                 </span>
                                                 <button
