@@ -26,6 +26,12 @@ import GoalNode from './nodes/GoalNode';
 import DeleteEdge from './nodes/DeleteEdge';
 import { DEFAULT_SPACE_MODE, getSpacePath, isSpaceMode } from './lib/routes';
 import { createDefaultMapState, createInitialEdges, createInitialNodes, normalizeMapState } from './lib/space';
+import {
+    getProjectContextPrompt,
+    loadWorkspaceMeta,
+    setDraftProjectId,
+    syncWorkspaceProjectFromSpace,
+} from './lib/workspace';
 
 const nodeTypes = {
     sequenceNode: SequenceNode,
@@ -64,6 +70,7 @@ function EditorContent() {
     const currentMode = isDraft ? draftMode : (isSpaceMode(mode) ? mode : DEFAULT_SPACE_MODE);
     const draftSnapshotRef = useRef(null);
     const promoteDraftPromiseRef = useRef(null);
+    const [workspaceMetaVersion, setWorkspaceMetaVersion] = useState(0);
 
     const [apiKeys, setApiKeys] = useState(() => {
         const saved = localStorage.getItem('blueprint_api_keys');
@@ -93,11 +100,73 @@ function EditorContent() {
     }, [apiKeys]);
 
     useEffect(() => {
+        const handleWorkspaceMetaUpdate = () => setWorkspaceMetaVersion((current) => current + 1);
+        window.addEventListener('workspaceMetaUpdated', handleWorkspaceMetaUpdate);
+        return () => window.removeEventListener('workspaceMetaUpdated', handleWorkspaceMetaUpdate);
+    }, []);
+
+    const workspaceMeta = useMemo(() => {
+        void workspaceMetaVersion;
+        return loadWorkspaceMeta();
+    }, [workspaceMetaVersion]);
+    const currentProjectId = isDraft
+        ? (workspaceMeta.draftProjectId || workspaceMeta.selectedProjectId || null)
+        : (workspaceMeta.spaces[spaceId]?.projectId || null);
+    const currentProject = useMemo(
+        () => workspaceMeta.projects.find((project) => project.id === currentProjectId) || null,
+        [currentProjectId, workspaceMeta.projects],
+    );
+    const projectContextPrompt = useMemo(
+        () => getProjectContextPrompt(currentProject),
+        [currentProject],
+    );
+
+    const applyProjectGoalToNodes = useCallback((rawNodes, project) => {
+        if (!project?.sharedGoal) return rawNodes;
+
+        return rawNodes.map((node) => (
+            node?.data?.isStarter && !node?.data?.systemPrompt
+                ? { ...node, data: { ...node.data, systemPrompt: project.sharedGoal } }
+                : node
+        ));
+    }, []);
+
+    const resetDraftState = useCallback(() => {
+        const latestWorkspaceMeta = loadWorkspaceMeta();
+        const draftProjectId = latestWorkspaceMeta.draftProjectId || latestWorkspaceMeta.selectedProjectId || null;
+        const draftProject = latestWorkspaceMeta.projects.find((project) => project.id === draftProjectId) || null;
+
+        setIsHydrated(false);
+        setSpaceTitle(t('editor.untitled'));
+        setNodes(applyProjectGoalToNodes(createInitialNodes(), draftProject));
+        setEdges(createInitialEdges());
+        setMapState(createDefaultMapState());
+        setActiveChatNodeId('1');
+        setDraftMode(DEFAULT_SPACE_MODE);
+        setDraftDirty(false);
+        promoteDraftPromiseRef.current = null;
+        setIsHydrated(true);
+    }, [applyProjectGoalToNodes, setEdges, setNodes, t]);
+
+    useEffect(() => {
         if (isDraft) return;
         if (!isSpaceMode(mode)) {
             navigate(getSpacePath(spaceId), { replace: true });
         }
     }, [isDraft, spaceId, mode, navigate]);
+
+    useEffect(() => {
+        const handleWorkspaceStartNewSpace = () => {
+            if (isDraft) {
+                resetDraftState();
+                return;
+            }
+            navigate('/');
+        };
+
+        window.addEventListener('workspaceStartNewSpace', handleWorkspaceStartNewSpace);
+        return () => window.removeEventListener('workspaceStartNewSpace', handleWorkspaceStartNewSpace);
+    }, [isDraft, navigate, resetDraftState]);
 
     const updateRemoteSpace = useCallback(async (payload) => {
         if (!supabase || !spaceId) return;
@@ -115,15 +184,7 @@ function EditorContent() {
 
     useEffect(() => {
         if (isDraft) {
-            setIsHydrated(false);
-            setSpaceTitle(t('editor.untitled'));
-            setNodes(createInitialNodes());
-            setEdges(createInitialEdges());
-            setMapState(createDefaultMapState());
-            setActiveChatNodeId('1');
-            setDraftMode(DEFAULT_SPACE_MODE);
-            setDraftDirty(false);
-            setIsHydrated(true);
+            resetDraftState();
             return undefined;
         }
 
@@ -133,10 +194,19 @@ function EditorContent() {
 
         const applySpaceData = (data) => {
             if (isCancelled || !data) return;
+            const latestWorkspaceMeta = loadWorkspaceMeta();
+            const projectForSpace = latestWorkspaceMeta.projects.find(
+                (project) => project.id === latestWorkspaceMeta.spaces[spaceId]?.projectId,
+            ) || null;
 
             setSpaceTitle(data.title || t('editor.untitled'));
             setMapState(normalizeMapState(data.map_state));
-            setNodes(Array.isArray(data.nodes) && data.nodes.length > 0 ? data.nodes : createInitialNodes());
+            setNodes(
+                applyProjectGoalToNodes(
+                    Array.isArray(data.nodes) && data.nodes.length > 0 ? data.nodes : createInitialNodes(),
+                    projectForSpace,
+                ),
+            );
             setEdges(Array.isArray(data.edges) && data.edges.length > 0 ? data.edges : createInitialEdges());
             if (data.viewport && Object.keys(data.viewport).length > 0) {
                 setViewport({ x: data.viewport.x, y: data.viewport.y, zoom: data.viewport.zoom });
@@ -148,7 +218,12 @@ function EditorContent() {
             let localData = null;
             try {
                 const stored = localStorage.getItem(`blueprint_space_${spaceId}`);
-                if (stored) localData = JSON.parse(stored);
+                if (stored) {
+                    localData = JSON.parse(stored);
+                    if (localData?.project_id) {
+                        syncWorkspaceProjectFromSpace(spaceId, localData, localData.project_id);
+                    }
+                }
             } catch {
                 // Ignore invalid locally stored API keys.
             }
@@ -204,7 +279,7 @@ function EditorContent() {
             isCancelled = true;
             window.removeEventListener('spaceTitleUpdated', handleTitleUpdate);
         };
-    }, [isDraft, spaceId, mode, setNodes, setEdges, setViewport, t]);
+    }, [applyProjectGoalToNodes, isDraft, mode, resetDraftState, setEdges, setNodes, setViewport, spaceId, t]);
 
     const cleanNodesForSave = (rawNodes) => {
         return rawNodes.map(n => ({
@@ -226,8 +301,9 @@ function EditorContent() {
             edges,
             mapState,
             mode: currentMode,
+            projectId: currentProjectId,
         };
-    }, [spaceTitle, nodes, edges, mapState, currentMode]);
+    }, [spaceTitle, nodes, edges, mapState, currentMode, currentProjectId]);
 
     const createSpaceFromSnapshot = useCallback(async (snapshot) => {
         const updates = {
@@ -235,6 +311,7 @@ function EditorContent() {
             nodes: cleanNodesForSave(snapshot.nodes),
             edges: snapshot.edges,
             map_state: snapshot.mapState,
+            project_id: snapshot.projectId || null,
             updated_at: new Date().toISOString(),
         };
 
@@ -266,6 +343,7 @@ function EditorContent() {
                             updated_at: data.updated_at || updates.updated_at,
                         };
                         localStorage.setItem(`blueprint_space_${data.id}`, JSON.stringify(persistedUpdates));
+                        syncWorkspaceProjectFromSpace(data.id, persistedUpdates, snapshot.projectId || null);
                         window.dispatchEvent(new CustomEvent('spaceTitleUpdated'));
                         return data.id;
                     }
@@ -277,6 +355,7 @@ function EditorContent() {
 
         const newId = crypto.randomUUID();
         localStorage.setItem(`blueprint_space_${newId}`, JSON.stringify(updates));
+        syncWorkspaceProjectFromSpace(newId, updates, snapshot.projectId || null);
         window.dispatchEvent(new CustomEvent('spaceTitleUpdated'));
         return newId;
     }, [t]);
@@ -306,9 +385,17 @@ function EditorContent() {
         setIsSaving(true);
         setSaveSuccess(false);
         try {
-            const updates = { title: spaceTitle, nodes: cleanNodesForSave(nodes), edges, map_state: mapState, updated_at: new Date().toISOString() };
+            const updates = {
+                title: spaceTitle,
+                nodes: cleanNodesForSave(nodes),
+                edges,
+                map_state: mapState,
+                project_id: currentProjectId,
+                updated_at: new Date().toISOString(),
+            };
             localStorage.setItem(`blueprint_space_${spaceId}`, JSON.stringify(updates));
             await updateRemoteSpace({ title: spaceTitle, nodes: updates.nodes, edges: updates.edges, map_state: updates.map_state, updated_at: updates.updated_at });
+            syncWorkspaceProjectFromSpace(spaceId, updates, currentProjectId);
             window.dispatchEvent(new CustomEvent('spaceTitleUpdated'));
             setSaveSuccess(true);
             setTimeout(() => setSaveSuccess(false), 2500);
@@ -342,15 +429,23 @@ function EditorContent() {
         if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
         saveTimerRef.current = setTimeout(async () => {
             try {
-                const updates = { title: spaceTitle, nodes: cleanNodesForSave(nodes), edges, map_state: mapState, updated_at: new Date().toISOString() };
+                const updates = {
+                    title: spaceTitle,
+                    nodes: cleanNodesForSave(nodes),
+                    edges,
+                    map_state: mapState,
+                    project_id: currentProjectId,
+                    updated_at: new Date().toISOString(),
+                };
                 localStorage.setItem(`blueprint_space_${spaceId}`, JSON.stringify(updates));
                 await updateRemoteSpace({ nodes: updates.nodes, edges: updates.edges, map_state: updates.map_state, updated_at: updates.updated_at });
+                syncWorkspaceProjectFromSpace(spaceId, updates, currentProjectId);
             } catch (err) {
                 console.error('Auto-save failed', err);
             }
         }, 1500);
         return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
-    }, [nodes, edges, mapState, spaceId, spaceTitle, updateRemoteSpace]);
+    }, [currentProjectId, nodes, edges, mapState, spaceId, spaceTitle, updateRemoteSpace]);
 
     const onNodesChange = useCallback((changes) => {
         baseOnNodesChange(changes);
@@ -436,19 +531,13 @@ function EditorContent() {
 
     const handleStartNewProject = useCallback(() => {
         if (isDraft) {
-            setSpaceTitle(t('editor.untitled'));
-            setNodes(createInitialNodes());
-            setEdges(createInitialEdges());
-            setMapState(createDefaultMapState());
-            setActiveChatNodeId('1');
-            setDraftMode(DEFAULT_SPACE_MODE);
-            setDraftDirty(false);
-            promoteDraftPromiseRef.current = null;
+            resetDraftState();
             return;
         }
 
+        setDraftProjectId(currentProjectId);
         navigate('/');
-    }, [isDraft, navigate, setEdges, setNodes, t]);
+    }, [currentProjectId, isDraft, navigate, resetDraftState]);
 
     const onDeleteNode = useCallback((nodeId) => {
         setNodes(nds => nds.filter(n => n.id !== nodeId));
@@ -503,12 +592,13 @@ function EditorContent() {
     const nodesWithData = useMemo(() => {
         // Get goal/systemPrompt from starter node
         const starterNode = nodes.find(n => n.data?.isStarter);
-        const sharedGoal = starterNode?.data?.systemPrompt || '';
+        const sharedGoal = starterNode?.data?.systemPrompt || currentProject?.sharedGoal || '';
         return nodes.map(n => ({
             ...n,
             data: {
                 ...n.data, dir: direction,
-                systemPrompt: n.data?.isStarter ? n.data.systemPrompt : (n.data?.systemPrompt || sharedGoal),
+                systemPrompt: n.data?.isStarter ? (n.data?.systemPrompt || currentProject?.sharedGoal || '') : (n.data?.systemPrompt || sharedGoal),
+                projectContextPrompt,
                 onChange: updateNodeData,
                 onUpdateNodeData: updateNodeData,
                 onAddBranch,
@@ -533,7 +623,7 @@ function EditorContent() {
                 apiKeys
             }
         }));
-    }, [nodes, edges, direction, updateNodeData, onAddBranch, onQuickAdd, onDeleteNode, apiKeys, navigate, spaceId, isDraft]);
+    }, [nodes, edges, direction, currentProject, projectContextPrompt, updateNodeData, onAddBranch, onQuickAdd, onDeleteNode, apiKeys, navigate, spaceId, isDraft]);
 
     const toggleDirection = () => setDirection(d => d === 'LR' ? 'TB' : 'LR');
 
@@ -603,6 +693,19 @@ function EditorContent() {
                                 onClick={() => { setTempTitle(spaceTitle); setIsEditingTitle(true); }} title={t('editor.editTitle')}>
                                 {spaceTitle} <Edit3 size={12} color="var(--text-muted)" />
                             </h2>
+                        )}
+                        {currentProject && (
+                            <span style={{
+                                padding: '0.22rem 0.6rem',
+                                borderRadius: '999px',
+                                fontSize: '0.72rem',
+                                color: '#c6d4ff',
+                                background: 'rgba(108, 140, 255, 0.12)',
+                                border: '1px solid rgba(108, 140, 255, 0.18)',
+                                whiteSpace: 'nowrap',
+                            }}>
+                                {currentProject.name}
+                            </span>
                         )}
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -689,6 +792,7 @@ function EditorContent() {
                         onBranchFromChat={onBranchFromChat}
                         onNavigateToBranch={onNavigateToBranch}
                         onStartNewProject={handleStartNewProject}
+                        projectContextPrompt={projectContextPrompt}
                         spaceId={spaceId}
                     />
                 ) : currentMode === 'map' ? (

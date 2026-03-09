@@ -150,6 +150,7 @@ export default function ChatView({
     onBranchFromChat,
     onNavigateToBranch,
     onStartNewProject,
+    projectContextPrompt,
     spaceId,
 }) {
     const { t } = useLanguage();
@@ -219,6 +220,7 @@ export default function ChatView({
         const keyToUse = apiKeyObj?.key?.trim();
         const provider = apiKeyObj?.provider || 'openai';
         const userModel = apiKeyObj?.model;
+        const fullSystemPrompt = [projectContextPrompt, systemPrompt].filter(Boolean).join('\n\n');
 
         if (!keyToUse) return `${t('chat.noApiKey')} (${provider})`;
 
@@ -229,7 +231,7 @@ export default function ChatView({
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        systemInstruction: systemPrompt ? { parts: [{ text: systemPrompt }] } : undefined,
+                        systemInstruction: fullSystemPrompt ? { parts: [{ text: fullSystemPrompt }] } : undefined,
                         contents: history.map((message) => ({
                             role: message.role === 'user' ? 'user' : 'model',
                             parts: [{ text: message.content }],
@@ -259,7 +261,7 @@ export default function ChatView({
                     body: JSON.stringify({
                         model: modelToUse,
                         max_tokens: 2048,
-                        system: systemPrompt || undefined,
+                        system: fullSystemPrompt || undefined,
                         messages,
                     }),
                 });
@@ -281,7 +283,7 @@ export default function ChatView({
                     ? 'https://open.bigmodel.cn/api/paas/v4/chat/completions'
                     : 'https://api.openai.com/v1/chat/completions';
             const messages = [];
-            if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
+            if (fullSystemPrompt) messages.push({ role: 'system', content: fullSystemPrompt });
             history.forEach((message) => {
                 messages.push({
                     role: message.role === 'ai' ? 'assistant' : 'user',
