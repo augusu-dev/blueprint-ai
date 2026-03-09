@@ -1,7 +1,133 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Send, Bot, User, Copy, Check, RefreshCw, GitBranch, ExternalLink, ChevronLeft, ChevronRight, Target, Sparkles } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import {
+    Bot,
+    Check,
+    ChevronDown,
+    ChevronLeft,
+    ChevronRight,
+    ChevronUp,
+    Copy,
+    ExternalLink,
+    GitBranch,
+    RefreshCw,
+    Send,
+    Sparkles,
+    Target,
+    User,
+} from 'lucide-react';
 import { useLanguage } from './i18n';
 import GoalWizard from './GoalWizard';
+
+function createResponseVariant({
+    id,
+    content = '',
+    pendingAction = null,
+    actionStatus = null,
+    inlineExplanations = [],
+}) {
+    return {
+        id: id || crypto.randomUUID(),
+        content,
+        pendingAction,
+        actionStatus,
+        inlineExplanations: Array.isArray(inlineExplanations) ? inlineExplanations : [],
+    };
+}
+
+function syncAiMessage(message, responseVariants, requestedActiveIndex = 0) {
+    const safeVariants = responseVariants.length > 0
+        ? responseVariants
+        : [createResponseVariant({ content: message?.content || '' })];
+    const activeVariantIndex = Math.max(0, Math.min(safeVariants.length - 1, requestedActiveIndex));
+    const activeVariant = safeVariants[activeVariantIndex];
+
+    return {
+        ...message,
+        role: 'ai',
+        responseVariants: safeVariants,
+        activeVariantIndex,
+        content: activeVariant.content,
+        pendingAction: activeVariant.pendingAction,
+        actionStatus: activeVariant.actionStatus,
+        inlineExplanations: activeVariant.inlineExplanations,
+    };
+}
+
+function normalizeAiMessage(message) {
+    if (!message || message.role !== 'ai') return message;
+
+    const responseVariants = Array.isArray(message.responseVariants) && message.responseVariants.length > 0
+        ? message.responseVariants.map((variant) => createResponseVariant(variant))
+        : [createResponseVariant({
+            content: message.content ?? '',
+            pendingAction: message.pendingAction ?? null,
+            actionStatus: message.actionStatus ?? null,
+            inlineExplanations: message.inlineExplanations,
+        })];
+
+    return syncAiMessage(
+        message,
+        responseVariants,
+        Number.isInteger(message.activeVariantIndex) ? message.activeVariantIndex : 0,
+    );
+}
+
+function normalizeHistory(history) {
+    return (history || []).map((message) => (
+        message?.role === 'ai' ? normalizeAiMessage(message) : message
+    ));
+}
+
+function getActiveResponseVariant(message) {
+    if (message?.role !== 'ai') return null;
+    const normalizedMessage = normalizeAiMessage(message);
+    return normalizedMessage.responseVariants[normalizedMessage.activeVariantIndex] || null;
+}
+
+function replaceActiveResponseVariant(message, updater) {
+    const normalizedMessage = normalizeAiMessage(message);
+    const responseVariants = normalizedMessage.responseVariants.map((variant, index) => (
+        index === normalizedMessage.activeVariantIndex ? updater(variant) : variant
+    ));
+    return syncAiMessage(normalizedMessage, responseVariants, normalizedMessage.activeVariantIndex);
+}
+
+function appendResponseVariant(message, variant) {
+    const normalizedMessage = normalizeAiMessage(message);
+    const responseVariants = [...normalizedMessage.responseVariants, variant];
+    return syncAiMessage(normalizedMessage, responseVariants, responseVariants.length - 1);
+}
+
+function setResponseVariantIndex(message, nextIndex) {
+    const normalizedMessage = normalizeAiMessage(message);
+    return syncAiMessage(normalizedMessage, normalizedMessage.responseVariants, nextIndex);
+}
+
+function parseAiReply(reply, fallbackText) {
+    let content = reply || '';
+    let pendingAction = null;
+
+    if (content.includes('[ACTION: CREATE_NODE]')) {
+        pendingAction = 'CREATE_NODE';
+        content = content.replace(/\[ACTION: CREATE_NODE\]/g, '').trim();
+    } else if (content.includes('[ACTION: TOGGLE_LOOP_ON]')) {
+        pendingAction = 'TOGGLE_LOOP_ON';
+        content = content.replace(/\[ACTION: TOGGLE_LOOP_ON\]/g, '').trim();
+    } else if (content.includes('[ACTION: TOGGLE_LOOP_OFF]')) {
+        pendingAction = 'TOGGLE_LOOP_OFF';
+        content = content.replace(/\[ACTION: TOGGLE_LOOP_OFF\]/g, '').trim();
+    }
+
+    if (!content && pendingAction) {
+        content = fallbackText || 'Action completed.';
+    }
+
+    return {
+        content,
+        pendingAction,
+        actionStatus: pendingAction ? 'pending' : null,
+    };
+}
 
 export default function ChatView({
     node,
@@ -9,7 +135,7 @@ export default function ChatView({
     onUpdateNodeData,
     onBranchFromChat,
     onNavigateToBranch,
-    spaceId
+    spaceId,
 }) {
     const { t } = useLanguage();
     const [input, setInput] = useState('');
@@ -25,16 +151,35 @@ export default function ChatView({
     const messageContentRefs = useRef({});
 
     useEffect(() => {
-        if (node) {
-            setChatHistory(node.data?.chatHistory || []);
-            setSelectionDraft(null);
-            setActiveExplanation(null);
-        }
+        if (!node) return;
+        setChatHistory(normalizeHistory(node.data?.chatHistory || []));
+        setSelectionDraft(null);
+        setActiveExplanation(null);
     }, [node]);
 
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [chatHistory, isLoading]);
+
+    const persistChatHistory = (nextHistory) => {
+        const normalized = normalizeHistory(nextHistory);
+        setChatHistory(normalized);
+        if (node) {
+            onUpdateNodeData(node.id, 'chatHistory', normalized);
+        }
+    };
+
+    const getControlInstructions = () => `
+
+---
+[システム指示]
+必要だと判断した場合のみ、次のタグを返答に含めてください。
+1. 新しいノードを作る提案をする時は [ACTION: CREATE_NODE]
+2. ループを有効化する提案をする時は [ACTION: TOGGLE_LOOP_ON]
+3. ループを無効化する提案をする時は [ACTION: TOGGLE_LOOP_OFF]
+タグを含めると、アプリ側で確認 UI を表示します。
+---
+    `;
 
     const callAI = async (history, systemPrompt) => {
         const apiKeyObj = apiKeys?.[node?.data?.selectedApiKey || 0];
@@ -52,60 +197,168 @@ export default function ChatView({
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         systemInstruction: systemPrompt ? { parts: [{ text: systemPrompt }] } : undefined,
-                        contents: history.map(msg => ({ role: msg.role === 'user' ? 'user' : 'model', parts: [{ text: msg.content }] })),
-                        tools: [{ googleSearch: {} }]
-                    })
+                        contents: history.map((message) => ({
+                            role: message.role === 'user' ? 'user' : 'model',
+                            parts: [{ text: message.content }],
+                        })),
+                        tools: [{ googleSearch: {} }],
+                    }),
                 });
                 const data = await response.json();
                 if (!response.ok) throw new Error(data.error?.message || 'Gemini Error');
                 return data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response.';
+            }
 
-            } else if (provider === 'anthropic') {
+            if (provider === 'anthropic') {
                 const modelToUse = userModel || 'claude-sonnet-4-6';
-                const msgs = history.map(m => ({ role: m.role === 'ai' ? 'assistant' : 'user', content: m.content }));
+                const messages = history.map((message) => ({
+                    role: message.role === 'ai' ? 'assistant' : 'user',
+                    content: message.content,
+                }));
                 const response = await fetch('https://api.anthropic.com/v1/messages', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'x-api-key': keyToUse, 'anthropic-version': '2023-06-01', 'anthropic-dangerously-allow-browser': 'true' },
-                    body: JSON.stringify({ model: modelToUse, max_tokens: 2048, system: systemPrompt || undefined, messages: msgs })
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'x-api-key': keyToUse,
+                        'anthropic-version': '2023-06-01',
+                        'anthropic-dangerously-allow-browser': 'true',
+                    },
+                    body: JSON.stringify({
+                        model: modelToUse,
+                        max_tokens: 2048,
+                        system: systemPrompt || undefined,
+                        messages,
+                    }),
                 });
                 const data = await response.json();
                 if (!response.ok) throw new Error(data.error?.message || 'Anthropic Error');
                 return data.content?.[0]?.text || 'No response.';
+            }
 
-            } else {
-                const modelToUse = userModel || (provider === 'openai' ? 'gpt-5.3-chat-latest' : provider === 'openrouter' ? 'google/gemini-3.1-pro-preview' : 'glm-4-plus');
-                const endpoint = provider === 'openrouter' ? 'https://openrouter.ai/api/v1/chat/completions' :
-                    provider === 'glm' ? 'https://open.bigmodel.cn/api/paas/v4/chat/completions' :
-                        'https://api.openai.com/v1/chat/completions';
-                const msgs = [];
-                if (systemPrompt) msgs.push({ role: 'system', content: systemPrompt });
-                history.forEach(m => msgs.push({ role: m.role === 'ai' ? 'assistant' : 'user', content: m.content }));
+            const modelToUse = userModel || (
+                provider === 'openai'
+                    ? 'gpt-5.3-chat-latest'
+                    : provider === 'openrouter'
+                        ? 'google/gemini-3.1-pro-preview'
+                        : 'glm-4-plus'
+            );
+            const endpoint = provider === 'openrouter'
+                ? 'https://openrouter.ai/api/v1/chat/completions'
+                : provider === 'glm'
+                    ? 'https://open.bigmodel.cn/api/paas/v4/chat/completions'
+                    : 'https://api.openai.com/v1/chat/completions';
+            const messages = [];
+            if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
+            history.forEach((message) => {
+                messages.push({
+                    role: message.role === 'ai' ? 'assistant' : 'user',
+                    content: message.content,
+                });
+            });
 
-                const response = await fetch(endpoint, {
+            const response = await fetch(endpoint, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${keyToUse}`,
+                },
+                body: JSON.stringify({ model: modelToUse, messages }),
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error?.message || 'LLM Error');
+            return data.choices?.[0]?.message?.content || 'No response.';
+        } catch (error) {
+            return `Error: ${error.message}`;
+        }
+    };
+
+    const generateSpaceTitle = async (messageText) => {
+        if (!spaceId) return;
+
+        try {
+            const apiKeyObj = apiKeys?.[node?.data?.selectedApiKey || 0];
+            const keyToUse = apiKeyObj?.key?.trim();
+            const provider = apiKeyObj?.provider || 'openai';
+            const userModel = apiKeyObj?.model;
+            if (!keyToUse) return;
+
+            const titlePrompt = `次の最初のメッセージ「${messageText}」をもとに、このワークスペースのタイトルを10文字以内で1つだけ返してください。説明は不要です。`;
+            let newTitle = '';
+
+            if (provider === 'gemini') {
+                const modelToUse = userModel || 'gemini-3.1-pro-preview';
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelToUse}:generateContent?key=${keyToUse}`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${keyToUse}` },
-                    body: JSON.stringify({ model: modelToUse, messages: msgs })
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: titlePrompt }] }] }),
                 });
                 const data = await response.json();
-                if (!response.ok) throw new Error(data.error?.message || 'LLM Error');
-                return data.choices?.[0]?.message?.content || 'No response.';
+                newTitle = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
+            } else if (provider === 'anthropic') {
+                const modelToUse = userModel || 'claude-sonnet-4-6';
+                const response = await fetch('https://api.anthropic.com/v1/messages', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'x-api-key': keyToUse,
+                        'anthropic-version': '2023-06-01',
+                        'anthropic-dangerously-allow-browser': 'true',
+                    },
+                    body: JSON.stringify({
+                        model: modelToUse,
+                        max_tokens: 50,
+                        messages: [{ role: 'user', content: titlePrompt }],
+                    }),
+                });
+                const data = await response.json();
+                newTitle = data.content?.[0]?.text?.trim() || '';
+            } else {
+                const modelToUse = userModel || (
+                    provider === 'openai'
+                        ? 'gpt-5.3-chat-latest'
+                        : provider === 'openrouter'
+                            ? 'google/gemini-3.1-pro-preview'
+                            : 'glm-4-plus'
+                );
+                const endpoint = provider === 'openrouter'
+                    ? 'https://openrouter.ai/api/v1/chat/completions'
+                    : provider === 'glm'
+                        ? 'https://open.bigmodel.cn/api/paas/v4/chat/completions'
+                        : 'https://api.openai.com/v1/chat/completions';
+                const response = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Authorization: `Bearer ${keyToUse}`,
+                    },
+                    body: JSON.stringify({
+                        model: modelToUse,
+                        messages: [{ role: 'user', content: titlePrompt }],
+                    }),
+                });
+                const data = await response.json();
+                newTitle = data.choices?.[0]?.message?.content?.trim() || '';
             }
-        } catch (err) {
-            return `Error: ${err.message}`;
+
+            newTitle = newTitle.replace(/^["']|["']$/g, '');
+            if (!newTitle || newTitle.includes('Untitled')) return;
+
+            const { supabase } = await import('./lib/supabase');
+            if (!supabase) return;
+            await supabase.from('spaces').update({ title: newTitle }).eq('id', spaceId);
+            window.dispatchEvent(new CustomEvent('spaceTitleUpdated'));
+        } catch (error) {
+            console.error('Title Generation Failed:', error);
         }
     };
 
     const getInlineExplanations = (message) => {
-        if (!Array.isArray(message?.inlineExplanations)) return [];
-        return [...message.inlineExplanations].sort((a, b) => a.start - b.start);
+        const activeVariant = getActiveResponseVariant(message);
+        if (!Array.isArray(activeVariant?.inlineExplanations)) return [];
+        return [...activeVariant.inlineExplanations].sort((a, b) => a.start - b.start);
     };
 
-    const persistChatHistory = (nextHistory) => {
-        setChatHistory(nextHistory);
-        if (node) {
-            onUpdateNodeData(node.id, 'chatHistory', nextHistory);
-        }
-    };
+    const isReplyCollapsed = (message) => Boolean(message?.collapsed);
 
     const truncateInlineExplanation = (text) => {
         const normalized = (text || '').replace(/\s+/g, ' ').trim();
@@ -159,7 +412,9 @@ export default function ChatView({
         const start = prefixRange.toString().length + leadingWhitespace;
         const end = start + rawText.length - leadingWhitespace - trailingWhitespace;
 
-        const existing = getInlineExplanations(chatHistory[messageIndex]).find((item) => item.start === start && item.end === end);
+        const existing = getInlineExplanations(chatHistory[messageIndex]).find((item) => (
+            item.start === start && item.end === end
+        ));
 
         if (existing) {
             selection.removeAllRanges();
@@ -175,27 +430,29 @@ export default function ChatView({
         if (!selectionDraft || isExplaining) return;
 
         const sourceMessage = chatHistory[selectionDraft.messageIndex];
-        if (!sourceMessage) return;
+        const activeVariant = getActiveResponseVariant(sourceMessage);
+        if (!sourceMessage || !activeVariant) return;
 
         setIsExplaining(true);
         try {
-            const before = sourceMessage.content.slice(Math.max(0, selectionDraft.start - 120), selectionDraft.start);
-            const after = sourceMessage.content.slice(selectionDraft.end, Math.min(sourceMessage.content.length, selectionDraft.end + 120));
+            const sourceContent = activeVariant.content || '';
+            const before = sourceContent.slice(Math.max(0, selectionDraft.start - 120), selectionDraft.start);
+            const after = sourceContent.slice(selectionDraft.end, Math.min(sourceContent.length, selectionDraft.end + 120));
             const prompt = [
-                '次の文章の選択箇所について、日本語でやさしく説明してください。',
+                '次の選択箇所を日本語でやさしく短く説明してください。',
                 '条件:',
-                '- 300字以内',
-                '- 箇条書きにしない',
-                '- その場ですぐ理解できる短さにする',
+                '- 最大300文字',
+                '- 難しい言い換えは避ける',
+                '- その場で理解できる説明にする',
                 '',
-                `選択箇所:「${selectionDraft.text}」`,
+                `選択箇所: 「${selectionDraft.text}」`,
                 '',
-                `前後文:「${before}<<${selectionDraft.text}>>${after}」`,
+                `前後文脈: 「${before}<<${selectionDraft.text}>>${after}」`,
             ].join('\n');
 
             const explanationText = truncateInlineExplanation(await callAI(
                 [{ role: 'user', content: prompt }],
-                'あなたは学習の補助役です。選択された一部分だけを、必ず300字以内の日本語で短く説明してください。余計な前置きは不要です。'
+                'あなたは学習支援の説明役です。最大300文字で、自然な日本語で簡潔に説明してください。',
             ));
 
             const explanation = {
@@ -209,10 +466,10 @@ export default function ChatView({
             const nextHistory = [...chatHistory];
             const targetMessage = nextHistory[selectionDraft.messageIndex];
             const currentExplanations = getInlineExplanations(targetMessage);
-            nextHistory[selectionDraft.messageIndex] = {
-                ...targetMessage,
+            nextHistory[selectionDraft.messageIndex] = replaceActiveResponseVariant(targetMessage, (variant) => ({
+                ...variant,
                 inlineExplanations: [...currentExplanations, explanation],
-            };
+            }));
 
             persistChatHistory(nextHistory);
             setActiveExplanation({ messageIndex: selectionDraft.messageIndex, explanationId: explanation.id });
@@ -222,188 +479,168 @@ export default function ChatView({
         }
     };
 
-    const handleSend = async (retryContent = null) => {
-        const messageText = retryContent || input.trim();
+    const handleSend = async () => {
+        const messageText = input.trim();
         if (!messageText || !node) return;
 
-        const newUserMsg = { role: 'user', content: messageText };
-        let updatedHistory;
+        const wasFirstUserMessage = !chatHistory.some((message) => message.role === 'user');
+        const nextHistory = normalizeHistory([...chatHistory, { role: 'user', content: messageText }]);
 
-        if (retryContent) {
-            const lastUserIdx = chatHistory.map(m => m.role).lastIndexOf('user');
-            updatedHistory = [...chatHistory.slice(0, lastUserIdx), newUserMsg];
-        } else {
-            updatedHistory = [...chatHistory, newUserMsg];
-        }
-
-        setChatHistory(updatedHistory);
-        if (!retryContent) setInput('');
+        setInput('');
+        setChatHistory(nextHistory);
         setIsLoading(true);
 
-        // Inject node control abilities into system prompt
-        const controlInstructions = `
-\n\n---
-[システム指示]
-あなたはチャットを通じてノードシステムを構築・制御することができます。ユーザーから指示があった場合や、状況に応じてあなたが必要だと判断した場合は、以下のタグを含めて返信することで、ユーザーにアクションの実行を提案できます。
-1. 新たにノードを派生・分岐させるべき話題になった場合: [ACTION: CREATE_NODE] と返信のどこかに含める。
-2. このノード自身にループ機能(自動的反復処理)を行わせるべき話題になった場合: [ACTION: TOGGLE_LOOP_ON] と含める。
-3. ループ機能を停止させるべき場合: [ACTION: TOGGLE_LOOP_OFF] と含める。
-※ アクションタグを含めるだけで、システムが自動的に抽出してユーザーへ提案UIを表示します。
----
-        `;
-        const activeSystemPrompt = (node.data?.systemPrompt || '') + controlInstructions;
-        const reply = await callAI(updatedHistory, activeSystemPrompt);
+        try {
+            const reply = await callAI(nextHistory, (node.data?.systemPrompt || '') + getControlInstructions());
+            const parsedReply = parseAiReply(reply, t('chat.actionCompleted') || 'Action completed.');
+            const aiMessage = syncAiMessage(
+                { role: 'ai', collapsed: false },
+                [createResponseVariant(parsedReply)],
+                0,
+            );
+            const finalHistory = [...nextHistory, aiMessage];
+            persistChatHistory(finalHistory);
 
-        let displayReply = reply || '';
-        let pendingAction = null;
-
-        if (displayReply.includes('[ACTION: CREATE_NODE]')) {
-            pendingAction = 'CREATE_NODE';
-            displayReply = displayReply.replace(/\[ACTION: CREATE_NODE\]/g, '').trim();
-        } else if (displayReply.includes('[ACTION: TOGGLE_LOOP_ON]')) {
-            pendingAction = 'TOGGLE_LOOP_ON';
-            displayReply = displayReply.replace(/\[ACTION: TOGGLE_LOOP_ON\]/g, '').trim();
-        } else if (displayReply.includes('[ACTION: TOGGLE_LOOP_OFF]')) {
-            pendingAction = 'TOGGLE_LOOP_OFF';
-            displayReply = displayReply.replace(/\[ACTION: TOGGLE_LOOP_OFF\]/g, '').trim();
-        }
-
-        if (!displayReply && pendingAction) {
-            displayReply = t('chat.actionCompleted') || 'Action completed.';
-        }
-
-        const aiMsgObj = {
-            role: 'ai',
-            content: displayReply,
-            pendingAction: pendingAction,
-            actionStatus: pendingAction ? 'pending' : null
-        };
-
-        const finalHistory = [...updatedHistory, aiMsgObj];
-        setChatHistory(finalHistory);
-        onUpdateNodeData(node.id, 'chatHistory', finalHistory);
-
-        // Auto title on first message
-        if (chatHistory.length === 0 && spaceId && !retryContent) {
-            try {
-                const apiKeyObj = apiKeys?.[node?.data?.selectedApiKey || 0];
-                const keyToUse = apiKeyObj?.key?.trim();
-                const provider = apiKeyObj?.provider || 'openai';
-                const userModel = apiKeyObj?.model;
-                if (keyToUse) {
-                    const titlePrompt = `ユーザーの最初のメッセージ「${messageText}」に基づき、このワークスペースのタイトルを10文字以内で作成してください。余計な記号や説明は一切含めず、タイトルテキストのみを出力してください。`;
-                    let newTitle = '';
-
-                    if (provider === 'gemini') {
-                        const modelToUse = userModel || 'gemini-3.1-pro-preview';
-                        const tRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelToUse}:generateContent?key=${keyToUse}`, {
-                            method: 'POST', headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: titlePrompt }] }] })
-                        });
-                        const tData = await tRes.json();
-                        newTitle = tData.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
-                    } else if (provider === 'anthropic') {
-                        const modelToUse = userModel || 'claude-sonnet-4-6';
-                        const tRes = await fetch('https://api.anthropic.com/v1/messages', {
-                            method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': keyToUse, 'anthropic-version': '2023-06-01', 'anthropic-dangerously-allow-browser': 'true' },
-                            body: JSON.stringify({ model: modelToUse, max_tokens: 50, messages: [{ role: 'user', content: titlePrompt }] })
-                        });
-                        const tData = await tRes.json();
-                        newTitle = tData.content?.[0]?.text?.trim() || '';
-                    } else {
-                        const modelToUse = userModel || (provider === 'openai' ? 'gpt-5.3-chat-latest' : provider === 'openrouter' ? 'google/gemini-3.1-pro-preview' : 'glm-4-plus');
-                        const endpoint = provider === 'openrouter' ? 'https://openrouter.ai/api/v1/chat/completions' :
-                            provider === 'glm' ? 'https://open.bigmodel.cn/api/paas/v4/chat/completions' : 'https://api.openai.com/v1/chat/completions';
-                        const tRes = await fetch(endpoint, {
-                            method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${keyToUse}` },
-                            body: JSON.stringify({ model: modelToUse, messages: [{ role: 'user', content: titlePrompt }] })
-                        });
-                        const tData = await tRes.json();
-                        newTitle = tData.choices?.[0]?.message?.content?.trim() || '';
-                    }
-
-                    newTitle = newTitle.replace(/^["']|["']$/g, '');
-                    if (newTitle && !newTitle.includes('Untitled')) {
-                        const { supabase } = await import('./lib/supabase');
-                        if (supabase) {
-                            await supabase.from('spaces').update({ title: newTitle }).eq('id', spaceId);
-                            window.dispatchEvent(new CustomEvent('spaceTitleUpdated'));
-                        }
-                    }
-                }
-            } catch (tErr) {
-                console.error("Title Generation Failed:", tErr);
+            if (wasFirstUserMessage && spaceId) {
+                await generateSpaceTitle(messageText);
             }
+        } finally {
+            setIsLoading(false);
         }
-
-        setIsLoading(false);
     };
 
     const handleCopy = async (content, idx) => {
         try {
             await navigator.clipboard.writeText(content);
             setCopiedIdx(idx);
-            setTimeout(() => setCopiedIdx(null), 2000);
-        } catch (err) { console.error('Copy failed:', err); }
+            window.setTimeout(() => setCopiedIdx(null), 2000);
+        } catch (error) {
+            console.error('Copy failed:', error);
+        }
     };
 
-    const handleRetry = (idx) => {
-        for (let i = idx - 1; i >= 0; i--) {
+    const handleToggleReplyCollapse = (replyIndex) => {
+        const replyMessage = chatHistory[replyIndex];
+        if (!replyMessage || replyMessage.role !== 'ai') return;
+
+        const nextHistory = [...chatHistory];
+        nextHistory[replyIndex] = {
+            ...normalizeAiMessage(replyMessage),
+            collapsed: !isReplyCollapsed(replyMessage),
+        };
+        persistChatHistory(nextHistory);
+
+        if (!isReplyCollapsed(replyMessage)) {
+            setSelectionDraft((current) => (current?.messageIndex === replyIndex ? null : current));
+            setActiveExplanation((current) => (current?.messageIndex === replyIndex ? null : current));
+        }
+    };
+
+    const handleRetry = async (idx) => {
+        if (isLoading || !node) return;
+        const targetMessage = chatHistory[idx];
+        if (!targetMessage || targetMessage.role !== 'ai') return;
+
+        let userIndex = -1;
+        for (let i = idx - 1; i >= 0; i -= 1) {
             if (chatHistory[i].role === 'user') {
-                handleSend(chatHistory[i].content);
-                return;
+                userIndex = i;
+                break;
             }
         }
+        if (userIndex < 0) return;
+
+        setSelectionDraft(null);
+        setActiveExplanation(null);
+        setIsLoading(true);
+
+        try {
+            const historyForRetry = normalizeHistory(chatHistory.slice(0, userIndex + 1));
+            const reply = await callAI(historyForRetry, (node.data?.systemPrompt || '') + getControlInstructions());
+            const nextHistory = [...chatHistory];
+            nextHistory[idx] = appendResponseVariant(
+                targetMessage,
+                createResponseVariant(parseAiReply(reply, t('chat.actionCompleted') || 'Action completed.')),
+            );
+            persistChatHistory(nextHistory);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleSwitchResponseVariant = (idx, direction) => {
+        const targetMessage = chatHistory[idx];
+        if (!targetMessage || targetMessage.role !== 'ai') return;
+
+        const normalizedMessage = normalizeAiMessage(targetMessage);
+        const nextIndex = Math.max(
+            0,
+            Math.min(normalizedMessage.responseVariants.length - 1, normalizedMessage.activeVariantIndex + direction),
+        );
+        if (nextIndex === normalizedMessage.activeVariantIndex) return;
+
+        const nextHistory = [...chatHistory];
+        nextHistory[idx] = setResponseVariantIndex(targetMessage, nextIndex);
+        persistChatHistory(nextHistory);
+        setSelectionDraft(null);
+        setActiveExplanation(null);
     };
 
     const handleBranch = (idx) => {
         if (!node || !onBranchFromChat) return;
-        const branchHistory = chatHistory.slice(0, idx + 1);
-        const currentBranchCount = node.data.branchCount || 0;
+        const currentBranchCount = node.data?.branchCount || 0;
         if (currentBranchCount >= 10) return;
-        const success = onBranchFromChat(node.id, branchHistory);
+
+        const success = onBranchFromChat(node.id, chatHistory.slice(0, idx + 1));
         if (success) {
             onUpdateNodeData(node.id, 'branchCount', currentBranchCount + 1);
         }
     };
 
     const handleActionApprove = (idx) => {
-        const msg = chatHistory[idx];
-        if (!msg || !msg.pendingAction || msg.actionStatus !== 'pending') return;
+        const message = normalizeAiMessage(chatHistory[idx]);
+        const activeVariant = getActiveResponseVariant(message);
+        if (!message || !activeVariant?.pendingAction || activeVariant.actionStatus !== 'pending') return;
 
-        // Execute action
-        if (msg.pendingAction === 'CREATE_NODE' && onBranchFromChat) {
+        if (activeVariant.pendingAction === 'CREATE_NODE' && onBranchFromChat) {
             onBranchFromChat(node.id, chatHistory.slice(0, idx + 1));
             const currentBranchCount = node.data?.branchCount || 0;
             onUpdateNodeData(node.id, 'branchCount', currentBranchCount + 1);
-        } else if (msg.pendingAction === 'TOGGLE_LOOP_ON') {
+        } else if (activeVariant.pendingAction === 'TOGGLE_LOOP_ON') {
             onUpdateNodeData(node.id, 'isLooping', true);
-        } else if (msg.pendingAction === 'TOGGLE_LOOP_OFF') {
+        } else if (activeVariant.pendingAction === 'TOGGLE_LOOP_OFF') {
             onUpdateNodeData(node.id, 'isLooping', false);
         }
 
-        // Update status
-        const newHistory = [...chatHistory];
-        newHistory[idx] = { ...msg, actionStatus: 'approved' };
-        setChatHistory(newHistory);
-        onUpdateNodeData(node.id, 'chatHistory', newHistory);
+        const nextHistory = [...chatHistory];
+        nextHistory[idx] = replaceActiveResponseVariant(message, (variant) => ({
+            ...variant,
+            actionStatus: 'approved',
+        }));
+        persistChatHistory(nextHistory);
     };
 
     const handleActionReject = (idx) => {
-        const msg = chatHistory[idx];
-        if (!msg || !msg.pendingAction || msg.actionStatus !== 'pending') return;
+        const message = normalizeAiMessage(chatHistory[idx]);
+        const activeVariant = getActiveResponseVariant(message);
+        if (!message || !activeVariant?.pendingAction || activeVariant.actionStatus !== 'pending') return;
 
-        const newHistory = [...chatHistory];
-        newHistory[idx] = { ...msg, actionStatus: 'rejected' };
-        setChatHistory(newHistory);
-        onUpdateNodeData(node.id, 'chatHistory', newHistory);
+        const nextHistory = [...chatHistory];
+        nextHistory[idx] = replaceActiveResponseVariant(message, (variant) => ({
+            ...variant,
+            actionStatus: 'rejected',
+        }));
+        persistChatHistory(nextHistory);
     };
 
     const renderMessageContent = (message, messageIndex) => {
         if (message.role !== 'ai') return message.content;
 
+        const activeVariant = getActiveResponseVariant(message);
+        const content = activeVariant?.content || '';
         const explanations = getInlineExplanations(message);
-        if (explanations.length === 0) return message.content;
+
+        if (explanations.length === 0) return content;
 
         const segments = [];
         let cursor = 0;
@@ -412,8 +649,8 @@ export default function ChatView({
             if (item.start > cursor) {
                 segments.push(
                     <span key={`${item.id}-text`}>
-                        {message.content.slice(cursor, item.start)}
-                    </span>
+                        {content.slice(cursor, item.start)}
+                    </span>,
                 );
             }
 
@@ -428,19 +665,15 @@ export default function ChatView({
                         cursor: 'pointer',
                     }}
                 >
-                    {message.content.slice(item.start, item.end)}
-                </span>
+                    {content.slice(item.start, item.end)}
+                </span>,
             );
 
             cursor = item.end;
         });
 
-        if (cursor < message.content.length) {
-            segments.push(
-                <span key={`${messageIndex}-tail`}>
-                    {message.content.slice(cursor)}
-                </span>
-            );
+        if (cursor < content.length) {
+            segments.push(<span key={`${messageIndex}-tail`}>{content.slice(cursor)}</span>);
         }
 
         return segments;
@@ -448,16 +681,18 @@ export default function ChatView({
 
     if (!node) {
         return (
-            <div style={{
-                flex: 1,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                background: 'var(--bg-dark)',
-                color: 'var(--text-muted)',
-                padding: '2rem',
-                textAlign: 'center',
-            }}>
+            <div
+                style={{
+                    flex: 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    background: 'var(--bg-dark)',
+                    color: 'var(--text-muted)',
+                    padding: '2rem',
+                    textAlign: 'center',
+                }}
+            >
                 <div>
                     <div style={{ fontSize: '0.76rem', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.5rem' }}>
                         Session Loading
@@ -489,24 +724,26 @@ export default function ChatView({
     const branchCount = node.data?.branchCount || 0;
 
     return (
-        <div style={{
-            flex: 1,
-            display: 'flex',
-            flexDirection: 'column',
-            background: 'var(--bg-dark)',
-            height: '100%',
-            position: 'relative'
-        }}>
-            {/* Top Bar */}
-            <div style={{
-                padding: '0.5rem 1.5rem',
-                borderBottom: '1px solid var(--panel-border)',
+        <div
+            style={{
+                flex: 1,
                 display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center'
-            }}>
+                flexDirection: 'column',
+                background: 'var(--bg-dark)',
+                height: '100%',
+                position: 'relative',
+            }}
+        >
+            <div
+                style={{
+                    padding: '0.5rem 1.5rem',
+                    borderBottom: '1px solid var(--panel-border)',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                }}
+            >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    {/* Goal Button */}
                     {node.data?.isStarter && (
                         <button
                             onClick={() => setShowGoalWizard(true)}
@@ -523,7 +760,7 @@ export default function ChatView({
                                 alignItems: 'center',
                                 gap: '0.3rem',
                                 transition: 'all 0.2s',
-                                fontFamily: 'inherit'
+                                fontFamily: 'inherit',
                             }}
                         >
                             <Target size={13} />
@@ -534,65 +771,96 @@ export default function ChatView({
                 <select
                     className="node-select-sm"
                     value={node.data?.selectedApiKey || 0}
-                    onChange={(e) => onUpdateNodeData(node.id, 'selectedApiKey', parseInt(e.target.value))}
+                    onChange={(event) => onUpdateNodeData(node.id, 'selectedApiKey', parseInt(event.target.value, 10))}
                     style={{ maxWidth: '130px' }}
                     title={t('chat.modelSelect')}
                 >
-                    {apiKeys?.map((item, i) => (
-                        <option key={i} value={i}>Key {i + 1} ({item?.provider || 'openai'})</option>
+                    {apiKeys?.map((item, index) => (
+                        <option key={index} value={index}>
+                            Key {index + 1} ({item?.provider || 'openai'})
+                        </option>
                     ))}
                 </select>
             </div>
 
-            {/* Messages */}
-            <div style={{
-                flex: 1,
-                overflowY: 'auto',
-                padding: '1.5rem',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '1rem',
-                maxWidth: '820px',
-                width: '100%',
-                margin: '0 auto'
-            }}>
+            <div
+                style={{
+                    flex: 1,
+                    overflowY: 'auto',
+                    padding: '1.5rem',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '1rem',
+                    maxWidth: '820px',
+                    width: '100%',
+                    margin: '0 auto',
+                }}
+            >
                 {chatHistory.length === 0 ? (
-                    <div style={{
-                        margin: 'auto',
-                        textAlign: 'center',
-                        color: 'var(--text-muted)',
-                        animation: 'fadeSlideUp 0.5s ease'
-                    }}>
+                    <div
+                        style={{
+                            margin: 'auto',
+                            textAlign: 'center',
+                            color: 'var(--text-muted)',
+                            animation: 'fadeSlideUp 0.5s ease',
+                        }}
+                    >
                         <Bot size={48} style={{ opacity: 0.3, marginBottom: '1rem' }} />
                         <p style={{ fontSize: '1rem', fontWeight: 400 }}>{t('chat.empty')}</p>
                     </div>
                 ) : (
-                    chatHistory.map((msg, idx) => {
-                        const explanations = getInlineExplanations(msg);
+                    chatHistory.map((rawMessage, idx) => {
+                        const message = rawMessage.role === 'ai' ? normalizeAiMessage(rawMessage) : rawMessage;
+                        const activeVariant = message.role === 'ai' ? getActiveResponseVariant(message) : null;
+                        const displayedContent = activeVariant?.content || message.content || '';
+                        const pendingAction = activeVariant?.pendingAction || null;
+                        const actionStatus = activeVariant?.actionStatus || null;
+                        const responseVariantCount = message.role === 'ai' ? message.responseVariants.length : 0;
+                        const activeResponseVariantIndex = message.role === 'ai' ? message.activeVariantIndex : 0;
+                        const linkedReplyIndex = message.role === 'user' && chatHistory[idx + 1]?.role === 'ai' ? idx + 1 : null;
+                        const linkedReplyCollapsed = linkedReplyIndex !== null ? isReplyCollapsed(chatHistory[linkedReplyIndex]) : false;
+                        const explanations = getInlineExplanations(message);
                         const activeExplanationIndex = explanations.findIndex((item) => item.id === activeExplanation?.explanationId);
                         const currentExplanation = activeExplanation?.messageIndex === idx && activeExplanationIndex >= 0
                             ? explanations[activeExplanationIndex]
                             : null;
 
+                        if (message.role === 'ai' && isReplyCollapsed(message)) {
+                            return null;
+                        }
+
                         return (
-                            <div key={idx} className="chat-msg-wrapper" style={{
-                                display: 'flex',
-                                flexDirection: 'column',
-                                alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start',
-                                animation: 'fadeIn 0.2s ease'
-                            }}>
-                                <div style={{
+                            <div
+                                key={idx}
+                                className="chat-msg-wrapper"
+                                style={{
                                     display: 'flex',
-                                    gap: '0.65rem',
-                                    flexDirection: msg.role === 'user' ? 'row-reverse' : 'row',
-                                    maxWidth: '85%'
-                                }}>
-                                    <div style={{
-                                        width: '30px', height: '30px', borderRadius: '50%', flexShrink: 0,
-                                        background: msg.role === 'user' ? 'var(--primary)' : 'rgba(255,255,255,0.06)',
-                                        display: 'flex', alignItems: 'center', justifyContent: 'center'
-                                    }}>
-                                        {msg.role === 'user' ? <User size={14} color="white" /> : <Bot size={14} />}
+                                    flexDirection: 'column',
+                                    alignItems: message.role === 'user' ? 'flex-end' : 'flex-start',
+                                    animation: 'fadeIn 0.2s ease',
+                                }}
+                            >
+                                <div
+                                    style={{
+                                        display: 'flex',
+                                        gap: '0.65rem',
+                                        flexDirection: message.role === 'user' ? 'row-reverse' : 'row',
+                                        maxWidth: '85%',
+                                    }}
+                                >
+                                    <div
+                                        style={{
+                                            width: '30px',
+                                            height: '30px',
+                                            borderRadius: '50%',
+                                            flexShrink: 0,
+                                            background: message.role === 'user' ? 'var(--primary)' : 'rgba(255,255,255,0.06)',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                        }}
+                                    >
+                                        {message.role === 'user' ? <User size={14} color="white" /> : <Bot size={14} />}
                                     </div>
                                     <div
                                         ref={(element) => {
@@ -600,47 +868,83 @@ export default function ChatView({
                                             else delete messageContentRefs.current[idx];
                                         }}
                                         onMouseUp={() => {
-                                            if (msg.role === 'ai') {
+                                            if (message.role === 'ai') {
                                                 setTimeout(() => handleTextSelection(idx), 0);
                                             }
                                         }}
                                         onTouchEnd={() => {
-                                            if (msg.role === 'ai') {
+                                            if (message.role === 'ai') {
                                                 setTimeout(() => handleTextSelection(idx), 0);
                                             }
                                         }}
                                         style={{
-                                            background: msg.role === 'user' ? 'linear-gradient(135deg, var(--primary) 0%, #748ffc 100%)' : 'var(--panel-bg)',
-                                            color: msg.role === 'user' ? 'white' : 'var(--text-main)',
+                                            background: message.role === 'user' ? 'linear-gradient(135deg, var(--primary) 0%, #748ffc 100%)' : 'var(--panel-bg)',
+                                            color: message.role === 'user' ? 'white' : 'var(--text-main)',
                                             padding: '0.8rem 1.25rem',
-                                            borderRadius: msg.role === 'user' ? '20px 20px 4px 20px' : '20px 20px 20px 4px',
-                                            border: msg.role === 'ai' ? '1px solid var(--panel-border)' : '1px solid rgba(255,255,255,0.1)',
-                                            boxShadow: msg.role === 'user' ? '0 4px 15px rgba(92, 124, 250, 0.25)' : 'var(--shadow-sm)',
-                                            wordBreak: 'break-word', whiteSpace: 'pre-wrap',
-                                            fontSize: '0.92rem', lineHeight: 1.75,
-                                            backdropFilter: msg.role === 'ai' ? 'blur(20px)' : 'none',
-                                            WebkitBackdropFilter: msg.role === 'ai' ? 'blur(20px)' : 'none'
+                                            borderRadius: message.role === 'user' ? '20px 20px 4px 20px' : '20px 20px 20px 4px',
+                                            border: message.role === 'ai' ? '1px solid var(--panel-border)' : '1px solid rgba(255,255,255,0.1)',
+                                            boxShadow: message.role === 'user' ? '0 4px 15px rgba(92, 124, 250, 0.25)' : 'var(--shadow-sm)',
+                                            wordBreak: 'break-word',
+                                            whiteSpace: 'pre-wrap',
+                                            fontSize: '0.92rem',
+                                            lineHeight: 1.75,
+                                            backdropFilter: message.role === 'ai' ? 'blur(20px)' : 'none',
+                                            WebkitBackdropFilter: message.role === 'ai' ? 'blur(20px)' : 'none',
                                         }}
                                     >
-                                        {renderMessageContent(msg, idx)}
+                                        {renderMessageContent(message, idx)}
                                     </div>
                                 </div>
 
+                                {message.role === 'user' && linkedReplyIndex !== null && (
+                                    <button
+                                        onClick={() => handleToggleReplyCollapse(linkedReplyIndex)}
+                                        style={{
+                                            marginTop: '0.35rem',
+                                            marginRight: '2.55rem',
+                                            alignSelf: 'flex-end',
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            gap: '0.28rem',
+                                            padding: '0.18rem 0.55rem',
+                                            borderRadius: '999px',
+                                            border: '1px solid rgba(255,255,255,0.08)',
+                                            background: 'rgba(255,255,255,0.04)',
+                                            color: 'var(--text-muted)',
+                                            fontSize: '0.72rem',
+                                            lineHeight: 1,
+                                            cursor: 'pointer',
+                                            transition: 'var(--transition-smooth)',
+                                        }}
+                                        title={linkedReplyCollapsed ? '回答を表示' : '回答を折り畳む'}
+                                    >
+                                        {linkedReplyCollapsed ? <ChevronDown size={11} /> : <ChevronUp size={11} />}
+                                        {linkedReplyCollapsed ? '回答を表示' : '回答を折り畳む'}
+                                    </button>
+                                )}
+
                                 {selectionDraft?.messageIndex === idx && (
-                                    <div style={{
-                                        marginLeft: '2.5rem',
-                                        marginTop: '0.5rem',
-                                        padding: '0.75rem 0.9rem',
-                                        borderRadius: '14px',
-                                        background: 'rgba(126, 216, 255, 0.08)',
-                                        border: '1px solid rgba(126, 216, 255, 0.2)',
-                                        maxWidth: '440px',
-                                        display: 'flex',
-                                        flexDirection: 'column',
-                                        gap: '0.65rem'
-                                    }}>
-                                        <div style={{ fontSize: '0.78rem', color: 'var(--text-main)', lineHeight: 1.6 }}>
-                                            <span style={{ color: '#7ed8ff', fontWeight: 600 }}>選択中:</span> 「{selectionDraft.text}」
+                                    <div
+                                        style={{
+                                            marginLeft: '2.5rem',
+                                            marginTop: '0.5rem',
+                                            padding: '0.95rem 1.05rem',
+                                            borderRadius: '18px',
+                                            background: 'linear-gradient(180deg, rgba(235,242,255,0.96) 0%, rgba(219,231,255,0.93) 100%)',
+                                            border: '1px solid rgba(125,161,255,0.35)',
+                                            boxShadow: '0 16px 34px rgba(17,31,66,0.18)',
+                                            maxWidth: '560px',
+                                            display: 'flex',
+                                            flexDirection: 'column',
+                                            gap: '0.75rem',
+                                        }}
+                                    >
+                                        <div style={{ fontSize: '0.88rem', color: '#22314d', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                                            <Sparkles size={14} color="#63a9ff" />
+                                            この部分を説明します
+                                        </div>
+                                        <div style={{ fontSize: '0.82rem', color: '#63a9ff', lineHeight: 1.7 }}>
+                                            「{selectionDraft.text}」
                                         </div>
                                         <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
                                             <button className="chat-action-btn" onClick={handleCreateExplanation} disabled={isExplaining}>
@@ -654,22 +958,25 @@ export default function ChatView({
                                 )}
 
                                 {currentExplanation && (
-                                    <div style={{
-                                        marginLeft: '2.5rem',
-                                        marginTop: '0.5rem',
-                                        padding: '0.85rem 1rem',
-                                        background: 'rgba(92, 124, 250, 0.08)',
-                                        border: '1px solid rgba(92, 124, 250, 0.25)',
-                                        borderRadius: '12px',
-                                        display: 'inline-flex',
-                                        flexDirection: 'column',
-                                        gap: '0.65rem',
-                                        maxWidth: '460px',
-                                        animation: 'fadeIn 0.2s ease'
-                                    }}>
+                                    <div
+                                        style={{
+                                            marginLeft: '2.5rem',
+                                            marginTop: '0.5rem',
+                                            padding: '1rem 1.1rem',
+                                            background: 'linear-gradient(180deg, rgba(235,242,255,0.96) 0%, rgba(219,231,255,0.93) 100%)',
+                                            border: '1px solid rgba(125,161,255,0.35)',
+                                            borderRadius: '18px',
+                                            boxShadow: '0 18px 36px rgba(17,31,66,0.18)',
+                                            display: 'inline-flex',
+                                            flexDirection: 'column',
+                                            gap: '0.8rem',
+                                            maxWidth: '560px',
+                                            animation: 'fadeIn 0.2s ease',
+                                        }}
+                                    >
                                         <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.7rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                                            <div style={{ fontSize: '0.84rem', color: 'var(--text-main)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
-                                                <Sparkles size={13} color="#7ed8ff" />
+                                            <div style={{ fontSize: '0.88rem', color: '#22314d', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                                                <Sparkles size={14} color="#63a9ff" />
                                                 この部分の説明
                                             </div>
                                             {explanations.length > 1 && (
@@ -677,7 +984,7 @@ export default function ChatView({
                                                     <button className="chat-action-btn" disabled={activeExplanationIndex <= 0} onClick={() => shiftExplanation(idx, -1)} style={{ padding: '0.2rem' }}>
                                                         <ChevronLeft size={12} />
                                                     </button>
-                                                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', minWidth: '28px', textAlign: 'center' }}>
+                                                    <span style={{ fontSize: '0.72rem', color: '#63779a', minWidth: '36px', textAlign: 'center' }}>
                                                         {activeExplanationIndex + 1}/{explanations.length}
                                                     </span>
                                                     <button className="chat-action-btn" disabled={activeExplanationIndex >= explanations.length - 1} onClick={() => shiftExplanation(idx, 1)} style={{ padding: '0.2rem' }}>
@@ -686,10 +993,10 @@ export default function ChatView({
                                                 </div>
                                             )}
                                         </div>
-                                        <div style={{ fontSize: '0.78rem', color: '#8fdfff', lineHeight: 1.6 }}>
+                                        <div style={{ fontSize: '0.82rem', color: '#63a9ff', lineHeight: 1.7 }}>
                                             「{currentExplanation.text}」
                                         </div>
-                                        <div style={{ fontSize: '0.82rem', color: 'var(--text-main)', lineHeight: 1.7 }}>
+                                        <div style={{ fontSize: '0.86rem', color: '#22314d', lineHeight: 1.9 }}>
                                             {currentExplanation.summary}
                                         </div>
                                         <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
@@ -703,115 +1010,154 @@ export default function ChatView({
                                     </div>
                                 )}
 
-                            {/* Pending Action UI */}
-                            {msg.role === 'ai' && msg.pendingAction && (
-                                <div style={{
-                                    marginLeft: '2.5rem',
-                                    marginTop: '0.5rem',
-                                    padding: '0.85rem 1rem',
-                                    background: 'rgba(92, 124, 250, 0.08)',
-                                    border: '1px solid rgba(92, 124, 250, 0.25)',
-                                    borderRadius: '12px',
-                                    display: 'inline-flex',
-                                    flexDirection: 'column',
-                                    gap: '0.6rem',
-                                    maxWidth: '400px',
-                                    animation: 'fadeIn 0.3s ease'
-                                }}>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-main)', fontSize: '0.85rem', fontWeight: 500 }}>
-                                        <Bot size={14} color="var(--primary)" />
-                                        {msg.pendingAction === 'CREATE_NODE' ? t('chat.aiSuggestsBranch') :
-                                            msg.pendingAction === 'TOGGLE_LOOP_ON' ? t('chat.aiSuggestsLoopOn') :
-                                                'AI Suggests Action'}
+                                {message.role === 'ai' && pendingAction && (
+                                    <div
+                                        style={{
+                                            marginLeft: '2.5rem',
+                                            marginTop: '0.5rem',
+                                            padding: '0.85rem 1rem',
+                                            background: 'rgba(92, 124, 250, 0.08)',
+                                            border: '1px solid rgba(92, 124, 250, 0.25)',
+                                            borderRadius: '12px',
+                                            display: 'inline-flex',
+                                            flexDirection: 'column',
+                                            gap: '0.6rem',
+                                            maxWidth: '400px',
+                                            animation: 'fadeIn 0.3s ease',
+                                        }}
+                                    >
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-main)', fontSize: '0.85rem', fontWeight: 500 }}>
+                                            <Bot size={14} color="var(--primary)" />
+                                            {pendingAction === 'CREATE_NODE'
+                                                ? t('chat.aiSuggestsBranch')
+                                                : pendingAction === 'TOGGLE_LOOP_ON'
+                                                    ? t('chat.aiSuggestsLoopOn')
+                                                    : 'AI Suggests Action'}
+                                        </div>
+
+                                        {actionStatus === 'pending' ? (
+                                            <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                                <button
+                                                    onClick={() => handleActionApprove(idx)}
+                                                    style={{
+                                                        padding: '0.4rem 0.8rem',
+                                                        background: 'var(--primary)',
+                                                        color: 'white',
+                                                        border: 'none',
+                                                        borderRadius: '6px',
+                                                        fontSize: '0.8rem',
+                                                        cursor: 'pointer',
+                                                        transition: 'var(--transition-smooth)',
+                                                        fontWeight: 500,
+                                                    }}
+                                                >
+                                                    <Check size={12} style={{ display: 'inline', marginRight: '4px', verticalAlign: '-2px' }} />
+                                                    {t('chat.approve')}
+                                                </button>
+                                                <button
+                                                    onClick={() => handleActionReject(idx)}
+                                                    style={{
+                                                        padding: '0.4rem 0.8rem',
+                                                        background: 'rgba(255,100,100,0.15)',
+                                                        color: '#ff6b6b',
+                                                        border: '1px solid rgba(255,100,100,0.3)',
+                                                        borderRadius: '6px',
+                                                        fontSize: '0.8rem',
+                                                        cursor: 'pointer',
+                                                        transition: 'var(--transition-smooth)',
+                                                    }}
+                                                >
+                                                    {t('chat.reject')}
+                                                </button>
+                                            </div>
+                                        ) : (
+                                            <div style={{ color: actionStatus === 'approved' ? 'var(--action)' : 'var(--text-muted)', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                                                {actionStatus === 'approved' ? <Check size={12} /> : null}
+                                                {actionStatus === 'approved' ? t('chat.actionExecuted') : t('chat.actionRejected')}
+                                            </div>
+                                        )}
                                     </div>
+                                )}
 
-                                    {msg.actionStatus === 'pending' ? (
-                                        <div style={{ display: 'flex', gap: '0.5rem' }}>
-                                            <button
-                                                onClick={() => handleActionApprove(idx)}
-                                                style={{
-                                                    padding: '0.4rem 0.8rem', background: 'var(--primary)', color: 'white',
-                                                    border: 'none', borderRadius: '6px', fontSize: '0.8rem', cursor: 'pointer',
-                                                    transition: 'var(--transition-smooth)', fontWeight: 500
-                                                }}>
-                                                <Check size={12} style={{ display: 'inline', marginRight: '4px', verticalAlign: '-2px' }} />
-                                                {t('chat.approve')}
-                                            </button>
-                                            <button
-                                                onClick={() => handleActionReject(idx)}
-                                                style={{
-                                                    padding: '0.4rem 0.8rem', background: 'rgba(255,100,100,0.15)', color: '#ff6b6b',
-                                                    border: '1px solid rgba(255,100,100,0.3)', borderRadius: '6px', fontSize: '0.8rem', cursor: 'pointer',
-                                                    transition: 'var(--transition-smooth)'
-                                                }}>
-                                                {t('chat.reject')}
-                                            </button>
-                                        </div>
-                                    ) : (
-                                        <div style={{ color: msg.actionStatus === 'approved' ? 'var(--action)' : 'var(--text-muted)', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                                            {msg.actionStatus === 'approved' ? <Check size={12} /> : null}
-                                            {msg.actionStatus === 'approved' ? t('chat.actionExecuted') : t('chat.actionRejected')}
-                                        </div>
-                                    )}
-                                </div>
-                            )}
+                                {message.role === 'ai' && (
+                                    <div className="chat-actions" style={{ marginLeft: '2.6rem', marginTop: '0.4rem' }}>
+                                        <button className="chat-action-btn" onClick={() => handleCopy(displayedContent, idx)} title={copiedIdx === idx ? t('chat.copied') : t('chat.copy')}>
+                                            {copiedIdx === idx ? <Check size={12} /> : <Copy size={12} />}
+                                            {copiedIdx === idx ? t('chat.copied') : t('chat.copy')}
+                                        </button>
+                                        <button className="chat-action-btn" onClick={() => handleRetry(idx)} disabled={isLoading} title={t('chat.retry')}>
+                                            <RefreshCw size={12} /> {t('chat.retry')}
+                                        </button>
 
-                            {/* Action buttons for AI messages */}
-                            {msg.role === 'ai' && (
-                                <div className="chat-actions" style={{ marginLeft: '2.6rem', marginTop: '0.4rem' }}>
-                                    <button className="chat-action-btn" onClick={() => handleCopy(msg.content, idx)} title={copiedIdx === idx ? t('chat.copied') : t('chat.copy')}>
-                                        {copiedIdx === idx ? <Check size={12} /> : <Copy size={12} />}
-                                        {copiedIdx === idx ? t('chat.copied') : t('chat.copy')}
-                                    </button>
-                                    <button className="chat-action-btn" onClick={() => handleRetry(idx)} disabled={isLoading} title={t('chat.retry')}>
-                                        <RefreshCw size={12} /> {t('chat.retry')}
-                                    </button>
-                                    <button className="chat-action-btn" onClick={() => handleBranch(idx)} disabled={branchCount >= 10} title={branchCount >= 10 ? t('chat.branchMax') : t('chat.branch')}>
-                                        <GitBranch size={12} /> {t('chat.branch')} {branchCount > 0 && `(${branchCount}/10)`}
-                                    </button>
-
-                                    {/* Branch navigation */}
-                                    {branchCount > 0 && (
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.2rem', marginLeft: '0.3rem', borderLeft: '1px solid var(--panel-border)', paddingLeft: '0.5rem' }}>
-                                            <button
-                                                className="chat-action-btn"
-                                                disabled={activeBranchView <= 0}
-                                                onClick={() => setActiveBranchView(v => Math.max(0, v - 1))}
-                                                style={{ padding: '0.2rem' }}
-                                            >
-                                                <ChevronLeft size={12} />
-                                            </button>
-                                            <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', minWidth: '20px', textAlign: 'center' }}>
-                                                {activeBranchView + 1}
-                                            </span>
-                                            <button
-                                                className="chat-action-btn"
-                                                disabled={activeBranchView >= branchCount}
-                                                onClick={() => setActiveBranchView(v => Math.min(branchCount, v + 1))}
-                                                style={{ padding: '0.2rem' }}
-                                            >
-                                                <ChevronRight size={12} />
-                                            </button>
-
-                                            {/* Move to branch button (not for branch 1 = index 0) */}
-                                            {activeBranchView > 0 && onNavigateToBranch && (
+                                        {responseVariantCount > 1 && (
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.2rem', borderLeft: '1px solid var(--panel-border)', paddingLeft: '0.5rem' }}>
                                                 <button
                                                     className="chat-action-btn"
-                                                    onClick={() => onNavigateToBranch(node.id, activeBranchView)}
-                                                    style={{ marginLeft: '0.2rem' }}
-                                                    title={t('chat.moveTo')}
+                                                    disabled={activeResponseVariantIndex <= 0}
+                                                    onClick={() => handleSwitchResponseVariant(idx, -1)}
+                                                    style={{ padding: '0.2rem' }}
                                                 >
-                                                    <ExternalLink size={12} /> {t('chat.moveTo')}
+                                                    <ChevronLeft size={12} />
                                                 </button>
-                                            )}
-                                        </div>
-                                    )}
-                                </div>
-                            )}
+                                                <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', minWidth: '54px', textAlign: 'center' }}>
+                                                    回答 {activeResponseVariantIndex + 1}/{responseVariantCount}
+                                                </span>
+                                                <button
+                                                    className="chat-action-btn"
+                                                    disabled={activeResponseVariantIndex >= responseVariantCount - 1}
+                                                    onClick={() => handleSwitchResponseVariant(idx, 1)}
+                                                    style={{ padding: '0.2rem' }}
+                                                >
+                                                    <ChevronRight size={12} />
+                                                </button>
+                                            </div>
+                                        )}
+
+                                        <button className="chat-action-btn" onClick={() => handleBranch(idx)} disabled={branchCount >= 10} title={branchCount >= 10 ? t('chat.branchMax') : t('chat.branch')}>
+                                            <GitBranch size={12} /> {t('chat.branch')} {branchCount > 0 && `(${branchCount}/10)`}
+                                        </button>
+
+                                        {branchCount > 0 && (
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.2rem', marginLeft: '0.3rem', borderLeft: '1px solid var(--panel-border)', paddingLeft: '0.5rem' }}>
+                                                <button
+                                                    className="chat-action-btn"
+                                                    disabled={activeBranchView <= 0}
+                                                    onClick={() => setActiveBranchView((value) => Math.max(0, value - 1))}
+                                                    style={{ padding: '0.2rem' }}
+                                                >
+                                                    <ChevronLeft size={12} />
+                                                </button>
+                                                <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', minWidth: '20px', textAlign: 'center' }}>
+                                                    {activeBranchView + 1}
+                                                </span>
+                                                <button
+                                                    className="chat-action-btn"
+                                                    disabled={activeBranchView >= branchCount}
+                                                    onClick={() => setActiveBranchView((value) => Math.min(branchCount, value + 1))}
+                                                    style={{ padding: '0.2rem' }}
+                                                >
+                                                    <ChevronRight size={12} />
+                                                </button>
+
+                                                {activeBranchView > 0 && onNavigateToBranch && (
+                                                    <button
+                                                        className="chat-action-btn"
+                                                        onClick={() => onNavigateToBranch(node.id, activeBranchView)}
+                                                        style={{ marginLeft: '0.2rem' }}
+                                                        title={t('chat.moveTo')}
+                                                    >
+                                                        <ExternalLink size={12} /> {t('chat.moveTo')}
+                                                    </button>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
                             </div>
                         );
                     })
                 )}
+
                 {isLoading && (
                     <div style={{ display: 'flex', gap: '0.65rem', animation: 'pulse 1.5s infinite' }}>
                         <div style={{ width: '30px', height: '30px', borderRadius: '50%', background: 'rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -822,51 +1168,71 @@ export default function ChatView({
                         </div>
                     </div>
                 )}
+
                 <div ref={messagesEndRef} />
             </div>
 
-            {/* Input Area */}
             <div style={{ padding: '1.25rem 2rem', borderTop: '1px solid var(--panel-border)' }}>
-                <div style={{
-                    display: 'flex',
-                    background: 'var(--panel-bg)',
-                    backdropFilter: 'blur(24px)',
-                    WebkitBackdropFilter: 'blur(24px)',
-                    border: '1px solid var(--panel-border)',
-                    boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
-                    borderRadius: '28px',
-                    overflow: 'hidden',
-                    padding: '0.35rem 0.35rem 0.35rem 1.25rem',
-                    alignItems: 'flex-end',
-                    maxWidth: '820px',
-                    margin: '0 auto',
-                    transition: 'var(--transition-smooth)',
-                    minHeight: '56px'
-                }}>
+                <div
+                    style={{
+                        display: 'flex',
+                        background: 'var(--panel-bg)',
+                        backdropFilter: 'blur(24px)',
+                        WebkitBackdropFilter: 'blur(24px)',
+                        border: '1px solid var(--panel-border)',
+                        boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
+                        borderRadius: '28px',
+                        overflow: 'hidden',
+                        padding: '0.35rem 0.35rem 0.35rem 1.25rem',
+                        alignItems: 'flex-end',
+                        maxWidth: '820px',
+                        margin: '0 auto',
+                        transition: 'var(--transition-smooth)',
+                        minHeight: '56px',
+                    }}
+                >
                     <textarea
                         value={input}
-                        onChange={e => setInput(e.target.value)}
-                        onKeyDown={(e) => {
-                            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
+                        onChange={(event) => setInput(event.target.value)}
+                        onKeyDown={(event) => {
+                            if (event.key === 'Enter' && !event.shiftKey) {
+                                event.preventDefault();
+                                handleSend();
+                            }
                         }}
                         placeholder={t('chat.placeholder')}
                         style={{
-                            flex: 1, background: 'transparent', border: 'none', color: 'var(--text-main)',
-                            resize: 'none', outline: 'none', padding: '0.5rem 0', minHeight: '32px',
-                            maxHeight: '150px', fontSize: '0.95rem', fontFamily: 'inherit', lineHeight: 1.5
+                            flex: 1,
+                            background: 'transparent',
+                            border: 'none',
+                            color: 'var(--text-main)',
+                            resize: 'none',
+                            outline: 'none',
+                            padding: '0.5rem 0',
+                            minHeight: '32px',
+                            maxHeight: '150px',
+                            fontSize: '0.95rem',
+                            fontFamily: 'inherit',
+                            lineHeight: 1.5,
                         }}
                         rows={1}
                     />
                     <button
-                        onClick={() => handleSend()}
+                        onClick={handleSend}
                         disabled={isLoading || !input.trim()}
                         style={{
-                            width: '38px', height: '38px', borderRadius: '50%',
+                            width: '38px',
+                            height: '38px',
+                            borderRadius: '50%',
                             background: input.trim() ? 'var(--primary)' : 'rgba(255,255,255,0.05)',
                             color: input.trim() ? 'white' : 'var(--text-muted)',
-                            border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            cursor: input.trim() ? 'pointer' : 'default', transition: 'all 0.2s',
-                            marginBottom: '4px'
+                            border: 'none',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            cursor: input.trim() ? 'pointer' : 'default',
+                            transition: 'all 0.2s',
+                            marginBottom: '4px',
                         }}
                     >
                         <Send size={16} />
