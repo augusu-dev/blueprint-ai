@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Bot, User, Copy, Check, RefreshCw, GitBranch, ExternalLink, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Send, Bot, User, Copy, Check, RefreshCw, GitBranch, ExternalLink, ChevronLeft, ChevronRight, Target } from 'lucide-react';
 import { useLanguage } from './i18n';
+import GoalWizard from './GoalWizard';
 
 export default function ChatView({
     node,
-    nodes,
     apiKeys,
     onUpdateNodeData,
     onBranchFromChat,
@@ -17,6 +17,7 @@ export default function ChatView({
     const [isLoading, setIsLoading] = useState(false);
     const [copiedIdx, setCopiedIdx] = useState(null);
     const [activeBranchView, setActiveBranchView] = useState(0);
+    const [showGoalWizard, setShowGoalWizard] = useState(false);
     const messagesEndRef = useRef(null);
 
     useEffect(() => {
@@ -116,8 +117,9 @@ export default function ChatView({
 3. ループ機能を停止させるべき場合: [ACTION: TOGGLE_LOOP_OFF] と含める。
 ※ アクションタグを含めるだけで、システムが自動的に抽出してユーザーへ提案UIを表示します。
 ---
-`;
+        `;
         const activeSystemPrompt = (node.data?.systemPrompt || '') + controlInstructions;
+        const reply = await callAI(updatedHistory, activeSystemPrompt);
 
         let displayReply = reply || '';
         let pendingAction = null;
@@ -264,7 +266,45 @@ export default function ChatView({
         onUpdateNodeData(node.id, 'chatHistory', newHistory);
     };
 
-    if (!node) return null;
+    if (!node) {
+        return (
+            <div style={{
+                flex: 1,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: 'var(--bg-dark)',
+                color: 'var(--text-muted)',
+                padding: '2rem',
+                textAlign: 'center',
+            }}>
+                <div>
+                    <div style={{ fontSize: '0.76rem', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.5rem' }}>
+                        Session Loading
+                    </div>
+                    <div style={{ fontSize: '0.96rem', color: 'var(--text-main)' }}>
+                        Preparing your chat workspace...
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    if (showGoalWizard && node.data?.isStarter) {
+        return (
+            <GoalWizard
+                onClose={() => setShowGoalWizard(false)}
+                apiKeys={apiKeys}
+                selectedApiKey={node.data?.selectedApiKey || 0}
+                onSetGoal={(goalText) => {
+                    onUpdateNodeData(node.id, 'systemPrompt', goalText);
+                    setShowGoalWizard(false);
+                }}
+                initialHistory={node.data?.goalHistory || []}
+                onSaveHistory={(history) => onUpdateNodeData(node.id, 'goalHistory', history)}
+            />
+        );
+    }
 
     const branchCount = node.data?.branchCount || 0;
 

@@ -3,14 +3,17 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { supabase } from './lib/supabase';
 import { Plus, X, Search, MessageSquare, Trash2, Settings } from 'lucide-react';
 import { useLanguage } from './i18n';
+import { DEFAULT_SPACE_MODE, getSpacePath, isSpaceMode } from './lib/routes';
+import { createSpaceData } from './lib/space';
 
 export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
     const { t } = useLanguage();
     const navigate = useNavigate();
-    const { id: currentSpaceId } = useParams();
+    const { id: currentSpaceId, mode } = useParams();
     const [spaces, setSpaces] = useState([]);
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState('');
+    const currentMode = isSpaceMode(mode) ? mode : DEFAULT_SPACE_MODE;
 
     const fetchSpaces = async () => {
         let allSpaces = [];
@@ -54,20 +57,19 @@ export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
     }, []);
 
     const handleNewSpace = async () => {
-        const initNodes = [
-            { id: 'goal-1', type: 'goalNode', position: { x: -320, y: 120 }, data: {} },
-            { id: '1', type: 'sequenceNode', position: { x: 100, y: 100 }, data: { isStarter: true, dir: 'LR', prompt: '' } }
-        ];
-        const initEdges = [
-            { id: 'e-goal-1', source: 'goal-1', sourceHandle: 'goal', target: '1', animated: true, type: 'deleteEdge' }
-        ];
+        const spaceData = createSpaceData(t('editor.untitled'));
         try {
             if (supabase) {
                 const { data: { user } } = await supabase.auth.getUser();
                 if (user) {
-                    const { data, error } = await supabase.from('spaces').insert({ user_id: user.id, title: t('editor.untitled'), nodes: initNodes, edges: initEdges }).select().single();
+                    const { data, error } = await supabase.from('spaces').insert({ user_id: user.id, title: spaceData.title, nodes: spaceData.nodes, edges: spaceData.edges }).select().single();
                     if (!error && data) {
-                        navigate(`/space/${data.id}`);
+                        localStorage.setItem(`blueprint_space_${data.id}`, JSON.stringify({
+                            ...spaceData,
+                            title: data.title || spaceData.title,
+                            updated_at: data.updated_at || spaceData.updated_at,
+                        }));
+                        navigate(getSpacePath(data.id));
                         onClose();
                         return;
                     }
@@ -76,9 +78,8 @@ export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
         } catch (err) { }
 
         const newId = crypto.randomUUID();
-        const spaceData = { title: t('editor.untitled'), nodes: initNodes, edges: initEdges, updated_at: new Date().toISOString() };
         localStorage.setItem(`blueprint_space_${newId}`, JSON.stringify(spaceData));
-        navigate(`/space/${newId}`);
+        navigate(getSpacePath(newId));
         onClose();
     };
 
@@ -154,7 +155,7 @@ export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
                     ) : (
                         filteredSpaces.map(space => (
                             <div key={space.id} className="sidebar-item"
-                                onClick={() => { navigate(`/space/${space.id}`); onClose(); }}
+                                onClick={() => { navigate(getSpacePath(space.id, currentMode)); onClose(); }}
                                 style={{
                                     padding: '0.5rem 0.6rem', display: 'flex', alignItems: 'center', gap: '0.5rem',
                                     background: space.id === currentSpaceId ? 'linear-gradient(90deg, rgba(92, 124, 250, 0.15) 0%, transparent 100%)' : 'transparent',

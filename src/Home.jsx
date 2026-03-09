@@ -3,31 +3,33 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from './lib/supabase';
 import { Box, LogOut, ChevronRight } from 'lucide-react';
 import { useLanguage } from './i18n';
+import { getSpacePath } from './lib/routes';
+import { createSpaceData } from './lib/space';
 
 export default function Home() {
     const navigate = useNavigate();
     const { t } = useLanguage();
 
     const handleNewSpace = async () => {
-        const initNodes = [
-            { id: 'goal-1', type: 'goalNode', position: { x: -320, y: 120 }, data: {} },
-            { id: '1', type: 'sequenceNode', position: { x: 100, y: 100 }, data: { isStarter: true, dir: 'LR', prompt: '' } }
-        ];
-        const initEdges = [
-            { id: 'e-goal-1', source: 'goal-1', sourceHandle: 'goal', target: '1', animated: true, type: 'deleteEdge' }
-        ];
+        const spaceData = createSpaceData(t('editor.untitled'));
+
         try {
             if (supabase) {
                 const { data: { user } } = await supabase.auth.getUser();
                 if (user) {
                     const { data, error } = await supabase
                         .from('spaces')
-                        .insert([{ user_id: user.id, title: t('editor.untitled'), nodes: initNodes, edges: initEdges }])
+                        .insert([{ user_id: user.id, title: spaceData.title, nodes: spaceData.nodes, edges: spaceData.edges }])
                         .select()
                         .single();
 
                     if (!error && data) {
-                        navigate(`/space/${data.id}`);
+                        localStorage.setItem(`blueprint_space_${data.id}`, JSON.stringify({
+                            ...spaceData,
+                            title: data.title || spaceData.title,
+                            updated_at: data.updated_at || spaceData.updated_at,
+                        }));
+                        navigate(getSpacePath(data.id));
                         return;
                     }
                 }
@@ -38,9 +40,8 @@ export default function Home() {
 
         // Fallback for local / unauthenticated
         const newId = crypto.randomUUID();
-        const spaceData = { title: t('editor.untitled'), nodes: initNodes, edges: initEdges, updated_at: new Date().toISOString() };
         localStorage.setItem(`blueprint_space_${newId}`, JSON.stringify(spaceData));
-        navigate(`/space/${newId}`);
+        navigate(getSpacePath(newId));
     };
 
     return (

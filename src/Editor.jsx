@@ -11,37 +11,21 @@ import {
     useReactFlow,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Settings, X, LogOut, Columns, Rows, Menu, Save, Edit3, MessageSquare, GitFork, Check } from 'lucide-react';
+import { Settings, X, LogOut, Columns, Rows, Menu, Save, Edit3, MessageSquare, GitFork, Check, Map as MapIcon } from 'lucide-react';
 import { supabase } from './lib/supabase';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useLanguage } from './i18n';
 
 import Sidebar from './Sidebar';
 import ChatView from './ChatView';
+import MapView from './MapView';
 import SequenceNode from './nodes/SequenceNode';
 import LoopNode from './nodes/LoopNode';
 import BranchNode from './nodes/BranchNode';
 import GoalNode from './nodes/GoalNode';
 import DeleteEdge from './nodes/DeleteEdge';
-
-const initialNodes = [
-    {
-        id: 'goal-1',
-        type: 'goalNode',
-        position: { x: -320, y: 120 },
-        data: {},
-    },
-    {
-        id: '1',
-        type: 'sequenceNode',
-        position: { x: 100, y: 100 },
-        data: { isStarter: true, dir: 'LR', prompt: '' },
-    },
-];
-
-const initialEdges = [
-    { id: 'e-goal-1', source: 'goal-1', sourceHandle: 'goal', target: '1', animated: true, type: 'deleteEdge' }
-];
+import { DEFAULT_SPACE_MODE, getSpacePath, isSpaceMode } from './lib/routes';
+import { createDefaultMapState, createInitialEdges, createInitialNodes, normalizeMapState } from './lib/space';
 
 const nodeTypes = {
     sequenceNode: SequenceNode,
@@ -55,14 +39,17 @@ const edgeTypes = {
 };
 
 function EditorContent() {
-    const { id: spaceId } = useParams();
+    const { id: spaceId, mode } = useParams();
     const navigate = useNavigate();
     const { setViewport, updateNodeInternals } = useReactFlow();
     const { t, lang, setLang } = useLanguage();
+    const currentMode = isSpaceMode(mode) ? mode : DEFAULT_SPACE_MODE;
 
     const [nodes, setNodes, onNodesChange] = useNodesState([]);
     const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+    const [mapState, setMapState] = useState(createDefaultMapState);
     const [spaceTitle, setSpaceTitle] = useState(t('editor.loading'));
+    const [isHydrated, setIsHydrated] = useState(false);
     const [direction, setDirection] = useState('LR');
     const [showSettings, setShowSettings] = useState(false);
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -71,9 +58,6 @@ function EditorContent() {
     const [tempTitle, setTempTitle] = useState('');
     const [isSaving, setIsSaving] = useState(false);
     const [saveSuccess, setSaveSuccess] = useState(false);
-
-    // Chat-first: viewMode = 'chat' | 'nodes'
-    const [viewMode, setViewMode] = useState('chat');
     const [activeChatNodeId, setActiveChatNodeId] = useState('1');
 
     const [apiKeys, setApiKeys] = useState(() => {
@@ -103,6 +87,42 @@ function EditorContent() {
 
     useEffect(() => {
         if (!spaceId) { navigate('/'); return; }
+        if (!isSpaceMode(mode)) {
+            navigate(getSpacePath(spaceId), { replace: true });
+        }
+    }, [spaceId, mode, navigate]);
+
+    const updateRemoteSpace = useCallback(async (payload) => {
+        if (!supabase || !spaceId) return;
+
+        const legacyPayload = { ...payload };
+        delete legacyPayload.map_state;
+        const { error } = await supabase.from('spaces').update(payload).eq('id', spaceId);
+
+        if (!error) return;
+        if (!Object.prototype.hasOwnProperty.call(payload, 'map_state')) throw error;
+
+        const { error: legacyError } = await supabase.from('spaces').update(legacyPayload).eq('id', spaceId);
+        if (legacyError) throw legacyError;
+    }, [spaceId]);
+
+    useEffect(() => {
+        if (!spaceId || !isSpaceMode(mode)) return;
+        let isCancelled = false;
+        setIsHydrated(false);
+
+        const applySpaceData = (data) => {
+            if (isCancelled || !data) return;
+
+            setSpaceTitle(data.title || t('editor.untitled'));
+            setMapState(normalizeMapState(data.map_state));
+            setNodes(Array.isArray(data.nodes) && data.nodes.length > 0 ? data.nodes : createInitialNodes());
+            setEdges(Array.isArray(data.edges) && data.edges.length > 0 ? data.edges : createInitialEdges());
+            if (data.viewport && Object.keys(data.viewport).length > 0) {
+                setViewport({ x: data.viewport.x, y: data.viewport.y, zoom: data.viewport.zoom });
+            }
+            setIsHydrated(true);
+        };
 
         const fetchSpace = async () => {
             let localData = null;
@@ -110,6 +130,15 @@ function EditorContent() {
                 const stored = localStorage.getItem(`blueprint_space_${spaceId}`);
                 if (stored) localData = JSON.parse(stored);
             } catch (e) { }
+
+            const fallbackData = localData || {
+                title: t('editor.untitled'),
+                nodes: createInitialNodes(),
+                edges: createInitialEdges(),
+                map_state: createDefaultMapState(),
+            };
+
+            applySpaceData(fallbackData);
 
             let remoteData = null;
             if (supabase) {
@@ -119,24 +148,20 @@ function EditorContent() {
                 } catch (globalErr) { console.warn("Fetch failed"); }
             }
 
+            if (isCancelled) return;
+
             let bestData = null;
             if (remoteData && localData) {
                 bestData = (new Date(remoteData.updated_at) > new Date(localData.updated_at)) ? remoteData : localData;
-            } else { bestData = remoteData || localData; }
+            } else {
+                bestData = remoteData || fallbackData;
+            }
 
             if (bestData) {
-                setSpaceTitle(bestData.title || t('editor.untitled'));
-                if (Array.isArray(bestData.nodes) && bestData.nodes.length > 0) setNodes(bestData.nodes);
-                else setNodes(initialNodes);
-                if (Array.isArray(bestData.edges) && bestData.edges.length > 0) setEdges(bestData.edges);
-                else setEdges(initialEdges);
-                if (bestData.viewport && Object.keys(bestData.viewport).length > 0) {
-                    setViewport({ x: bestData.viewport.x, y: bestData.viewport.y, zoom: bestData.viewport.zoom });
-                }
-            } else {
-                setNodes(initialNodes);
-                setEdges(initialEdges);
-                setSpaceTitle(t('editor.untitled'));
+                applySpaceData({
+                    ...bestData,
+                    map_state: bestData.map_state ?? localData?.map_state ?? fallbackData.map_state,
+                });
             }
         };
 
@@ -145,12 +170,15 @@ function EditorContent() {
         const handleTitleUpdate = async () => {
             try {
                 const { data } = await supabase.from('spaces').select('title').eq('id', spaceId).single();
-                if (data?.title) setSpaceTitle(data.title);
+                if (!isCancelled && data?.title) setSpaceTitle(data.title);
             } catch (e) { }
         };
         window.addEventListener('spaceTitleUpdated', handleTitleUpdate);
-        return () => window.removeEventListener('spaceTitleUpdated', handleTitleUpdate);
-    }, [spaceId, navigate, setNodes, setEdges, setViewport]);
+        return () => {
+            isCancelled = true;
+            window.removeEventListener('spaceTitleUpdated', handleTitleUpdate);
+        };
+    }, [spaceId, mode, setNodes, setEdges, setViewport, t]);
 
     const cleanNodesForSave = (rawNodes) => {
         return rawNodes.map(n => ({
@@ -170,11 +198,9 @@ function EditorContent() {
         setIsSaving(true);
         setSaveSuccess(false);
         try {
-            const updates = { title: spaceTitle, nodes: cleanNodesForSave(nodes), edges, updated_at: new Date().toISOString() };
+            const updates = { title: spaceTitle, nodes: cleanNodesForSave(nodes), edges, map_state: mapState, updated_at: new Date().toISOString() };
             localStorage.setItem(`blueprint_space_${spaceId}`, JSON.stringify(updates));
-            if (supabase) {
-                await supabase.from('spaces').update({ title: spaceTitle, nodes: updates.nodes, edges: updates.edges, updated_at: updates.updated_at }).eq('id', spaceId);
-            }
+            await updateRemoteSpace({ title: spaceTitle, nodes: updates.nodes, edges: updates.edges, map_state: updates.map_state, updated_at: updates.updated_at });
             window.dispatchEvent(new CustomEvent('spaceTitleUpdated'));
             setSaveSuccess(true);
             setTimeout(() => setSaveSuccess(false), 2500);
@@ -202,15 +228,17 @@ function EditorContent() {
         if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
         saveTimerRef.current = setTimeout(async () => {
             try {
-                const updates = { title: spaceTitle, nodes: cleanNodesForSave(nodes), edges, updated_at: new Date().toISOString() };
+                const updates = { title: spaceTitle, nodes: cleanNodesForSave(nodes), edges, map_state: mapState, updated_at: new Date().toISOString() };
                 localStorage.setItem(`blueprint_space_${spaceId}`, JSON.stringify(updates));
-                if (supabase) {
-                    await supabase.from('spaces').update({ nodes: updates.nodes, edges: updates.edges, updated_at: updates.updated_at }).eq('id', spaceId);
-                }
+                await updateRemoteSpace({ nodes: updates.nodes, edges: updates.edges, map_state: updates.map_state, updated_at: updates.updated_at });
             } catch (err) { console.error("Auto-save failed", err); }
         }, 1500);
         return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
-    }, [nodes, edges, spaceId, spaceTitle]);
+    }, [nodes, edges, mapState, spaceId, spaceTitle, updateRemoteSpace]);
+
+    const updateMapState = useCallback((nextMapState) => {
+        setMapState((current) => normalizeMapState(typeof nextMapState === 'function' ? nextMapState(current) : nextMapState));
+    }, []);
 
     const updateNodeData = useCallback((id, key, val) => {
         setNodes((nds) => nds.map((node) => node.id === id ? { ...node, data: { ...node.data, [key]: val } } : node));
@@ -309,7 +337,12 @@ function EditorContent() {
                 ...n.data, dir: direction,
                 systemPrompt: n.data?.isStarter ? n.data.systemPrompt : (n.data?.systemPrompt || sharedGoal),
                 onChange: updateNodeData, onAddBranch, onQuickAdd, onDeleteNode,
-                onOpenChat: (nodeId) => { setActiveChatNodeId(nodeId); setViewMode('chat'); },
+                onOpenChat: (nodeId) => {
+                    setActiveChatNodeId(nodeId);
+                    if (spaceId) {
+                        navigate(getSpacePath(spaceId, 'chat'));
+                    }
+                },
                 onSetGoalFromNode: (goalNodeId, goalText) => {
                     const outgoingEdge = edges.find(e => e.source === goalNodeId);
                     if (outgoingEdge) {
@@ -321,7 +354,7 @@ function EditorContent() {
                 apiKeys
             }
         }));
-    }, [nodes, edges, direction, updateNodeData, onAddBranch, onQuickAdd, onDeleteNode, apiKeys]);
+    }, [nodes, edges, direction, updateNodeData, onAddBranch, onQuickAdd, onDeleteNode, apiKeys, navigate, spaceId]);
 
     const toggleDirection = () => setDirection(d => d === 'LR' ? 'TB' : 'LR');
 
@@ -334,7 +367,24 @@ function EditorContent() {
         return () => clearTimeout(timer);
     }, [direction, nodes.length, updateNodeInternals]);
 
+    useEffect(() => {
+        if (nodes.length === 0) return;
+
+        const hasActiveNode = nodes.some((node) => node.id === activeChatNodeId);
+        if (hasActiveNode) return;
+
+        const fallbackNode = nodes.find((node) => node.data?.isStarter) || nodes[0];
+        if (fallbackNode) {
+            setActiveChatNodeId(fallbackNode.id);
+        }
+    }, [nodes, activeChatNodeId]);
+
     const activeNode = nodesWithData.find(n => n.id === activeChatNodeId);
+    const modeTabs = [
+        { id: 'chat', label: 'Chat', icon: MessageSquare },
+        { id: 'graph', label: 'Graph', icon: GitFork },
+        { id: 'map', label: 'Map', icon: MapIcon },
+    ];
 
     return (
         <div className="editor-layout" style={{ display: 'flex', flexDirection: 'row', height: '100vh', width: '100vw', overflow: 'hidden' }}>
@@ -373,29 +423,59 @@ function EditorContent() {
                         )}
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                        {/* View toggle */}
-                        <button onClick={() => setViewMode(viewMode === 'chat' ? 'nodes' : 'chat')}
-                            style={{
-                                background: 'rgba(255,255,255,0.04)', border: '1px solid var(--panel-border)',
-                                borderRadius: '20px', padding: '0.3rem 0.8rem', fontSize: '0.78rem', fontWeight: 500,
-                                color: 'var(--text-main)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.3rem',
-                                transition: 'all 0.2s', fontFamily: 'inherit'
-                            }}>
-                            {viewMode === 'chat' ? <><GitFork size={13} color="var(--primary)" /> {t('chat.switchToNodes')}</> : <><MessageSquare size={13} color="var(--primary)" /> {t('chat.switchToChat')}</>}
-                        </button>
+                        <div style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.3rem',
+                            padding: '0.18rem',
+                            borderRadius: '999px',
+                            background: 'rgba(255,255,255,0.03)',
+                            border: '1px solid var(--panel-border)'
+                        }}>
+                            {modeTabs.map((tab) => {
+                                const Icon = tab.icon;
+                                const isActive = currentMode === tab.id;
 
-                        <button onClick={handleManualSave} disabled={isSaving}
+                                return (
+                                    <button
+                                        key={tab.id}
+                                        onClick={() => navigate(getSpacePath(spaceId, tab.id))}
+                                        style={{
+                                            border: 'none',
+                                            borderRadius: '999px',
+                                            padding: '0.38rem 0.78rem',
+                                            background: isActive ? 'linear-gradient(135deg, rgba(108,140,255,0.92), rgba(96,165,250,0.92))' : 'transparent',
+                                            color: isActive ? 'white' : 'var(--text-muted)',
+                                            cursor: 'pointer',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '0.35rem',
+                                            fontSize: '0.78rem',
+                                            fontWeight: 500,
+                                            fontFamily: 'inherit',
+                                            boxShadow: isActive ? '0 8px 24px rgba(108, 140, 255, 0.25)' : 'none',
+                                            transition: 'all 0.2s',
+                                        }}
+                                    >
+                                        <Icon size={13} />
+                                        {tab.label}
+                                    </button>
+                                );
+                            })}
+                        </div>
+
+                        <button onClick={handleManualSave} disabled={isSaving || !isHydrated}
                             style={{
-                                background: saveSuccess ? 'var(--action)' : isSaving ? 'rgba(108, 140, 255, 0.4)' : 'var(--primary)',
+                                background: saveSuccess ? 'var(--action)' : (isSaving || !isHydrated) ? 'rgba(108, 140, 255, 0.4)' : 'var(--primary)',
                                 color: 'white', fontSize: '0.78rem', padding: '0.3rem 0.8rem', border: 'none',
                                 borderRadius: '20px', display: 'flex', alignItems: 'center', gap: '0.3rem',
-                                fontWeight: 500, cursor: isSaving ? 'wait' : 'pointer', fontFamily: 'inherit',
+                                fontWeight: 500, cursor: (isSaving || !isHydrated) ? 'wait' : 'pointer', fontFamily: 'inherit',
                                 transition: 'all 0.3s'
                             }}>
-                            {saveSuccess ? <><Check size={13} /> {t('editor.saved')}</> : <><Save size={13} /> {isSaving ? t('editor.saving') : t('editor.save')}</>}
+                            {saveSuccess ? <><Check size={13} /> {t('editor.saved')}</> : <><Save size={13} /> {(isSaving || !isHydrated) ? t('editor.saving') : t('editor.save')}</>}
                         </button>
 
-                        {viewMode === 'nodes' && (
+                        {currentMode === 'graph' && (
                             <button onClick={toggleDirection}
                                 style={{
                                     background: 'rgba(255,255,255,0.04)', fontSize: '0.78rem', padding: '0.3rem 0.8rem',
@@ -411,7 +491,7 @@ function EditorContent() {
                 </div>
 
                 {/* Content area */}
-                {viewMode === 'chat' ? (
+                {currentMode === 'chat' ? (
                     <ChatView
                         node={activeNode}
                         nodes={nodesWithData}
@@ -420,6 +500,14 @@ function EditorContent() {
                         onBranchFromChat={onBranchFromChat}
                         onNavigateToBranch={onNavigateToBranch}
                         spaceId={spaceId}
+                    />
+                ) : currentMode === 'map' ? (
+                    <MapView
+                        spaceTitle={spaceTitle}
+                        nodes={nodesWithData}
+                        mapState={mapState}
+                        onMapStateChange={updateMapState}
+                        onOpenMode={(nextMode) => navigate(getSpacePath(spaceId, nextMode))}
                     />
                 ) : (
                     <div style={{ flex: 1, position: 'relative' }}>

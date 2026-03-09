@@ -1,11 +1,18 @@
 import { useState, useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom';
 import { supabase } from './lib/supabase'
 import { LanguageProvider, useLanguage } from './i18n';
 import AuthScreen from './AuthScreen';
 import Home from './Home';
 import Editor from './Editor';
+import ErrorBoundary from './ErrorBoundary';
+import { getSpacePath } from './lib/routes';
 import './index.css';
+
+function SpaceModeRedirect() {
+  const { id } = useParams();
+  return <Navigate to={getSpacePath(id)} replace />;
+}
 
 function AppContent() {
   const { t } = useLanguage();
@@ -57,7 +64,11 @@ function AppContent() {
           />
           <Route
             path="/space/:id"
-            element={session ? <Editor /> : <Navigate to="/auth" replace />}
+            element={session ? <SpaceModeRedirect /> : <Navigate to="/auth" replace />}
+          />
+          <Route
+            path="/space/:id/:mode"
+            element={session ? <ErrorBoundary><Editor /></ErrorBoundary> : <Navigate to="/auth" replace />}
           />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
