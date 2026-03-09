@@ -4,7 +4,6 @@ import { supabase } from './lib/supabase';
 import { Plus, X, Search, MessageSquare, Trash2, Settings } from 'lucide-react';
 import { useLanguage } from './i18n';
 import { DEFAULT_SPACE_MODE, getSpacePath, isSpaceMode } from './lib/routes';
-import { createSpaceData } from './lib/space';
 
 export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
     const { t } = useLanguage();
@@ -65,39 +64,8 @@ export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
         return () => window.removeEventListener('spaceTitleUpdated', handleTitleUpdate);
     }, [fetchSpaces]);
 
-    const handleNewSpace = async () => {
-        const spaceData = createSpaceData(t('editor.untitled'));
-        try {
-            if (supabase) {
-                const { data: { user } } = await supabase.auth.getUser();
-                if (user) {
-                    const basePayload = { user_id: user.id, title: spaceData.title, nodes: spaceData.nodes, edges: spaceData.edges };
-                    let insertResult = await supabase.from('spaces').insert({ ...basePayload, map_state: spaceData.map_state }).select().single();
-
-                    if (insertResult.error) {
-                        insertResult = await supabase.from('spaces').insert(basePayload).select().single();
-                    }
-
-                    const { data, error } = insertResult;
-                    if (!error && data) {
-                        localStorage.setItem(`blueprint_space_${data.id}`, JSON.stringify({
-                            ...spaceData,
-                            title: data.title || spaceData.title,
-                            updated_at: data.updated_at || spaceData.updated_at,
-                        }));
-                        navigate(getSpacePath(data.id));
-                        onClose();
-                        return;
-                    }
-                }
-            }
-        } catch {
-            // Fall back to local-only space creation.
-        }
-
-        const newId = crypto.randomUUID();
-        localStorage.setItem(`blueprint_space_${newId}`, JSON.stringify(spaceData));
-        navigate(getSpacePath(newId));
+    const handleNewSpace = () => {
+        navigate('/');
         onClose();
     };
 

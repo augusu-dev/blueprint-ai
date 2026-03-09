@@ -43,10 +43,10 @@ function EditorContent() {
     const navigate = useNavigate();
     const { setViewport, updateNodeInternals } = useReactFlow();
     const { t, lang, setLang } = useLanguage();
-    const currentMode = isSpaceMode(mode) ? mode : DEFAULT_SPACE_MODE;
+    const isDraft = !spaceId;
 
-    const [nodes, setNodes, onNodesChange] = useNodesState([]);
-    const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+    const [nodes, setNodes, baseOnNodesChange] = useNodesState([]);
+    const [edges, setEdges, baseOnEdgesChange] = useEdgesState([]);
     const [mapState, setMapState] = useState(createDefaultMapState);
     const [spaceTitle, setSpaceTitle] = useState(t('editor.loading'));
     const [isHydrated, setIsHydrated] = useState(false);
@@ -59,6 +59,11 @@ function EditorContent() {
     const [isSaving, setIsSaving] = useState(false);
     const [saveSuccess, setSaveSuccess] = useState(false);
     const [activeChatNodeId, setActiveChatNodeId] = useState('1');
+    const [draftMode, setDraftMode] = useState(DEFAULT_SPACE_MODE);
+    const [draftDirty, setDraftDirty] = useState(false);
+    const currentMode = isDraft ? draftMode : (isSpaceMode(mode) ? mode : DEFAULT_SPACE_MODE);
+    const draftSnapshotRef = useRef(null);
+    const promoteDraftPromiseRef = useRef(null);
 
     const [apiKeys, setApiKeys] = useState(() => {
         const saved = localStorage.getItem('blueprint_api_keys');
@@ -76,7 +81,9 @@ function EditorContent() {
                         return { ...item, model: item.model || '' };
                     });
                 }
-            } catch (e) { }
+            } catch {
+                // Ignore invalid locally stored API keys.
+            }
         }
         return [{ key: '', provider: 'openai', model: '' }];
     });
@@ -86,11 +93,11 @@ function EditorContent() {
     }, [apiKeys]);
 
     useEffect(() => {
-        if (!spaceId) { navigate('/'); return; }
+        if (isDraft) return;
         if (!isSpaceMode(mode)) {
             navigate(getSpacePath(spaceId), { replace: true });
         }
-    }, [spaceId, mode, navigate]);
+    }, [isDraft, spaceId, mode, navigate]);
 
     const updateRemoteSpace = useCallback(async (payload) => {
         if (!supabase || !spaceId) return;
@@ -107,7 +114,20 @@ function EditorContent() {
     }, [spaceId]);
 
     useEffect(() => {
-        if (!spaceId || !isSpaceMode(mode)) return;
+        if (isDraft) {
+            setIsHydrated(false);
+            setSpaceTitle(t('editor.untitled'));
+            setNodes(createInitialNodes());
+            setEdges(createInitialEdges());
+            setMapState(createDefaultMapState());
+            setActiveChatNodeId('1');
+            setDraftMode(DEFAULT_SPACE_MODE);
+            setDraftDirty(false);
+            setIsHydrated(true);
+            return undefined;
+        }
+
+        if (!spaceId || !isSpaceMode(mode)) return undefined;
         let isCancelled = false;
         setIsHydrated(false);
 
@@ -129,7 +149,9 @@ function EditorContent() {
             try {
                 const stored = localStorage.getItem(`blueprint_space_${spaceId}`);
                 if (stored) localData = JSON.parse(stored);
-            } catch (e) { }
+            } catch {
+                // Ignore invalid locally stored API keys.
+            }
 
             const fallbackData = localData || {
                 title: t('editor.untitled'),
@@ -145,7 +167,9 @@ function EditorContent() {
                 try {
                     const { data, error } = await supabase.from('spaces').select('*').eq('id', spaceId).single();
                     if (!error && data) remoteData = data;
-                } catch (globalErr) { console.warn("Fetch failed"); }
+                } catch {
+                    console.warn('Fetch failed');
+                }
             }
 
             if (isCancelled) return;
@@ -171,14 +195,16 @@ function EditorContent() {
             try {
                 const { data } = await supabase.from('spaces').select('title').eq('id', spaceId).single();
                 if (!isCancelled && data?.title) setSpaceTitle(data.title);
-            } catch (e) { }
+            } catch {
+                // Ignore title refresh failures.
+            }
         };
         window.addEventListener('spaceTitleUpdated', handleTitleUpdate);
         return () => {
             isCancelled = true;
             window.removeEventListener('spaceTitleUpdated', handleTitleUpdate);
         };
-    }, [spaceId, mode, setNodes, setEdges, setViewport, t]);
+    }, [isDraft, spaceId, mode, setNodes, setEdges, setViewport, t]);
 
     const cleanNodesForSave = (rawNodes) => {
         return rawNodes.map(n => ({
@@ -192,6 +218,88 @@ function EditorContent() {
             } : {}
         }));
     };
+
+    useEffect(() => {
+        draftSnapshotRef.current = {
+            title: spaceTitle,
+            nodes,
+            edges,
+            mapState,
+            mode: currentMode,
+        };
+    }, [spaceTitle, nodes, edges, mapState, currentMode]);
+
+    const createSpaceFromSnapshot = useCallback(async (snapshot) => {
+        const updates = {
+            title: snapshot.title || t('editor.untitled'),
+            nodes: cleanNodesForSave(snapshot.nodes),
+            edges: snapshot.edges,
+            map_state: snapshot.mapState,
+            updated_at: new Date().toISOString(),
+        };
+
+        if (supabase) {
+            try {
+                const { data: { user } } = await supabase.auth.getUser();
+                if (user) {
+                    const basePayload = {
+                        user_id: user.id,
+                        title: updates.title,
+                        nodes: updates.nodes,
+                        edges: updates.edges,
+                        map_state: updates.map_state,
+                        updated_at: updates.updated_at,
+                    };
+
+                    let insertResult = await supabase.from('spaces').insert(basePayload).select().single();
+                    if (insertResult.error) {
+                        const legacyPayload = { ...basePayload };
+                        delete legacyPayload.map_state;
+                        insertResult = await supabase.from('spaces').insert(legacyPayload).select().single();
+                    }
+
+                    const { data, error } = insertResult;
+                    if (!error && data?.id) {
+                        const persistedUpdates = {
+                            ...updates,
+                            title: data.title || updates.title,
+                            updated_at: data.updated_at || updates.updated_at,
+                        };
+                        localStorage.setItem(`blueprint_space_${data.id}`, JSON.stringify(persistedUpdates));
+                        window.dispatchEvent(new CustomEvent('spaceTitleUpdated'));
+                        return data.id;
+                    }
+                }
+            } catch (err) {
+                console.error('Draft promotion failed remotely:', err);
+            }
+        }
+
+        const newId = crypto.randomUUID();
+        localStorage.setItem(`blueprint_space_${newId}`, JSON.stringify(updates));
+        window.dispatchEvent(new CustomEvent('spaceTitleUpdated'));
+        return newId;
+    }, [t]);
+
+    const markDraftDirty = useCallback(() => {
+        if (isDraft) {
+            setDraftDirty(true);
+        }
+    }, [isDraft]);
+
+    useEffect(() => {
+        if (!isDraft || !draftDirty || promoteDraftPromiseRef.current) return;
+
+        const promoteDraft = async () => {
+            const snapshot = draftSnapshotRef.current;
+            if (!snapshot) return;
+
+            const newId = await createSpaceFromSnapshot(snapshot);
+            navigate(getSpacePath(newId, snapshot.mode), { replace: true });
+        };
+
+        promoteDraftPromiseRef.current = promoteDraft();
+    }, [createSpaceFromSnapshot, draftDirty, isDraft, navigate]);
 
     const handleManualSave = async () => {
         if (!spaceId || nodes.length === 0) return;
@@ -214,6 +322,12 @@ function EditorContent() {
         const cleanedTitle = tempTitle.trim() || t('editor.untitled');
         setSpaceTitle(cleanedTitle);
         setIsEditingTitle(false);
+        if (isDraft) {
+            if (cleanedTitle !== spaceTitle) {
+                markDraftDirty();
+            }
+            return;
+        }
         if (supabase && spaceId) {
             await supabase.from('spaces').update({ title: cleanedTitle }).eq('id', spaceId);
             window.dispatchEvent(new CustomEvent('spaceTitleUpdated'));
@@ -231,22 +345,41 @@ function EditorContent() {
                 const updates = { title: spaceTitle, nodes: cleanNodesForSave(nodes), edges, map_state: mapState, updated_at: new Date().toISOString() };
                 localStorage.setItem(`blueprint_space_${spaceId}`, JSON.stringify(updates));
                 await updateRemoteSpace({ nodes: updates.nodes, edges: updates.edges, map_state: updates.map_state, updated_at: updates.updated_at });
-            } catch (err) { console.error("Auto-save failed", err); }
+            } catch (err) {
+                console.error('Auto-save failed', err);
+            }
         }, 1500);
         return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
     }, [nodes, edges, mapState, spaceId, spaceTitle, updateRemoteSpace]);
 
+    const onNodesChange = useCallback((changes) => {
+        baseOnNodesChange(changes);
+        if (changes.some((change) => change.type !== 'select')) {
+            markDraftDirty();
+        }
+    }, [baseOnNodesChange, markDraftDirty]);
+
+    const onEdgesChange = useCallback((changes) => {
+        baseOnEdgesChange(changes);
+        if (changes.some((change) => change.type !== 'select')) {
+            markDraftDirty();
+        }
+    }, [baseOnEdgesChange, markDraftDirty]);
+
     const updateMapState = useCallback((nextMapState) => {
         setMapState((current) => normalizeMapState(typeof nextMapState === 'function' ? nextMapState(current) : nextMapState));
-    }, []);
+        markDraftDirty();
+    }, [markDraftDirty]);
 
     const updateNodeData = useCallback((id, key, val) => {
         setNodes((nds) => nds.map((node) => node.id === id ? { ...node, data: { ...node.data, [key]: val } } : node));
-    }, [setNodes]);
+        markDraftDirty();
+    }, [markDraftDirty, setNodes]);
 
     const onAddBranch = useCallback((id) => {
         setNodes((nds) => nds.map((node) => node.id === id ? { ...node, data: { ...node.data, numBranches: (node.data.numBranches || 2) + 1 } } : node));
-    }, [setNodes]);
+        markDraftDirty();
+    }, [markDraftDirty, setNodes]);
 
     const onQuickAdd = useCallback((sourceId, type) => {
         const outgoingEdges = edges.filter(e => e.source === sourceId);
@@ -262,7 +395,8 @@ function EditorContent() {
             setTimeout(() => { setEdges(eds => addEdge({ id: `e-${sourceId}-${newId}`, source: sourceId, target: newId, type: 'deleteEdge' }, eds)); }, 50);
             return [...nds, newNode];
         });
-    }, [direction, edges, setNodes, setEdges, t]);
+        markDraftDirty();
+    }, [direction, edges, markDraftDirty, setNodes, setEdges, t]);
 
     const onBranchFromChat = useCallback((sourceNodeId, chatHistory) => {
         const outgoingEdges = edges.filter(e => e.source === sourceNodeId);
@@ -287,8 +421,9 @@ function EditorContent() {
             setTimeout(() => { setEdges(eds => addEdge({ id: `e-${sourceNodeId}-${newId}`, source: sourceNodeId, target: newId, type: 'deleteEdge' }, eds)); }, 50);
             return [...nds, newNode];
         });
+        markDraftDirty();
         return true;
-    }, [direction, edges, setNodes, setEdges]);
+    }, [direction, edges, markDraftDirty, setNodes, setEdges]);
 
     const onNavigateToBranch = useCallback((sourceNodeId, branchIndex) => {
         // Find the nth outgoing edge from this node
@@ -303,17 +438,20 @@ function EditorContent() {
         setNodes(nds => nds.filter(n => n.id !== nodeId));
         setEdges(eds => eds.filter(e => e.source !== nodeId && e.target !== nodeId));
         if (activeChatNodeId === nodeId) setActiveChatNodeId('1');
-    }, [setNodes, setEdges, activeChatNodeId]);
+        markDraftDirty();
+    }, [setNodes, setEdges, activeChatNodeId, markDraftDirty]);
 
     const onConnect = useCallback((params) => {
         // Prevent self-loops
         if (params.source === params.target) return;
         setEdges((eds) => addEdge({ ...params, type: 'deleteEdge' }, eds));
-    }, [setEdges]);
+        markDraftDirty();
+    }, [markDraftDirty, setEdges]);
 
     const onDeleteEdge = useCallback((edgeId) => {
         setEdges(eds => eds.filter(e => e.id !== edgeId));
-    }, [setEdges]);
+        markDraftDirty();
+    }, [markDraftDirty, setEdges]);
 
     const onEdgeClick = useCallback((event, edge) => {
         event.stopPropagation();
@@ -339,7 +477,9 @@ function EditorContent() {
                 onChange: updateNodeData, onAddBranch, onQuickAdd, onDeleteNode,
                 onOpenChat: (nodeId) => {
                     setActiveChatNodeId(nodeId);
-                    if (spaceId) {
+                    if (isDraft) {
+                        setDraftMode('chat');
+                    } else if (spaceId) {
                         navigate(getSpacePath(spaceId, 'chat'));
                     }
                 },
@@ -354,18 +494,22 @@ function EditorContent() {
                 apiKeys
             }
         }));
-    }, [nodes, edges, direction, updateNodeData, onAddBranch, onQuickAdd, onDeleteNode, apiKeys, navigate, spaceId]);
+    }, [nodes, edges, direction, updateNodeData, onAddBranch, onQuickAdd, onDeleteNode, apiKeys, navigate, spaceId, isDraft]);
 
     const toggleDirection = () => setDirection(d => d === 'LR' ? 'TB' : 'LR');
 
     useEffect(() => {
         const timer = setTimeout(() => {
             nodes.forEach(node => {
-                try { updateNodeInternals(node.id); } catch (e) { }
+                try {
+                    updateNodeInternals(node.id);
+                } catch {
+                    // Ignore transient node internals failures.
+                }
             });
         }, 50);
         return () => clearTimeout(timer);
-    }, [direction, nodes.length, updateNodeInternals]);
+    }, [direction, nodes, updateNodeInternals]);
 
     useEffect(() => {
         if (nodes.length === 0) return;
@@ -439,7 +583,13 @@ function EditorContent() {
                                 return (
                                     <button
                                         key={tab.id}
-                                        onClick={() => navigate(getSpacePath(spaceId, tab.id))}
+                                        onClick={() => {
+                                            if (isDraft) {
+                                                setDraftMode(tab.id);
+                                                return;
+                                            }
+                                            navigate(getSpacePath(spaceId, tab.id));
+                                        }}
                                         style={{
                                             border: 'none',
                                             borderRadius: '999px',
@@ -464,15 +614,15 @@ function EditorContent() {
                             })}
                         </div>
 
-                        <button onClick={handleManualSave} disabled={isSaving || !isHydrated}
+                        <button onClick={handleManualSave} disabled={isSaving || !isHydrated || isDraft}
                             style={{
-                                background: saveSuccess ? 'var(--action)' : (isSaving || !isHydrated) ? 'rgba(108, 140, 255, 0.4)' : 'var(--primary)',
+                                background: saveSuccess ? 'var(--action)' : (isSaving || !isHydrated || isDraft) ? 'rgba(108, 140, 255, 0.4)' : 'var(--primary)',
                                 color: 'white', fontSize: '0.78rem', padding: '0.3rem 0.8rem', border: 'none',
                                 borderRadius: '20px', display: 'flex', alignItems: 'center', gap: '0.3rem',
-                                fontWeight: 500, cursor: (isSaving || !isHydrated) ? 'wait' : 'pointer', fontFamily: 'inherit',
+                                fontWeight: 500, cursor: (isSaving || !isHydrated || isDraft) ? 'wait' : 'pointer', fontFamily: 'inherit',
                                 transition: 'all 0.3s'
                             }}>
-                            {saveSuccess ? <><Check size={13} /> {t('editor.saved')}</> : <><Save size={13} /> {(isSaving || !isHydrated) ? t('editor.saving') : t('editor.save')}</>}
+                            {saveSuccess ? <><Check size={13} /> {t('editor.saved')}</> : <><Save size={13} /> {isDraft ? 'Draft' : (isSaving || !isHydrated) ? t('editor.saving') : t('editor.save')}</>}
                         </button>
 
                         {currentMode === 'graph' && (
@@ -507,7 +657,13 @@ function EditorContent() {
                         nodes={nodesWithData}
                         mapState={mapState}
                         onMapStateChange={updateMapState}
-                        onOpenMode={(nextMode) => navigate(getSpacePath(spaceId, nextMode))}
+                        onOpenMode={(nextMode) => {
+                            if (isDraft) {
+                                setDraftMode(nextMode);
+                                return;
+                            }
+                            navigate(getSpacePath(spaceId, nextMode));
+                        }}
                     />
                 ) : (
                     <div style={{ flex: 1, position: 'relative' }}>

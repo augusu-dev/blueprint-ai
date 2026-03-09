@@ -3,7 +3,6 @@ import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-
 import { supabase } from './lib/supabase'
 import { LanguageProvider, useLanguage } from './i18n';
 import AuthScreen from './AuthScreen';
-import Home from './Home';
 import Editor from './Editor';
 import ErrorBoundary from './ErrorBoundary';
 import { getSpacePath } from './lib/routes';
@@ -17,13 +16,10 @@ function SpaceModeRedirect() {
 function AppContent() {
   const { t } = useLanguage();
   const [session, setSession] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => Boolean(supabase));
 
   useEffect(() => {
-    if (!supabase) {
-      setLoading(false);
-      return;
-    }
+    if (!supabase) return undefined;
 
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
@@ -60,7 +56,7 @@ function AppContent() {
           />
           <Route
             path="/"
-            element={session ? <Home /> : <Navigate to="/auth" replace />}
+            element={session ? <ErrorBoundary><Editor /></ErrorBoundary> : <Navigate to="/auth" replace />}
           />
           <Route
             path="/space/:id"
