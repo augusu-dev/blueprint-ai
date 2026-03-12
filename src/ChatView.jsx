@@ -8,7 +8,6 @@ import {
     ChevronUp,
     Copy,
     ExternalLink,
-    FolderPlus,
     GitBranch,
     Pin,
     RefreshCw,
@@ -20,6 +19,40 @@ import {
 } from 'lucide-react';
 import { useLanguage } from './i18n';
 import GoalWizard from './GoalWizard';
+import {
+    createProjectImprovementVersion,
+    getProjectPlanAccess,
+    restoreProjectImprovementVersion,
+    saveProjectImprovementVersion,
+    saveProjectPlanSection,
+} from './lib/workspace';
+
+const PLAN_SECTION_PROMPTS = {
+    plan: `あなたはプロジェクトの計画設計アシスタントです。ここでは目標ではなく、具体的な進め方だけを整理してください。
+
+- いま進める段階
+- 直近でやること
+- 分岐の考え方
+- ノードや流れの調整方針
+
+を、短く具体的にまとめてください。必要ならチェックリストを使ってください。返答は日本語です。`,
+    reward: `あなたはプロジェクトの報酬設計アシスタントです。ここでは報酬設計だけを整理してください。
+
+- 小さな達成報酬
+- 節目のごほうび
+- Map や Achievement に接続しやすい報酬の形
+- 労力に見合う見せ方
+
+を具体化してください。必要なら選択肢やチェックリストを使ってください。返答は日本語です。`,
+    improvement: `あなたはプロジェクト改善アシスタントです。ここでは改善案だけを整理してください。
+
+- 何を改善するか
+- その理由
+- どう変えるか
+- 元に戻したい時の判断基準
+
+を簡潔にまとめてください。改善はバージョン管理される前提で、日本語で返答してください。`,
+};
 
 function createResponseVariant({
     id,
@@ -149,7 +182,6 @@ export default function ChatView({
     onUpdateNodeData,
     onBranchFromChat,
     onNavigateToBranch,
-    onStartNewProject,
     projectContextPrompt,
     spaceId,
 }) {
@@ -164,6 +196,9 @@ export default function ChatView({
     const [selectionDraft, setSelectionDraft] = useState(null);
     const [activeExplanation, setActiveExplanation] = useState(null);
     const [isExplaining, setIsExplaining] = useState(false);
+    const [workspaceMetaVersion, setWorkspaceMetaVersion] = useState(0);
+    const [activePlanSection, setActivePlanSection] = useState('goal');
+    const [selectedImprovementVersionId, setSelectedImprovementVersionId] = useState(null);
     const messagesEndRef = useRef(null);
     const messageContentRefs = useRef({});
 
@@ -179,21 +214,11 @@ export default function ChatView({
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [chatHistory, isLoading]);
 
-    const pinnedMessageIds = useMemo(
-        () => (Array.isArray(node?.data?.pinnedMessageIds) ? node.data.pinnedMessageIds : []),
-        [node?.data?.pinnedMessageIds],
-    );
-
     useEffect(() => {
-        if (!node || pinnedMessageIds.length === 0) return;
-
-        const validMessageIds = new Set(chatHistory.map((message) => message.id));
-        const nextPinnedIds = pinnedMessageIds.filter((messageId) => validMessageIds.has(messageId));
-
-        if (nextPinnedIds.length !== pinnedMessageIds.length) {
-            onUpdateNodeData(node.id, 'pinnedMessageIds', nextPinnedIds);
-        }
-    }, [chatHistory, node, onUpdateNodeData, pinnedMessageIds]);
+        const handleWorkspaceMetaUpdate = () => setWorkspaceMetaVersion((current) => current + 1);
+        window.addEventListener('workspaceMetaUpdated', handleWorkspaceMetaUpdate);
+        return () => window.removeEventListener('workspaceMetaUpdated', handleWorkspaceMetaUpdate);
+    }, []);
 
     const persistChatHistory = (nextHistory) => {
         const normalized = normalizeHistory(nextHistory);
@@ -546,16 +571,6 @@ export default function ChatView({
         persistChatHistory(nextHistory);
     };
 
-    const handleTogglePinnedMessage = (messageId) => {
-        if (!node || !messageId) return;
-
-        const nextPinnedIds = pinnedMessageIds.includes(messageId)
-            ? pinnedMessageIds.filter((currentId) => currentId !== messageId)
-            : [...pinnedMessageIds, messageId];
-
-        onUpdateNodeData(node.id, 'pinnedMessageIds', nextPinnedIds);
-    };
-
     const handleCopy = async (content, idx) => {
         try {
             await navigator.clipboard.writeText(content);
@@ -691,9 +706,13 @@ export default function ChatView({
             const currentBranchCount = node.data?.branchCount || 0;
             onUpdateNodeData(node.id, 'branchCount', currentBranchCount + 1);
         } else if (activeVariant.pendingAction === 'TOGGLE_LOOP_ON') {
-            onUpdateNodeData(node.id, 'isLooping', true);
+            if (!node.data?.loopNodeId && node.data?.onToggleLoop) {
+                node.data.onToggleLoop(node.id);
+            }
         } else if (activeVariant.pendingAction === 'TOGGLE_LOOP_OFF') {
-            onUpdateNodeData(node.id, 'isLooping', false);
+            if (node.data?.loopNodeId && node.data?.onToggleLoop) {
+                node.data.onToggleLoop(node.id);
+            }
         }
 
         const nextHistory = [...chatHistory];
@@ -763,6 +782,45 @@ export default function ChatView({
         return segments;
     };
 
+    const planAccess = useMemo(() => (
+        spaceId
+            ? getProjectPlanAccess(spaceId)
+            : {
+                projectId: null,
+                project: null,
+                isProjectSpace: false,
+                isPlanSpace: false,
+                planSpaceId: null,
+                activeImprovementVersion: null,
+            }
+    ), [spaceId, workspaceMetaVersion]);
+    const improvementVersions = planAccess.project?.improvementVersions || [];
+    const activeImprovementVersion = planAccess.activeImprovementVersion || null;
+    const selectedImprovementVersion = improvementVersions.find((version) => version.id === selectedImprovementVersionId)
+        || activeImprovementVersion
+        || null;
+    const isViewingArchivedImprovement = Boolean(
+        selectedImprovementVersion
+        && activeImprovementVersion
+        && selectedImprovementVersion.id !== activeImprovementVersion.id,
+    );
+
+    useEffect(() => {
+        if (!planAccess.isProjectSpace) {
+            if (activePlanSection !== 'goal') {
+                setActivePlanSection('goal');
+            }
+            setSelectedImprovementVersionId(null);
+            return;
+        }
+
+        setSelectedImprovementVersionId((current) => (
+            current && improvementVersions.some((version) => version.id === current)
+                ? current
+                : activeImprovementVersion?.id || null
+        ));
+    }, [activeImprovementVersion?.id, activePlanSection, improvementVersions, planAccess.isProjectSpace]);
+
     if (!node) {
         return (
             <div
@@ -789,6 +847,86 @@ export default function ChatView({
         );
     }
 
+    const projectPlanSection = planAccess.project?.planSections?.plan || { history: [], interactiveStates: {}, selectedOptions: {} };
+    const projectRewardSection = planAccess.project?.planSections?.reward || { history: [], interactiveStates: {}, selectedOptions: {} };
+    const selectedImprovementSection = selectedImprovementVersion || { history: [], interactiveStates: {}, selectedOptions: {} };
+    const readOnlyMessage = !planAccess.isProjectSpace && activePlanSection !== 'goal'
+        ? 'このスペースでは目標のみ設定できます。'
+        : activePlanSection !== 'goal' && !planAccess.isPlanSpace
+            ? 'このセクションはプロジェクトの Plan Space でのみ編集できます。'
+            : activePlanSection === 'improvement' && isViewingArchivedImprovement
+                ? '過去バージョンは閲覧のみです。復元すると編集できます。'
+                : '';
+    const isPlanSectionReadOnly = Boolean(readOnlyMessage);
+    const sectionTabs = [
+        { id: 'goal', label: '目標', active: activePlanSection === 'goal', disabled: false },
+        ...(planAccess.isProjectSpace ? [
+            { id: 'plan', label: '計画', active: activePlanSection === 'plan', disabled: false },
+            { id: 'reward', label: '報酬設計', active: activePlanSection === 'reward', disabled: false },
+            { id: 'improvement', label: '改善', active: activePlanSection === 'improvement', disabled: false },
+        ] : []),
+    ];
+    const activeWizardConfig = activePlanSection === 'plan'
+        ? {
+            systemPrompt: PLAN_SECTION_PROMPTS.plan,
+            placeholder: 'このプロジェクトで整理したい計画や分岐方針を書いてください...',
+            initialHistory: projectPlanSection.history,
+            onSaveHistory: (history) => planAccess.projectId && saveProjectPlanSection(planAccess.projectId, 'plan', { ...projectPlanSection, history }),
+            initialInteractiveStates: projectPlanSection.interactiveStates,
+            initialSelectedOptions: projectPlanSection.selectedOptions,
+            onSaveInteractiveStates: (state) => planAccess.projectId && saveProjectPlanSection(planAccess.projectId, 'plan', { ...projectPlanSection, interactiveStates: state }),
+            onSaveSelectedOptions: (state) => planAccess.projectId && saveProjectPlanSection(planAccess.projectId, 'plan', { ...projectPlanSection, selectedOptions: state }),
+            completionTag: null,
+        }
+        : activePlanSection === 'reward'
+            ? {
+                systemPrompt: PLAN_SECTION_PROMPTS.reward,
+                placeholder: '報酬設計や Achievement の案を書いてください...',
+                initialHistory: projectRewardSection.history,
+                onSaveHistory: (history) => planAccess.projectId && saveProjectPlanSection(planAccess.projectId, 'reward', { ...projectRewardSection, history }),
+                initialInteractiveStates: projectRewardSection.interactiveStates,
+                initialSelectedOptions: projectRewardSection.selectedOptions,
+                onSaveInteractiveStates: (state) => planAccess.projectId && saveProjectPlanSection(planAccess.projectId, 'reward', { ...projectRewardSection, interactiveStates: state }),
+                onSaveSelectedOptions: (state) => planAccess.projectId && saveProjectPlanSection(planAccess.projectId, 'reward', { ...projectRewardSection, selectedOptions: state }),
+                completionTag: null,
+            }
+            : activePlanSection === 'improvement'
+                ? {
+                    systemPrompt: PLAN_SECTION_PROMPTS.improvement,
+                    placeholder: '改善したい点や、戻したい版の考え方を書いてください...',
+                    initialHistory: selectedImprovementSection.history,
+                    onSaveHistory: (history) => (
+                        planAccess.projectId
+                        && selectedImprovementVersion
+                        && !isViewingArchivedImprovement
+                        && saveProjectImprovementVersion(planAccess.projectId, selectedImprovementVersion.id, { ...selectedImprovementSection, history })
+                    ),
+                    initialInteractiveStates: selectedImprovementSection.interactiveStates,
+                    initialSelectedOptions: selectedImprovementSection.selectedOptions,
+                    onSaveInteractiveStates: (state) => (
+                        planAccess.projectId
+                        && selectedImprovementVersion
+                        && !isViewingArchivedImprovement
+                        && saveProjectImprovementVersion(planAccess.projectId, selectedImprovementVersion.id, { ...selectedImprovementSection, interactiveStates: state })
+                    ),
+                    onSaveSelectedOptions: (state) => (
+                        planAccess.projectId
+                        && selectedImprovementVersion
+                        && !isViewingArchivedImprovement
+                        && saveProjectImprovementVersion(planAccess.projectId, selectedImprovementVersion.id, { ...selectedImprovementSection, selectedOptions: state })
+                    ),
+                    completionTag: null,
+                }
+                : {
+                    initialHistory: node.data?.goalHistory || [],
+                    onSaveHistory: (history) => onUpdateNodeData(node.id, 'goalHistory', history),
+                    initialInteractiveStates: node.data?.goalInteractiveStates || {},
+                    initialSelectedOptions: node.data?.goalSelectedOptions || {},
+                    onSaveInteractiveStates: (state) => onUpdateNodeData(node.id, 'goalInteractiveStates', state),
+                    onSaveSelectedOptions: (state) => onUpdateNodeData(node.id, 'goalSelectedOptions', state),
+                    completionTag: '[GOAL_COMPLETE]',
+                };
+
     if (showGoalWizard && node.data?.isStarter) {
         return (
             <GoalWizard
@@ -799,20 +937,29 @@ export default function ChatView({
                     onUpdateNodeData(node.id, 'systemPrompt', goalText);
                     setShowGoalWizard(false);
                 }}
-                initialHistory={node.data?.goalHistory || []}
-                onSaveHistory={(history) => onUpdateNodeData(node.id, 'goalHistory', history)}
-                initialInteractiveStates={node.data?.goalInteractiveStates || {}}
-                initialSelectedOptions={node.data?.goalSelectedOptions || {}}
-                onSaveInteractiveStates={(state) => onUpdateNodeData(node.id, 'goalInteractiveStates', state)}
-                onSaveSelectedOptions={(state) => onUpdateNodeData(node.id, 'goalSelectedOptions', state)}
+                title={t('goal.title')}
+                sectionTabs={sectionTabs}
+                activeSectionId={activePlanSection}
+                onSelectSection={setActivePlanSection}
+                readOnly={isPlanSectionReadOnly}
+                readOnlyMessage={readOnlyMessage}
+                versionOptions={activePlanSection === 'improvement'
+                    ? improvementVersions.map((version) => ({ id: version.id, label: version.version }))
+                    : []}
+                selectedVersionId={activePlanSection === 'improvement' ? selectedImprovementVersion?.id || '' : ''}
+                onSelectVersion={setSelectedImprovementVersionId}
+                onCreateVersion={() => planAccess.projectId && createProjectImprovementVersion(planAccess.projectId)}
+                onRestoreVersion={() => planAccess.projectId && selectedImprovementVersion && restoreProjectImprovementVersion(planAccess.projectId, selectedImprovementVersion.id)}
+                canCreateVersion={activePlanSection === 'improvement' && planAccess.isPlanSpace}
+                canRestoreVersion={activePlanSection === 'improvement' && planAccess.isPlanSpace && isViewingArchivedImprovement}
+                {...activeWizardConfig}
             />
         );
     }
 
     const branchCount = node.data?.branchCount || 0;
-    const pinnedMessages = pinnedMessageIds
-        .map((messageId) => chatHistory.find((message) => message.id === messageId))
-        .filter(Boolean);
+    const pinnedMessages = [];
+    const handleTogglePinnedMessage = () => {};
     const iconActionStyle = {
         width: '30px',
         height: '30px',
@@ -829,6 +976,36 @@ export default function ChatView({
         cursor: 'pointer',
         fontSize: 0,
         lineHeight: 0,
+    };
+    const generatePromptButtonStyle = {
+        ...iconActionStyle,
+        width: '120px',
+        padding: '0 0.9rem',
+        gap: '0.35rem',
+        fontSize: '0.78rem',
+        lineHeight: 1,
+        fontWeight: 600,
+    };
+    const avatarColumnStyle = {
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        gap: '0.3rem',
+        flexShrink: 0,
+    };
+    const userDeleteButtonStyle = {
+        width: '22px',
+        height: '22px',
+        padding: 0,
+        borderRadius: '999px',
+        border: '1px solid rgba(122, 104, 159, 0.14)',
+        background: 'rgba(255, 255, 255, 0.82)',
+        color: '#8268a7',
+        boxShadow: '0 5px 10px rgba(133, 110, 176, 0.12)',
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        cursor: 'pointer',
     };
     const actionStripStyle = {
         display: 'flex',
@@ -879,11 +1056,13 @@ export default function ChatView({
         <div
             style={{
                 flex: 1,
+                minWidth: 0,
                 display: 'flex',
                 flexDirection: 'column',
                 background: 'linear-gradient(180deg, #f7f4f7 0%, #f1eff3 100%)',
                 height: '100%',
                 position: 'relative',
+                overflow: 'hidden',
             }}
         >
             <div
@@ -892,9 +1071,11 @@ export default function ChatView({
                     display: 'flex',
                     justifyContent: 'space-between',
                     alignItems: 'center',
+                    minWidth: 0,
+                    gap: '0.75rem',
                 }}
             >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 }}>
                     {node.data?.isStarter && (
                         <button
                             onClick={() => setShowGoalWizard(true)}
@@ -919,32 +1100,12 @@ export default function ChatView({
                             {t('goal.title')}
                         </button>
                     )}
-                    <button hidden
-                        onClick={onStartNewProject}
-                        style={{
-                            width: '38px',
-                            height: '38px',
-                            borderRadius: '999px',
-                            border: '1px solid rgba(31, 41, 55, 0.08)',
-                            background: '#ffffff',
-                            color: '#667085',
-                            cursor: 'pointer',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            boxShadow: '0 8px 20px rgba(28, 33, 45, 0.06)',
-                        }}
-                        title="新しいプロジェクト"
-                        aria-label="新しいプロジェクト"
-                    >
-                        <FolderPlus size={15} />
-                    </button>
                 </div>
                 <select
                     className="node-select-sm"
                     value={node.data?.selectedApiKey || 0}
                     onChange={(event) => onUpdateNodeData(node.id, 'selectedApiKey', parseInt(event.target.value, 10))}
-                    style={{ maxWidth: '148px', background: '#ffffff', color: '#4f5565', border: '1px solid rgba(31, 41, 55, 0.08)', boxShadow: '0 8px 20px rgba(28, 33, 45, 0.06)' }}
+                    style={{ maxWidth: '148px', flexShrink: 0, background: '#ffffff', color: '#4f5565', border: '1px solid rgba(31, 41, 55, 0.08)', boxShadow: '0 8px 20px rgba(28, 33, 45, 0.06)' }}
                     title={t('chat.modelSelect')}
                 >
                     {apiKeys?.map((item, index) => (
@@ -959,6 +1120,7 @@ export default function ChatView({
                 style={{
                     flex: 1,
                     overflowY: 'auto',
+                    overflowX: 'hidden',
                     padding: '1.25rem 1.6rem 0.8rem',
                     display: 'flex',
                     flexDirection: 'column',
@@ -966,9 +1128,10 @@ export default function ChatView({
                     maxWidth: '920px',
                     width: '100%',
                     margin: '0 auto',
+                    minWidth: 0,
                 }}
             >
-                {pinnedMessages.length > 0 && (
+                {false && (
                     <div
                         style={{
                             display: 'flex',
@@ -1056,6 +1219,8 @@ export default function ChatView({
                                     flexDirection: 'column',
                                     alignItems: message.role === 'user' ? 'flex-end' : 'flex-start',
                                     animation: 'fadeIn 0.2s ease',
+                                    width: '100%',
+                                    minWidth: 0,
                                 }}
                             >
                                 <div
@@ -1064,22 +1229,34 @@ export default function ChatView({
                                             gap: '0.65rem',
                                             flexDirection: message.role === 'user' ? 'row-reverse' : 'row',
                                             maxWidth: message.role === 'user' ? '78%' : '72%',
+                                            minWidth: 0,
                                         }}
                                     >
-                                        <div
-                                            style={{
-                                                width: '34px',
-                                                height: '34px',
-                                                borderRadius: '50%',
-                                                flexShrink: 0,
-                                                background: message.role === 'user' ? '#eadff8' : '#ffffff',
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                justifyContent: 'center',
-                                                boxShadow: message.role === 'user' ? '0 8px 20px rgba(174, 150, 223, 0.2)' : '0 10px 20px rgba(29, 33, 44, 0.08)',
-                                            }}
-                                        >
-                                            {message.role === 'user' ? <User size={14} color="#664b8d" /> : <Bot size={14} color="#6f7688" />}
+                                        <div style={avatarColumnStyle}>
+                                            <div
+                                                style={{
+                                                    width: '34px',
+                                                    height: '34px',
+                                                    borderRadius: '50%',
+                                                    background: message.role === 'user' ? '#eadff8' : '#ffffff',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                    boxShadow: message.role === 'user' ? '0 8px 20px rgba(174, 150, 223, 0.2)' : '0 10px 20px rgba(29, 33, 44, 0.08)',
+                                                }}
+                                            >
+                                                {message.role === 'user' ? <User size={14} color="#664b8d" /> : <Bot size={14} color="#6f7688" />}
+                                            </div>
+                                            {message.role === 'user' && (
+                                                <button
+                                                    onClick={() => handleDeletePrompt(idx)}
+                                                    style={userDeleteButtonStyle}
+                                                    title="このプロンプトを削除"
+                                                    aria-label="このプロンプトを削除"
+                                                >
+                                                    <Trash2 size={11} />
+                                                </button>
+                                            )}
                                         </div>
                                     <div
                                         ref={(element) => {
@@ -1098,6 +1275,7 @@ export default function ChatView({
                                         }}
                                         style={{
                                             ...(message.role === 'user' ? userBubbleStyle : assistantBubbleStyle),
+                                            minWidth: 0,
                                         }}
                                     >
                                         {renderMessageContent(message, idx)}
@@ -1129,34 +1307,13 @@ export default function ChatView({
                                             <button
                                                 onClick={() => handleGeneratePrompt(idx)}
                                                 disabled={isLoading}
-                                                style={iconActionStyle}
+                                                style={generatePromptButtonStyle}
                                                 title="このプロンプトで回答を生成"
                                             >
                                                 <Sparkles size={11} />
-                                                {isGeneratingPrompt ? '生成中...' : '生成する'}
+                                                {isGeneratingPrompt ? '生成中...' : '回答を生成'}
                                             </button>
                                         )}
-                                        <button
-                                            onClick={() => handleDeletePrompt(idx)}
-                                            style={iconActionStyle}
-                                            title="このプロンプトを削除"
-                                            aria-label="このプロンプトを削除"
-                                        >
-                                            <Trash2 size={14} />
-                                        </button>
-                                        <button
-                                            onClick={() => handleTogglePinnedMessage(message.id)}
-                                            style={{
-                                                ...iconActionStyle,
-                                                color: pinnedMessageIds.includes(message.id) ? '#7c5cff' : '#707789',
-                                                borderColor: pinnedMessageIds.includes(message.id) ? 'rgba(124, 92, 255, 0.24)' : 'rgba(68, 76, 95, 0.12)',
-                                                background: pinnedMessageIds.includes(message.id) ? 'rgba(238, 233, 255, 0.96)' : 'rgba(255, 255, 255, 0.82)',
-                                            }}
-                                            title={pinnedMessageIds.includes(message.id) ? 'ピンを外す' : 'ピン止めする'}
-                                            aria-label={pinnedMessageIds.includes(message.id) ? 'ピンを外す' : 'ピン止めする'}
-                                        >
-                                            <Pin size={14} />
-                                        </button>
                                     </div>
                                 )}
 
@@ -1170,7 +1327,9 @@ export default function ChatView({
                                             background: 'linear-gradient(180deg, rgba(235,242,255,0.96) 0%, rgba(219,231,255,0.93) 100%)',
                                             border: '1px solid rgba(125,161,255,0.35)',
                                             boxShadow: '0 16px 34px rgba(17,31,66,0.18)',
+                                            width: 'min(560px, calc(100% - 2.5rem))',
                                             maxWidth: '560px',
+                                            minWidth: 0,
                                             display: 'flex',
                                             flexDirection: 'column',
                                             gap: '0.75rem',
@@ -1207,7 +1366,9 @@ export default function ChatView({
                                             display: 'inline-flex',
                                             flexDirection: 'column',
                                             gap: '0.8rem',
+                                            width: 'min(560px, calc(100% - 2.5rem))',
                                             maxWidth: '560px',
+                                            minWidth: 0,
                                             animation: 'fadeIn 0.2s ease',
                                         }}
                                     >
@@ -1259,7 +1420,9 @@ export default function ChatView({
                                             display: 'inline-flex',
                                             flexDirection: 'column',
                                             gap: '0.6rem',
+                                            width: 'min(400px, calc(100% - 2.5rem))',
                                             maxWidth: '400px',
+                                            minWidth: 0,
                                             animation: 'fadeIn 0.3s ease',
                                         }}
                                     >
@@ -1355,19 +1518,6 @@ export default function ChatView({
                                         <button style={iconActionStyle} onClick={() => handleBranch(idx)} disabled={branchCount >= 10} title={branchCount >= 10 ? t('chat.branchMax') : t('chat.branch')} aria-label={branchCount >= 10 ? t('chat.branchMax') : t('chat.branch')}>
                                             <GitBranch size={14} />
                                         </button>
-                                        <button
-                                            style={{
-                                                ...iconActionStyle,
-                                                color: pinnedMessageIds.includes(message.id) ? '#7c5cff' : '#707789',
-                                                borderColor: pinnedMessageIds.includes(message.id) ? 'rgba(124, 92, 255, 0.24)' : 'rgba(68, 76, 95, 0.12)',
-                                                background: pinnedMessageIds.includes(message.id) ? 'rgba(238, 233, 255, 0.96)' : 'rgba(255, 255, 255, 0.82)',
-                                            }}
-                                            onClick={() => handleTogglePinnedMessage(message.id)}
-                                            title={pinnedMessageIds.includes(message.id) ? 'ピンを外す' : 'ピン止めする'}
-                                            aria-label={pinnedMessageIds.includes(message.id) ? 'ピンを外す' : 'ピン止めする'}
-                                        >
-                                            <Pin size={14} />
-                                        </button>
 
                                         {branchCount > 0 && (
                                             <div style={{ ...actionStripStyle, paddingLeft: '0.28rem', marginLeft: '0.08rem', borderLeft: '1px solid rgba(68, 76, 95, 0.12)' }}>
@@ -1438,6 +1588,7 @@ export default function ChatView({
                         maxWidth: '820px',
                         margin: '0 auto',
                         minHeight: '56px',
+                        minWidth: 0,
                     }}
                 >
                     <textarea

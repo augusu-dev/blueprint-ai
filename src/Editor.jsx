@@ -11,7 +11,7 @@ import {
     useReactFlow,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Settings, X, LogOut, ArrowDown, ArrowRight, Menu, Save, Edit3, MessageSquare, GitFork, Check, Map as MapIcon } from 'lucide-react';
+import { Settings, X, LogOut, ArrowDown, ArrowRight, Menu, Edit3, MessageSquare, GitFork, Map as MapIcon } from 'lucide-react';
 import { supabase } from './lib/supabase';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useLanguage } from './i18n';
@@ -29,7 +29,6 @@ import { createDefaultMapState, createInitialEdges, createInitialNodes, normaliz
 import {
     getProjectContextPrompt,
     loadWorkspaceMeta,
-    setDraftProjectId,
     syncWorkspaceProjectFromSpace,
 } from './lib/workspace';
 
@@ -132,8 +131,6 @@ function EditorContent() {
 
     const [isEditingTitle, setIsEditingTitle] = useState(false);
     const [tempTitle, setTempTitle] = useState('');
-    const [isSaving, setIsSaving] = useState(false);
-    const [saveSuccess, setSaveSuccess] = useState(false);
     const [activeChatNodeId, setActiveChatNodeId] = useState('1');
     const [draftMode, setDraftMode] = useState(DEFAULT_SPACE_MODE);
     const [draftDirty, setDraftDirty] = useState(false);
@@ -205,11 +202,17 @@ function EditorContent() {
         const latestWorkspaceMeta = loadWorkspaceMeta();
         const draftProjectId = latestWorkspaceMeta.draftProjectId || latestWorkspaceMeta.selectedProjectId || null;
         const draftProject = latestWorkspaceMeta.projects.find((project) => project.id === draftProjectId) || null;
+        const draftNodes = Array.isArray(draftProject?.sharedSnapshot?.nodes) && draftProject.sharedSnapshot.nodes.length > 0
+            ? draftProject.sharedSnapshot.nodes
+            : createInitialNodes();
+        const draftEdges = Array.isArray(draftProject?.sharedSnapshot?.edges) && draftProject.sharedSnapshot.edges.length > 0
+            ? draftProject.sharedSnapshot.edges
+            : createInitialEdges();
 
         setIsHydrated(false);
         setSpaceTitle(t('editor.untitled'));
-        setNodes(alignGoalNode(applyProjectGoalToNodes(createInitialNodes(), draftProject), direction));
-        setEdges(createInitialEdges());
+        setNodes(alignGoalNode(applyProjectGoalToNodes(draftNodes, draftProject), direction));
+        setEdges(draftEdges);
         setMapState(createDefaultMapState());
         setActiveChatNodeId('1');
         setDraftMode(DEFAULT_SPACE_MODE);
@@ -268,19 +271,29 @@ function EditorContent() {
             const projectForSpace = latestWorkspaceMeta.projects.find(
                 (project) => project.id === latestWorkspaceMeta.spaces[spaceId]?.projectId,
             ) || null;
+            const projectNodes = Array.isArray(projectForSpace?.sharedSnapshot?.nodes) && projectForSpace.sharedSnapshot.nodes.length > 0
+                ? projectForSpace.sharedSnapshot.nodes
+                : null;
+            const projectEdges = Array.isArray(projectForSpace?.sharedSnapshot?.edges) && projectForSpace.sharedSnapshot.edges.length > 0
+                ? projectForSpace.sharedSnapshot.edges
+                : null;
+            const localNodes = Array.isArray(data.nodes) && data.nodes.length > 0 ? data.nodes : null;
+            const localEdges = Array.isArray(data.edges) && data.edges.length > 0 ? data.edges : null;
+            const resolvedNodes = localNodes || projectNodes || createInitialNodes();
+            const resolvedEdges = localEdges || projectEdges || createInitialEdges();
 
             setSpaceTitle(data.title || t('editor.untitled'));
             setMapState(normalizeMapState(data.map_state));
             setNodes(
                 alignGoalNode(
                     applyProjectGoalToNodes(
-                        Array.isArray(data.nodes) && data.nodes.length > 0 ? data.nodes : createInitialNodes(),
+                        resolvedNodes,
                         projectForSpace,
                     ),
                     direction,
                 ),
             );
-            setEdges(Array.isArray(data.edges) && data.edges.length > 0 ? data.edges : createInitialEdges());
+            setEdges(resolvedEdges);
             if (data.viewport && Object.keys(data.viewport).length > 0) {
                 setViewport({ x: data.viewport.x, y: data.viewport.y, zoom: data.viewport.zoom });
             }
@@ -363,6 +376,7 @@ function EditorContent() {
                 numBranches: n.data.numBranches, loopMode: n.data.loopMode,
                 selectedApiKey: n.data.selectedApiKey, branchCount: n.data.branchCount,
                 goalHistory: n.data.goalHistory, isLooping: n.data.isLooping,
+                loopNodeId: n.data.loopNodeId, loopOriginId: n.data.loopOriginId,
                 goalInteractiveStates: n.data.goalInteractiveStates,
                 goalSelectedOptions: n.data.goalSelectedOptions,
             } : {}
@@ -381,10 +395,24 @@ function EditorContent() {
     }, [spaceTitle, nodes, edges, mapState, currentMode, currentProjectId]);
 
     const createSpaceFromSnapshot = useCallback(async (snapshot) => {
+        const latestWorkspaceMeta = loadWorkspaceMeta();
+        const project = latestWorkspaceMeta.projects.find((item) => item.id === snapshot.projectId) || null;
+        const sharedNodes = Array.isArray(project?.sharedSnapshot?.nodes) && project.sharedSnapshot.nodes.length > 0
+            ? project.sharedSnapshot.nodes
+            : null;
+        const sharedEdges = Array.isArray(project?.sharedSnapshot?.edges) && project.sharedSnapshot.edges.length > 0
+            ? project.sharedSnapshot.edges
+            : null;
+        const snapshotNodes = Array.isArray(snapshot.nodes) && snapshot.nodes.length > 0
+            ? cleanNodesForSave(snapshot.nodes)
+            : null;
+        const snapshotEdges = Array.isArray(snapshot.edges) && snapshot.edges.length > 0
+            ? snapshot.edges
+            : null;
         const updates = {
             title: snapshot.title || t('editor.untitled'),
-            nodes: cleanNodesForSave(snapshot.nodes),
-            edges: snapshot.edges,
+            nodes: snapshotNodes || sharedNodes || cleanNodesForSave(createInitialNodes()),
+            edges: snapshotEdges || sharedEdges || createInitialEdges(),
             map_state: snapshot.mapState,
             project_id: snapshot.projectId || null,
             updated_at: new Date().toISOString(),
@@ -455,30 +483,28 @@ function EditorContent() {
         promoteDraftPromiseRef.current = promoteDraft();
     }, [createSpaceFromSnapshot, draftDirty, isDraft, navigate]);
 
-    const handleManualSave = async () => {
-        if (!spaceId || nodes.length === 0) return;
-        setIsSaving(true);
-        setSaveSuccess(false);
-        try {
-            const updates = {
-                title: spaceTitle,
-                nodes: cleanNodesForSave(nodes),
-                edges,
-                map_state: mapState,
-                project_id: currentProjectId,
-                updated_at: new Date().toISOString(),
-            };
-            localStorage.setItem(`blueprint_space_${spaceId}`, JSON.stringify(updates));
-            await updateRemoteSpace({ title: spaceTitle, nodes: updates.nodes, edges: updates.edges, map_state: updates.map_state, updated_at: updates.updated_at });
-            syncWorkspaceProjectFromSpace(spaceId, updates, currentProjectId);
-            window.dispatchEvent(new CustomEvent('spaceTitleUpdated'));
-            setSaveSuccess(true);
-            setTimeout(() => setSaveSuccess(false), 2500);
-        } catch (err) {
-            console.error("Save error:", err);
-            alert(t('editor.saveError'));
-        } finally { setIsSaving(false); }
-    };
+    const persistCurrentSpace = useCallback(async (titleOverride = spaceTitle) => {
+        if (!spaceId || nodes.length === 0 || !isHydrated) return;
+
+        const updates = {
+            title: titleOverride,
+            nodes: cleanNodesForSave(nodes),
+            edges,
+            map_state: mapState,
+            project_id: currentProjectId,
+            updated_at: new Date().toISOString(),
+        };
+
+        localStorage.setItem(`blueprint_space_${spaceId}`, JSON.stringify(updates));
+        await updateRemoteSpace({
+            title: updates.title,
+            nodes: updates.nodes,
+            edges: updates.edges,
+            map_state: updates.map_state,
+            updated_at: updates.updated_at,
+        });
+        syncWorkspaceProjectFromSpace(spaceId, updates, currentProjectId);
+    }, [currentProjectId, edges, isHydrated, mapState, nodes, spaceId, spaceTitle, updateRemoteSpace]);
 
     const saveTitle = async () => {
         const cleanedTitle = tempTitle.trim() || t('editor.untitled');
@@ -493,34 +519,29 @@ function EditorContent() {
         if (supabase && spaceId) {
             await supabase.from('spaces').update({ title: cleanedTitle }).eq('id', spaceId);
             window.dispatchEvent(new CustomEvent('spaceTitleUpdated'));
-            handleManualSave();
+            try {
+                await persistCurrentSpace(cleanedTitle);
+            } catch (err) {
+                console.error('Save error:', err);
+                alert(t('editor.saveError'));
+            }
         }
     };
 
     // Auto-save
     const saveTimerRef = useRef(null);
     useEffect(() => {
-        if (!spaceId || nodes.length === 0) return;
+        if (!spaceId || nodes.length === 0 || !isHydrated) return;
         if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
         saveTimerRef.current = setTimeout(async () => {
             try {
-                const updates = {
-                    title: spaceTitle,
-                    nodes: cleanNodesForSave(nodes),
-                    edges,
-                    map_state: mapState,
-                    project_id: currentProjectId,
-                    updated_at: new Date().toISOString(),
-                };
-                localStorage.setItem(`blueprint_space_${spaceId}`, JSON.stringify(updates));
-                await updateRemoteSpace({ nodes: updates.nodes, edges: updates.edges, map_state: updates.map_state, updated_at: updates.updated_at });
-                syncWorkspaceProjectFromSpace(spaceId, updates, currentProjectId);
+                await persistCurrentSpace();
             } catch (err) {
                 console.error('Auto-save failed', err);
             }
         }, 1500);
         return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
-    }, [currentProjectId, nodes, edges, mapState, spaceId, spaceTitle, updateRemoteSpace]);
+    }, [currentProjectId, edges, isHydrated, mapState, nodes, persistCurrentSpace, spaceId, spaceTitle]);
 
     const onNodesChange = useCallback((changes) => {
         baseOnNodesChange(changes);
@@ -554,6 +575,91 @@ function EditorContent() {
         setNodes((nds) => nds.map((node) => node.id === id ? { ...node, data: { ...node.data, numBranches: (node.data.numBranches || 2) + 1 } } : node));
         markDraftDirty();
     }, [markDraftDirty, setNodes]);
+
+    const toggleLoopForNode = useCallback((sourceId) => {
+        setNodes((nds) => {
+            const sourceNode = nds.find((node) => node.id === sourceId);
+            if (!sourceNode) return nds;
+
+            const existingLoopNodeId = sourceNode.data?.loopNodeId || null;
+            if (existingLoopNodeId) {
+                setEdges((eds) => eds.filter((edge) => (
+                    edge.source !== existingLoopNodeId
+                    && edge.target !== existingLoopNodeId
+                    && edge.id !== `e-loop-forward-${sourceId}-${existingLoopNodeId}`
+                    && edge.id !== `e-loop-return-${existingLoopNodeId}-${sourceId}`
+                )));
+
+                return nds
+                    .filter((node) => node.id !== existingLoopNodeId)
+                    .map((node) => (
+                        node.id === sourceId
+                            ? { ...node, data: { ...node.data, isLooping: false, loopNodeId: null } }
+                            : node
+                    ));
+            }
+
+            const newLoopNodeId = `loop-${crypto.randomUUID()}`;
+            const offset = direction === 'LR'
+                ? { x: 260, y: -220 }
+                : { x: 260, y: 220 };
+            const loopNode = {
+                id: newLoopNodeId,
+                type: 'loopNode',
+                position: {
+                    x: sourceNode.position.x + offset.x,
+                    y: sourceNode.position.y + offset.y,
+                },
+                data: {
+                    dir: direction,
+                    prompt: '',
+                    systemPrompt: sourceNode.data?.systemPrompt || '',
+                    selectedApiKey: sourceNode.data?.selectedApiKey || 0,
+                    loopOriginId: sourceId,
+                },
+            };
+
+            setEdges((eds) => ([
+                ...eds,
+                {
+                    id: `e-loop-forward-${sourceId}-${newLoopNodeId}`,
+                    source: sourceId,
+                    target: newLoopNodeId,
+                    sourceHandle: 'loop-forward-source',
+                    targetHandle: 'loop-forward-target',
+                    type: 'deleteEdge',
+                    style: {
+                        stroke: 'rgba(251, 191, 36, 0.92)',
+                        strokeWidth: 2.4,
+                    },
+                    data: { loopArc: 'forward', loopDirection: direction },
+                },
+                {
+                    id: `e-loop-return-${newLoopNodeId}-${sourceId}`,
+                    source: newLoopNodeId,
+                    target: sourceId,
+                    sourceHandle: 'loop-return-source',
+                    targetHandle: 'loop-return-target',
+                    type: 'deleteEdge',
+                    style: {
+                        stroke: 'rgba(251, 191, 36, 0.82)',
+                        strokeWidth: 2.2,
+                    },
+                    data: { loopArc: 'return', loopDirection: direction },
+                },
+            ]));
+
+            return [
+                ...nds.map((node) => (
+                    node.id === sourceId
+                        ? { ...node, data: { ...node.data, isLooping: true, loopNodeId: newLoopNodeId } }
+                        : node
+                )),
+                loopNode,
+            ];
+        });
+        markDraftDirty();
+    }, [direction, markDraftDirty, setEdges, setNodes]);
 
     const onQuickAdd = useCallback((sourceId, type) => {
         const outgoingEdges = edges.filter(e => e.source === sourceId);
@@ -608,20 +714,29 @@ function EditorContent() {
         }
     }, [edges]);
 
-    const handleStartNewProject = useCallback(() => {
-        if (isDraft) {
-            resetDraftState();
-            return;
-        }
-
-        setDraftProjectId(currentProjectId);
-        navigate('/');
-    }, [currentProjectId, isDraft, navigate, resetDraftState]);
-
     const onDeleteNode = useCallback((nodeId) => {
-        setNodes(nds => nds.filter(n => n.id !== nodeId));
-        setEdges(eds => eds.filter(e => e.source !== nodeId && e.target !== nodeId));
-        if (activeChatNodeId === nodeId) setActiveChatNodeId('1');
+        setNodes((nds) => {
+            const autoLoopChildren = nds
+                .filter((node) => node.data?.loopOriginId === nodeId)
+                .map((node) => node.id);
+            const sourceNode = nds.find((node) => node.id === nodeId) || null;
+            const loopNodeId = sourceNode?.data?.loopNodeId || null;
+            const removedNodeIds = new Set([nodeId, ...autoLoopChildren, ...(loopNodeId ? [loopNodeId] : [])]);
+
+            setEdges((eds) => eds.filter((edge) => !removedNodeIds.has(edge.source) && !removedNodeIds.has(edge.target)));
+
+            if (activeChatNodeId === nodeId || (loopNodeId && activeChatNodeId === loopNodeId)) {
+                setActiveChatNodeId('1');
+            }
+
+            return nds
+                .filter((node) => !removedNodeIds.has(node.id))
+                .map((node) => (
+                    node.data?.loopNodeId === nodeId
+                        ? { ...node, data: { ...node.data, isLooping: false, loopNodeId: null } }
+                        : node
+                ));
+        });
         markDraftDirty();
     }, [setNodes, setEdges, activeChatNodeId, markDraftDirty]);
 
@@ -681,6 +796,7 @@ function EditorContent() {
                 projectContextPrompt,
                 onChange: updateNodeData,
                 onUpdateNodeData: updateNodeData,
+                onToggleLoop: toggleLoopForNode,
                 onAddBranch,
                 onQuickAdd,
                 onDeleteNode,
@@ -703,7 +819,7 @@ function EditorContent() {
                 apiKeys
             }
         }));
-    }, [nodes, edges, direction, currentProject, projectContextPrompt, updateNodeData, onAddBranch, onQuickAdd, onDeleteNode, apiKeys, navigate, spaceId, isDraft]);
+    }, [nodes, edges, direction, currentProject, projectContextPrompt, updateNodeData, toggleLoopForNode, onAddBranch, onQuickAdd, onDeleteNode, apiKeys, navigate, spaceId, isDraft]);
 
     const toggleDirection = () => setDirection(d => d === 'LR' ? 'TB' : 'LR');
 
@@ -746,15 +862,21 @@ function EditorContent() {
             {/* Left icon bar (always visible) */}
             <div style={{
                 width: '52px', background: 'var(--bg-dark)', borderRight: '1px solid var(--panel-border)',
-                display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 'calc(env(safe-area-inset-top, 0px) + 0.75rem)', gap: '0.5rem', zIndex: 50
+                display: 'flex', flexDirection: 'column', alignItems: 'center',
+                paddingTop: 'calc(env(safe-area-inset-top, 0px) + 0.75rem)',
+                paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 0.75rem)',
+                gap: '0.5rem', zIndex: 200, flexShrink: 0, position: 'relative'
             }}>
                 <button onClick={() => setIsSidebarOpen(true)} className="btn-icon" style={{ width: '36px', height: '36px' }} title={t('sidebar.title')}>
                     <Menu size={18} />
                 </button>
+                <button onClick={() => setShowSettings(true)} className="btn-icon" style={{ width: '36px', height: '36px', marginTop: 'auto' }} title={t('settings.title')} aria-label={t('settings.title')}>
+                    <Settings size={17} />
+                </button>
             </div>
 
             {/* Main area */}
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative' }}>
+            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden' }}>
                 {/* Top Header (always) */}
                 <div style={{
                     padding: 'calc(env(safe-area-inset-top, 0px) + 0.45rem) 1rem 0.45rem', borderBottom: '1px solid var(--panel-border)',
@@ -836,17 +958,6 @@ function EditorContent() {
                             })}
                         </div>
 
-                        <button onClick={handleManualSave} disabled={isSaving || !isHydrated || isDraft}
-                            style={{
-                                background: saveSuccess ? 'var(--action)' : (isSaving || !isHydrated || isDraft) ? 'rgba(108, 140, 255, 0.4)' : 'var(--primary)',
-                                color: 'white', fontSize: '0.78rem', padding: '0.3rem 0.8rem', border: 'none',
-                                borderRadius: '20px', display: 'flex', alignItems: 'center', gap: '0.3rem',
-                                fontWeight: 500, cursor: (isSaving || !isHydrated || isDraft) ? 'wait' : 'pointer', fontFamily: 'inherit',
-                                transition: 'all 0.3s'
-                            }}>
-                            {saveSuccess ? <><Check size={13} /> {t('editor.saved')}</> : <><Save size={13} /> {isDraft ? 'Draft' : (isSaving || !isHydrated) ? t('editor.saving') : t('editor.save')}</>}
-                        </button>
-
                         {currentMode === 'graph' && (
                         <button onClick={toggleDirection}
                             aria-label={direction === 'LR' ? t('editor.ltr') : t('editor.ttb')}
@@ -873,7 +984,6 @@ function EditorContent() {
                         onUpdateNodeData={updateNodeData}
                         onBranchFromChat={onBranchFromChat}
                         onNavigateToBranch={onNavigateToBranch}
-                        onStartNewProject={handleStartNewProject}
                         projectContextPrompt={projectContextPrompt}
                         spaceId={spaceId}
                     />
@@ -975,10 +1085,7 @@ function EditorContent() {
                         </div>
                         <div className="settings-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <button className="btn-text-danger" style={{ fontSize: '0.82rem' }} onClick={() => { setShowSettings(false); supabase.auth.signOut(); }}><LogOut size={14} style={{ display: 'inline', verticalAlign: 'text-bottom', marginRight: '4px' }} /> {t('settings.logout')}</button>
-                            <div style={{ display: 'flex', gap: '0.75rem' }}>
-                                <button className="btn btn-secondary" onClick={() => setShowSettings(false)}>{t('settings.cancel')}</button>
-                                <button className="btn btn-primary" style={{ width: 'auto' }} onClick={() => setShowSettings(false)}>{t('settings.save')}</button>
-                            </div>
+                            <button className="btn btn-secondary" onClick={() => setShowSettings(false)}>{t('settings.cancel')}</button>
                         </div>
                     </div>
                 </div>

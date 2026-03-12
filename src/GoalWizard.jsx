@@ -8,7 +8,7 @@ import {
     parseInteractiveContent,
 } from './lib/interactiveContent';
 
-const GOAL_SYSTEM_PROMPT = `あなたは Plan 設計アシスタントです。この Plan Space では、ユーザーの目標、計画、報酬設計、改善ポイントを対話形式で整理してください。
+const DEFAULT_GOAL_SYSTEM_PROMPT = `あなたは Plan 設計アシスタントです。この Plan Space では、ユーザーの目標、計画、報酬設計、改善ポイントを対話形式で整理してください。
 
 重要なルール:
 1. まず目標と期限・タイムラインを確認してください。期限があるなら日付、なければ期間の目安を聞いてください。
@@ -35,12 +35,29 @@ export default function GoalWizard({
     apiKeys,
     selectedApiKey,
     onSetGoal,
+    onComplete,
     initialHistory,
     onSaveHistory,
     initialInteractiveStates,
     initialSelectedOptions,
     onSaveInteractiveStates,
     onSaveSelectedOptions,
+    systemPrompt = DEFAULT_GOAL_SYSTEM_PROMPT,
+    title,
+    placeholder,
+    completionTag = '[GOAL_COMPLETE]',
+    sectionTabs = [],
+    activeSectionId = 'goal',
+    onSelectSection,
+    readOnly = false,
+    readOnlyMessage = '',
+    versionOptions = [],
+    selectedVersionId = null,
+    onSelectVersion,
+    onCreateVersion,
+    onRestoreVersion,
+    canCreateVersion = false,
+    canRestoreVersion = false,
 }) {
     const { t } = useLanguage();
     const [messages, setMessages] = useState(initialHistory || []);
@@ -52,6 +69,24 @@ export default function GoalWizard({
     const messagesEndRef = useRef(null);
     const savedInteractiveStatesRef = useRef(JSON.stringify(initialInteractiveStates || {}));
     const savedSelectedOptionsRef = useRef(JSON.stringify(initialSelectedOptions || {}));
+    const resolvedTitle = title || t('goal.title');
+    const resolvedPlaceholder = placeholder || t('goal.placeholder');
+
+    useEffect(() => {
+        setMessages(initialHistory || []);
+    }, [activeSectionId, initialHistory]);
+
+    useEffect(() => {
+        const nextState = initialInteractiveStates || {};
+        savedInteractiveStatesRef.current = JSON.stringify(nextState);
+        setInteractiveStates(nextState);
+    }, [activeSectionId, initialInteractiveStates]);
+
+    useEffect(() => {
+        const nextState = initialSelectedOptions || {};
+        savedSelectedOptionsRef.current = JSON.stringify(nextState);
+        setSelectedOptions(nextState);
+    }, [activeSectionId, initialSelectedOptions]);
 
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -93,7 +128,7 @@ export default function GoalWizard({
             if (provider === 'gemini') {
                 const modelToUse = userModel || 'gemini-3.1-pro-preview';
                 const contents = [
-                    { role: 'user', parts: [{ text: GOAL_SYSTEM_PROMPT }] },
+                    { role: 'user', parts: [{ text: systemPrompt }] },
                     { role: 'model', parts: [{ text: 'はい、Plan を一緒に整理します。' }] },
                 ];
 
@@ -135,7 +170,7 @@ export default function GoalWizard({
                     body: JSON.stringify({
                         model: modelToUse,
                         max_tokens: 2048,
-                        system: GOAL_SYSTEM_PROMPT,
+                        system: systemPrompt,
                         messages: messagesForApi,
                     }),
                 });
@@ -156,7 +191,7 @@ export default function GoalWizard({
                 : provider === 'glm'
                     ? 'https://open.bigmodel.cn/api/paas/v4/chat/completions'
                     : 'https://api.openai.com/v1/chat/completions';
-            const messagesForApi = [{ role: 'system', content: GOAL_SYSTEM_PROMPT }];
+            const messagesForApi = [{ role: 'system', content: systemPrompt }];
 
             history.forEach((message) => {
                 messagesForApi.push({
@@ -183,7 +218,7 @@ export default function GoalWizard({
 
     const handleSend = async (overrideText = null) => {
         const text = overrideText || input.trim();
-        if (!text || isLoading) return;
+        if (!text || isLoading || readOnly) return;
 
         const userMessage = { role: 'user', content: text };
         const nextHistory = [...messages, userMessage];
@@ -200,8 +235,10 @@ export default function GoalWizard({
         setMessages(finalHistory);
         setIsLoading(false);
 
-        if (reply.includes('[GOAL_COMPLETE]')) {
-            onSetGoal(reply.replace('[GOAL_COMPLETE]', '').trim());
+        if (completionTag && reply.includes(completionTag)) {
+            const nextValue = reply.replace(completionTag, '').trim();
+            if (onComplete) onComplete(nextValue);
+            else if (onSetGoal) onSetGoal(nextValue);
         }
     };
 
@@ -233,7 +270,7 @@ export default function GoalWizard({
     };
 
     const renderAIMessage = (content, messageIndex) => {
-        const cleanContent = content.replace('[GOAL_COMPLETE]', '').trim();
+        const cleanContent = completionTag ? content.replace(completionTag, '').trim() : content;
         const parsed = parseInteractiveContent(cleanContent);
         const hasInteractive = parsed.some((part) => part.type === 'checkbox' || part.type === 'select');
         const canSubmit = hasInteractiveSelection(parsed, messageIndex, interactiveStates, selectedOptions);
@@ -263,7 +300,7 @@ export default function GoalWizard({
                                         <button
                                             type="button"
                                             key={item.id}
-                                            onClick={() => toggleCheckbox(messageIndex, item.id)}
+                                            onClick={() => !readOnly && toggleCheckbox(messageIndex, item.id)}
                                             style={{
                                                 display: 'flex',
                                                 alignItems: 'center',
@@ -307,7 +344,7 @@ export default function GoalWizard({
                                             <button
                                                 type="button"
                                                 key={item.id}
-                                                onClick={() => selectOption(messageIndex, item.id)}
+                                                onClick={() => !readOnly && selectOption(messageIndex, item.id)}
                                                 style={{
                                                     padding: '0.6rem 0.8rem',
                                                     background: isSelected ? 'rgba(92, 124, 250, 0.15)' : 'rgba(255,255,255,0.02)',
@@ -355,11 +392,11 @@ export default function GoalWizard({
                     return null;
                 })}
 
-                {hasInteractive && messageIndex === messages.length - 1 && !content.includes('[GOAL_COMPLETE]') && (
+                {hasInteractive && messageIndex === messages.length - 1 && (!completionTag || !content.includes(completionTag)) && (
                     <button
                         type="button"
                         onClick={() => submitInteractive(messageIndex, parsed)}
-                        disabled={!canSubmit}
+                        disabled={!canSubmit || readOnly}
                         style={{
                             marginTop: '0.6rem',
                             padding: '0.5rem 1.2rem',
@@ -382,10 +419,10 @@ export default function GoalWizard({
         );
     };
 
-    const hasCompletedGoal = messages.some((message) => message.content.includes('[GOAL_COMPLETE]'));
+    const hasCompletedGoal = Boolean(completionTag) && messages.some((message) => message.content.includes(completionTag));
 
     return (
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: 'var(--bg-dark)', height: '100%' }}>
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', background: 'var(--bg-dark)', height: '100%' }}>
             <div
                 style={{
                     padding: '0.9rem 1.5rem',
@@ -400,28 +437,122 @@ export default function GoalWizard({
                     <button type="button" onClick={onClose} className="btn-icon" style={{ width: '32px', height: '32px' }}>
                         <ArrowLeft size={16} />
                     </button>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', minWidth: 0, flexWrap: 'wrap' }}>
-                        <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 500 }}>{t('goal.title')}</h3>
-                        <button
-                            type="button"
-                            onClick={() => setShowProgressPanel((current) => !current)}
-                            style={{
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '0.35rem',
-                                padding: '0.34rem 0.72rem',
-                                borderRadius: '999px',
-                                border: '1px solid var(--panel-border)',
-                                background: showProgressPanel ? 'rgba(92, 124, 250, 0.14)' : 'rgba(255,255,255,0.04)',
-                                color: 'var(--text-main)',
-                                cursor: 'pointer',
-                                fontSize: '0.76rem',
-                                fontFamily: 'inherit',
-                            }}
-                        >
-                            <ListTodo size={13} color="var(--primary)" />
-                            {progressItems.length > 0 ? `${t('goal.progress')} ${completedProgressCount}/${progressItems.length}` : t('goal.progress')}
-                        </button>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem', minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', minWidth: 0, flexWrap: 'wrap' }}>
+                            <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 500 }}>{resolvedTitle}</h3>
+                            <button
+                                type="button"
+                                onClick={() => setShowProgressPanel((current) => !current)}
+                                style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '0.35rem',
+                                    padding: '0.34rem 0.72rem',
+                                    borderRadius: '999px',
+                                    border: '1px solid var(--panel-border)',
+                                    background: showProgressPanel ? 'rgba(92, 124, 250, 0.14)' : 'rgba(255,255,255,0.04)',
+                                    color: 'var(--text-main)',
+                                    cursor: 'pointer',
+                                    fontSize: '0.76rem',
+                                    fontFamily: 'inherit',
+                                }}
+                            >
+                                <ListTodo size={13} color="var(--primary)" />
+                                {progressItems.length > 0 ? `${t('goal.progress')} ${completedProgressCount}/${progressItems.length}` : t('goal.progress')}
+                            </button>
+                        </div>
+                        {sectionTabs.length > 1 && (
+                            <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                                {sectionTabs.map((tab) => (
+                                    <button
+                                        key={tab.id}
+                                        type="button"
+                                        onClick={() => onSelectSection && onSelectSection(tab.id)}
+                                        disabled={tab.disabled}
+                                        style={{
+                                            padding: '0.34rem 0.72rem',
+                                            borderRadius: '999px',
+                                            border: tab.active ? '1px solid rgba(92, 124, 250, 0.42)' : '1px solid var(--panel-border)',
+                                            background: tab.active ? 'rgba(92, 124, 250, 0.16)' : 'rgba(255,255,255,0.04)',
+                                            color: tab.active ? '#dbe5ff' : 'var(--text-main)',
+                                            cursor: tab.disabled ? 'default' : 'pointer',
+                                            fontSize: '0.74rem',
+                                            fontFamily: 'inherit',
+                                            opacity: tab.disabled ? 0.45 : 1,
+                                        }}
+                                    >
+                                        {tab.label}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                        {(readOnlyMessage || versionOptions.length > 0) && (
+                            <div style={{ display: 'flex', gap: '0.45rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                                {versionOptions.length > 0 && (
+                                    <>
+                                        <select
+                                            value={selectedVersionId || ''}
+                                            onChange={(event) => onSelectVersion && onSelectVersion(event.target.value)}
+                                            style={{
+                                                background: 'rgba(255,255,255,0.04)',
+                                                color: 'var(--text-main)',
+                                                border: '1px solid var(--panel-border)',
+                                                borderRadius: '999px',
+                                                padding: '0.28rem 0.75rem',
+                                                fontSize: '0.74rem',
+                                            }}
+                                        >
+                                            {versionOptions.map((version) => (
+                                                <option key={version.id} value={version.id}>
+                                                    {version.label}
+                                                </option>
+                                            ))}
+                                        </select>
+                                        {canCreateVersion && (
+                                            <button
+                                                type="button"
+                                                onClick={() => onCreateVersion && onCreateVersion()}
+                                                style={{
+                                                    padding: '0.3rem 0.72rem',
+                                                    borderRadius: '999px',
+                                                    border: '1px solid var(--panel-border)',
+                                                    background: 'rgba(255,255,255,0.04)',
+                                                    color: 'var(--text-main)',
+                                                    cursor: 'pointer',
+                                                    fontSize: '0.74rem',
+                                                    fontFamily: 'inherit',
+                                                }}
+                                            >
+                                                新しい版
+                                            </button>
+                                        )}
+                                        {canRestoreVersion && (
+                                            <button
+                                                type="button"
+                                                onClick={() => onRestoreVersion && onRestoreVersion()}
+                                                style={{
+                                                    padding: '0.3rem 0.72rem',
+                                                    borderRadius: '999px',
+                                                    border: '1px solid rgba(92, 124, 250, 0.28)',
+                                                    background: 'rgba(92, 124, 250, 0.14)',
+                                                    color: '#dbe5ff',
+                                                    cursor: 'pointer',
+                                                    fontSize: '0.74rem',
+                                                    fontFamily: 'inherit',
+                                                }}
+                                            >
+                                                この版を復元
+                                            </button>
+                                        )}
+                                    </>
+                                )}
+                                {readOnlyMessage && (
+                                    <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+                                        {readOnlyMessage}
+                                    </div>
+                                )}
+                            </div>
+                        )}
                     </div>
                 </div>
             </div>
@@ -437,8 +568,24 @@ export default function GoalWizard({
                     maxWidth: '780px',
                     width: '100%',
                     margin: '0 auto',
+                    minWidth: 0,
                 }}
             >
+                {readOnlyMessage && (
+                    <div
+                        style={{
+                            padding: '0.85rem 1rem',
+                            borderRadius: '14px',
+                            background: 'rgba(255,255,255,0.04)',
+                            border: '1px solid var(--panel-border)',
+                            color: 'var(--text-muted)',
+                            fontSize: '0.82rem',
+                            lineHeight: 1.65,
+                        }}
+                    >
+                        {readOnlyMessage}
+                    </div>
+                )}
                 {showProgressPanel && (
                     <div
                         style={{
@@ -590,7 +737,8 @@ export default function GoalWizard({
                                 handleSend();
                             }
                         }}
-                        placeholder={t('goal.placeholder')}
+                        placeholder={resolvedPlaceholder}
+                        disabled={readOnly}
                         style={{
                             flex: 1,
                             background: 'transparent',
@@ -609,7 +757,7 @@ export default function GoalWizard({
                     <button
                         type="button"
                         onClick={() => handleSend()}
-                        disabled={isLoading || !input.trim()}
+                        disabled={readOnly || isLoading || !input.trim()}
                         style={{
                             width: '34px',
                             height: '34px',
