@@ -177,7 +177,7 @@ function EditorContent() {
         return loadWorkspaceMeta();
     }, [workspaceMetaVersion]);
     const currentProjectId = isDraft
-        ? (workspaceMeta.draftProjectId || workspaceMeta.selectedProjectId || null)
+        ? (workspaceMeta.draftProjectId || null)
         : (workspaceMeta.spaces[spaceId]?.projectId || null);
     const currentProject = useMemo(
         () => workspaceMeta.projects.find((project) => project.id === currentProjectId) || null,
@@ -200,7 +200,7 @@ function EditorContent() {
 
     const resetDraftState = useCallback(() => {
         const latestWorkspaceMeta = loadWorkspaceMeta();
-        const draftProjectId = latestWorkspaceMeta.draftProjectId || latestWorkspaceMeta.selectedProjectId || null;
+        const draftProjectId = latestWorkspaceMeta.draftProjectId || null;
         const draftProject = latestWorkspaceMeta.projects.find((project) => project.id === draftProjectId) || null;
         const draftNodes = Array.isArray(draftProject?.sharedSnapshot?.nodes) && draftProject.sharedSnapshot.nodes.length > 0
             ? draftProject.sharedSnapshot.nodes

@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { supabase } from './lib/supabase';
 import {
     FolderClosed,
     FolderOpen,
@@ -13,6 +12,7 @@ import {
     Trash2,
     X,
 } from 'lucide-react';
+import { supabase } from './lib/supabase';
 import { useLanguage } from './i18n';
 import { DEFAULT_SPACE_MODE, getSpacePath, isSpaceMode, resolveSpaceRouteParams } from './lib/routes';
 import {
@@ -32,14 +32,21 @@ function SidebarSpaceRow({
     projectName,
     isPinned,
     nested = false,
+    draggable = false,
+    isDragging = false,
     onOpen,
     onPin,
     onDelete,
+    onDragStart,
+    onDragEnd,
 }) {
     return (
         <div
             className="sidebar-item"
             onClick={() => onOpen(space.id)}
+            draggable={draggable}
+            onDragStart={(event) => onDragStart && onDragStart(event, space.id)}
+            onDragEnd={onDragEnd}
             style={{
                 padding: nested ? '0.48rem 0.55rem 0.48rem 0.85rem' : '0.52rem 0.6rem',
                 display: 'flex',
@@ -48,9 +55,10 @@ function SidebarSpaceRow({
                 background: space.id === currentSpaceId ? 'linear-gradient(90deg, rgba(92, 124, 250, 0.15) 0%, transparent 100%)' : 'transparent',
                 borderLeft: space.id === currentSpaceId ? '3px solid var(--primary)' : '3px solid transparent',
                 borderRadius: '0 8px 8px 0',
-                cursor: 'pointer',
+                cursor: draggable ? 'grab' : 'pointer',
                 marginBottom: '0.24rem',
-                transition: 'background 0.2s ease',
+                transition: 'background 0.2s ease, opacity 0.2s ease',
+                opacity: isDragging ? 0.45 : 1,
             }}
             onMouseEnter={(event) => {
                 if (space.id !== currentSpaceId) {
@@ -106,8 +114,8 @@ function SidebarSpaceRow({
                     alignItems: 'center',
                     flexShrink: 0,
                 }}
-                title={isPinned ? 'ピンを外す' : 'ピンする'}
-                aria-label={isPinned ? 'ピンを外す' : 'ピンする'}
+                title={isPinned ? 'Unpin' : 'Pin'}
+                aria-label={isPinned ? 'Unpin' : 'Pin'}
             >
                 <Pin size={12} fill={isPinned ? 'currentColor' : 'none'} />
             </button>
@@ -127,8 +135,8 @@ function SidebarSpaceRow({
                     alignItems: 'center',
                     flexShrink: 0,
                 }}
-                title="削除"
-                aria-label="削除"
+                title="Delete"
+                aria-label="Delete"
             >
                 <Trash2 size={12} />
             </button>
@@ -148,27 +156,31 @@ export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
     const [isCreatingProject, setIsCreatingProject] = useState(false);
     const [newProjectName, setNewProjectName] = useState('');
     const [expandedProjectIds, setExpandedProjectIds] = useState({});
+    const [draggedSpaceId, setDraggedSpaceId] = useState(null);
+    const [dragOverProjectId, setDragOverProjectId] = useState(null);
     const currentMode = isSpaceMode(mode) ? mode : DEFAULT_SPACE_MODE;
+
     const workspaceMeta = useMemo(() => {
         void workspaceMetaVersion;
         return loadWorkspaceMeta();
     }, [workspaceMetaVersion]);
+
     const routeProjectId = currentSpaceId ? (workspaceMeta.spaces[currentSpaceId]?.projectId || null) : null;
     const selectedProjectId = workspaceMeta.selectedProjectId || null;
     const activeProjectId = selectedProjectId || routeProjectId || null;
-    const activeProjectIdForDraft = selectedProjectId || routeProjectId || null;
 
     const fetchSpaces = useCallback(async () => {
         setLoading(true);
-        let allSpaces = [];
-        for (let i = 0; i < localStorage.length; i += 1) {
-            const key = localStorage.key(i);
+        const nextSpaces = [];
+
+        for (let index = 0; index < localStorage.length; index += 1) {
+            const key = localStorage.key(index);
             if (!key?.startsWith('blueprint_space_')) continue;
 
             try {
                 const spaceData = JSON.parse(localStorage.getItem(key));
                 const id = key.replace('blueprint_space_', '');
-                allSpaces.push({
+                nextSpaces.push({
                     id,
                     title: spaceData.title || t('editor.untitled'),
                     updated_at: spaceData.updated_at || new Date().toISOString(),
@@ -180,14 +192,17 @@ export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
 
         if (supabase) {
             try {
-                const { data, error } = await supabase.from('spaces').select('id, title, updated_at').order('updated_at', { ascending: false });
+                const { data, error } = await supabase
+                    .from('spaces')
+                    .select('id, title, updated_at')
+                    .order('updated_at', { ascending: false });
                 if (!error && data) {
                     data.forEach((remoteSpace) => {
-                        const existingIndex = allSpaces.findIndex((space) => space.id === remoteSpace.id);
+                        const existingIndex = nextSpaces.findIndex((space) => space.id === remoteSpace.id);
                         if (existingIndex >= 0) {
-                            allSpaces[existingIndex] = remoteSpace;
+                            nextSpaces[existingIndex] = remoteSpace;
                         } else {
-                            allSpaces.push(remoteSpace);
+                            nextSpaces.push(remoteSpace);
                         }
                     });
                 }
@@ -196,8 +211,8 @@ export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
             }
         }
 
-        allSpaces.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
-        setSpaces(allSpaces);
+        nextSpaces.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+        setSpaces(nextSpaces);
         setLoading(false);
     }, [t]);
 
@@ -225,11 +240,11 @@ export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
     }, [fetchSpaces]);
 
     const handleNewSpace = useCallback(() => {
-        setDraftProjectId(activeProjectIdForDraft);
+        setDraftProjectId(null);
         window.dispatchEvent(new CustomEvent('workspaceStartNewSpace'));
         navigate('/');
         onClose();
-    }, [activeProjectIdForDraft, navigate, onClose]);
+    }, [navigate, onClose]);
 
     const handleDeleteSpace = async (event, spaceId) => {
         event.stopPropagation();
@@ -258,19 +273,19 @@ export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
         setIsCreatingProject(false);
     }, [newProjectName]);
 
-    const handleAssignCurrentSpaceToProject = () => {
-        if (!currentSpaceId || !activeProjectId) return;
-        const activeSpace = spaces.find((space) => space.id === currentSpaceId);
-        assignSpaceToProject(currentSpaceId, activeProjectId, activeSpace?.title || '');
+    const handleAssignSpaceToProject = useCallback((spaceId, projectId) => {
+        if (!spaceId || !projectId) return;
+        const targetSpace = spaces.find((space) => space.id === spaceId);
+        assignSpaceToProject(spaceId, projectId, targetSpace?.title || '');
         try {
-            const raw = localStorage.getItem(`blueprint_space_${currentSpaceId}`);
+            const raw = localStorage.getItem(`blueprint_space_${spaceId}`);
             if (raw) {
-                syncWorkspaceProjectFromSpace(currentSpaceId, JSON.parse(raw), activeProjectId);
+                syncWorkspaceProjectFromSpace(spaceId, JSON.parse(raw), projectId);
             }
         } catch {
             // Ignore invalid local snapshots when assigning a project.
         }
-    };
+    }, [spaces]);
 
     const searchedSpaces = useMemo(() => (
         spaces.filter((space) => (
@@ -305,29 +320,52 @@ export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
     ), [unpinnedSpaces, workspaceMeta.spaces]);
 
     const selectedProject = workspaceMeta.projects.find((project) => project.id === activeProjectId) || null;
-    const canAttachCurrentSpace = Boolean(
-        currentSpaceId
-        && activeProjectId
-        && workspaceMeta.spaces[currentSpaceId]?.projectId !== activeProjectId,
-    );
 
     const getProjectNameForSpace = useCallback((spaceId) => {
         const projectId = workspaceMeta.spaces[spaceId]?.projectId;
         return workspaceMeta.projects.find((project) => project.id === projectId)?.name || '';
     }, [workspaceMeta.projects, workspaceMeta.spaces]);
 
-    const handleProjectFolderClick = (projectId) => {
+    const handleProjectFolderClick = useCallback((projectId) => {
         setSelectedProjectId(projectId);
         if (!currentSpaceId) {
             setDraftProjectId(projectId);
         }
         setExpandedProjectIds((current) => ({
             ...current,
-                [projectId]: activeProjectId === projectId
+            [projectId]: activeProjectId === projectId
                 ? !(current[projectId] ?? true)
                 : true,
         }));
-    };
+    }, [activeProjectId, currentSpaceId]);
+
+    const handleSpaceDragStart = useCallback((event, spaceId) => {
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('text/plain', spaceId);
+        setDraggedSpaceId(spaceId);
+    }, []);
+
+    const handleSpaceDragEnd = useCallback(() => {
+        setDraggedSpaceId(null);
+        setDragOverProjectId(null);
+    }, []);
+
+    const handleProjectDragOver = useCallback((event, projectId) => {
+        if (!draggedSpaceId) return;
+        if (workspaceMeta.spaces[draggedSpaceId]?.projectId) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'move';
+        setDragOverProjectId(projectId);
+    }, [draggedSpaceId, workspaceMeta.spaces]);
+
+    const handleProjectDrop = useCallback((event, projectId) => {
+        const droppedSpaceId = event.dataTransfer.getData('text/plain') || draggedSpaceId;
+        event.preventDefault();
+        setDragOverProjectId(null);
+        setDraggedSpaceId(null);
+        if (!droppedSpaceId || workspaceMeta.spaces[droppedSpaceId]?.projectId) return;
+        handleAssignSpaceToProject(droppedSpaceId, projectId);
+    }, [draggedSpaceId, handleAssignSpaceToProject, workspaceMeta.spaces]);
 
     return (
         <>
@@ -356,7 +394,7 @@ export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
             }}
             >
                 <div style={{ padding: '0.7rem 0.8rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--panel-border)', minWidth: '260px' }}>
-                    <span style={{ fontWeight: 500, fontSize: '0.88rem' }}>ワークスペース</span>
+                    <span style={{ fontWeight: 500, fontSize: '0.88rem' }}>{t('sidebar.title')}</span>
                     <button className="btn-icon" onClick={onClose} style={{ width: '26px', height: '26px' }}><X size={14} /></button>
                 </div>
 
@@ -454,7 +492,7 @@ export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
                             type="text"
                             value={searchQuery}
                             onChange={(event) => setSearchQuery(event.target.value)}
-                            placeholder="スペースを検索"
+                            placeholder={t('sidebar.search')}
                             style={{ flex: 1, background: 'transparent', border: 'none', color: 'var(--text-main)', padding: '0.42rem 0.45rem', fontSize: '0.78rem', outline: 'none', fontFamily: 'inherit' }}
                         />
                     </div>
@@ -468,45 +506,32 @@ export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
                         )}
                     </div>
 
-                    <button
-                        type="button"
-                        onClick={() => {
-                            setSelectedProjectId(null);
-                            setDraftProjectId(null);
-                        }}
-                        style={{
-                            width: '100%',
-                            marginBottom: '0.3rem',
-                            padding: '0.46rem 0.55rem',
-                            borderRadius: '8px',
-                            border: '1px solid var(--panel-border)',
-                            background: !activeProjectId ? 'rgba(108, 140, 255, 0.12)' : 'rgba(255,255,255,0.03)',
-                            color: !activeProjectId ? '#dbe5ff' : 'var(--text-main)',
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '0.45rem',
-                            fontSize: '0.76rem',
-                            fontFamily: 'inherit',
-                        }}
-                    >
-                        <FolderOpen size={13} />
-                        すべてのスペース
-                    </button>
-
                     {visibleProjects.map((project) => {
                         const isSelected = activeProjectId === project.id;
                         const isExpanded = expandedProjectIds[project.id] ?? isSelected;
                         const projectSpaces = projectSpacesById[project.id] || [];
+                        const isDropTarget = dragOverProjectId === project.id;
 
                         return (
                             <div
                                 key={project.id}
+                                onDragOver={(event) => handleProjectDragOver(event, project.id)}
+                                onDragLeave={() => {
+                                    if (dragOverProjectId === project.id) {
+                                        setDragOverProjectId(null);
+                                    }
+                                }}
+                                onDrop={(event) => handleProjectDrop(event, project.id)}
                                 style={{
                                     marginBottom: '0.3rem',
                                     borderRadius: '8px',
-                                    border: '1px solid var(--panel-border)',
-                                    background: isSelected ? 'rgba(108, 140, 255, 0.12)' : 'rgba(255,255,255,0.03)',
+                                    border: isDropTarget ? '1px solid rgba(108, 140, 255, 0.45)' : '1px solid var(--panel-border)',
+                                    background: isDropTarget
+                                        ? 'rgba(108, 140, 255, 0.16)'
+                                        : isSelected
+                                            ? 'rgba(108, 140, 255, 0.12)'
+                                            : 'rgba(255,255,255,0.03)',
+                                    boxShadow: isDropTarget ? '0 0 0 1px rgba(108, 140, 255, 0.12)' : 'none',
                                 }}
                             >
                                 <button
@@ -539,7 +564,7 @@ export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
                                     <div style={{ padding: '0 0.2rem 0.3rem', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
                                         {projectSpaces.length === 0 ? (
                                             <p style={{ padding: '0.65rem 0.6rem 0.2rem', margin: 0, color: 'var(--text-muted)', fontSize: '0.74rem' }}>
-                                                このプロジェクトのスペースはまだありません
+                                                このプロジェクトにはまだスペースがありません
                                             </p>
                                         ) : (
                                             projectSpaces.map((space) => (
@@ -559,26 +584,10 @@ export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
                                                 />
                                             ))
                                         )}
-
-                                        {canAttachCurrentSpace && activeProjectId === project.id && (
-                                            <button
-                                                type="button"
-                                                onClick={handleAssignCurrentSpaceToProject}
-                                                style={{
-                                                    width: '100%',
-                                                    marginTop: '0.2rem',
-                                                    padding: '0.45rem 0.55rem',
-                                                    borderRadius: '8px',
-                                                    border: '1px dashed rgba(108, 140, 255, 0.24)',
-                                                    background: 'rgba(108, 140, 255, 0.08)',
-                                                    color: '#dbe5ff',
-                                                    cursor: 'pointer',
-                                                    fontSize: '0.74rem',
-                                                    fontFamily: 'inherit',
-                                                }}
-                                            >
-                                                現在のスペースをこのプロジェクトに追加
-                                            </button>
+                                        {isDropTarget && (
+                                            <div style={{ padding: '0.4rem 0.55rem 0.15rem', color: '#dbe5ff', fontSize: '0.72rem' }}>
+                                                未分類のスペースをここに移動
+                                            </div>
                                         )}
                                     </div>
                                 )}
@@ -604,12 +613,16 @@ export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
                                             currentSpaceId={currentSpaceId}
                                             projectName={getProjectNameForSpace(space.id)}
                                             isPinned
+                                            draggable={!workspaceMeta.spaces[space.id]?.projectId}
+                                            isDragging={draggedSpaceId === space.id}
                                             onOpen={(spaceId) => {
                                                 navigate(getSpacePath(spaceId, currentMode));
                                                 onClose();
                                             }}
                                             onPin={() => togglePinnedSpace(space.id)}
                                             onDelete={handleDeleteSpace}
+                                            onDragStart={handleSpaceDragStart}
+                                            onDragEnd={handleSpaceDragEnd}
                                         />
                                     ))}
                                 </div>
@@ -617,7 +630,7 @@ export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
 
                             <div>
                                 <div style={{ padding: '0 0.45rem 0.35rem', fontSize: '0.72rem', color: 'var(--text-muted)', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
-                                    {selectedProject ? '未分類のスペース' : 'Spaces'}
+                                    未分類のスペース
                                 </div>
                                 {unassignedSpaces.length === 0 ? (
                                     <p style={{ padding: '0.8rem', color: 'var(--text-muted)', fontSize: '0.78rem', textAlign: 'center' }}>
@@ -629,14 +642,18 @@ export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
                                             key={space.id}
                                             space={space}
                                             currentSpaceId={currentSpaceId}
-                                            projectName={getProjectNameForSpace(space.id)}
+                                            projectName=""
                                             isPinned={Boolean(workspaceMeta.spaces[space.id]?.pinned)}
+                                            draggable
+                                            isDragging={draggedSpaceId === space.id}
                                             onOpen={(spaceId) => {
                                                 navigate(getSpacePath(spaceId, currentMode));
                                                 onClose();
                                             }}
                                             onPin={() => togglePinnedSpace(space.id)}
                                             onDelete={handleDeleteSpace}
+                                            onDragStart={handleSpaceDragStart}
+                                            onDragEnd={handleSpaceDragEnd}
                                         />
                                     ))
                                 )}
