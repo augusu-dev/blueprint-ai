@@ -48,6 +48,11 @@ const DEFAULT_NODE_HEIGHT = 150;
 const DEFAULT_GOAL_NODE_WIDTH = 380;
 const DEFAULT_GOAL_NODE_HEIGHT = 460;
 const GOAL_NODE_MARGIN = 72;
+const LOOP_MAX_NODES = 5;
+const LOOP_EDGE_PREFIX = 'e-loop-';
+const LOOP_COLUMN_OFFSET = 320;
+const LOOP_ROW_OFFSET = 250;
+const LOOP_STACK_SPACING = 190;
 
 function getNodeMeasure(node, key, fallback) {
     return Number(node?.measured?.[key] || node?.[key] || fallback);
@@ -110,6 +115,244 @@ function alignGoalNode(rawNodes, direction) {
             ? { ...node, position: nextPosition }
             : node
     ));
+}
+
+function stripLoopState(data = {}) {
+    if (!data) return {};
+
+    const nextData = { ...data };
+    delete nextData.isLooping;
+    delete nextData.loopNodeId;
+    delete nextData.loopOriginId;
+    delete nextData.loopRootId;
+    delete nextData.loopPrevId;
+    delete nextData.loopNextId;
+    delete nextData.loopGenerated;
+    return nextData;
+}
+
+function isLoopEdge(edge) {
+    return edge?.data?.edgeKind === 'loop'
+        || edge?.id?.startsWith(LOOP_EDGE_PREFIX)
+        || Boolean(edge?.data?.loopArc);
+}
+
+function getLoopChainFromNext(nodesById, rootId) {
+    const chain = [rootId];
+    const visited = new Set(chain);
+    let currentId = rootId;
+    let safety = nodesById.size + 1;
+
+    while (safety > 0) {
+        safety -= 1;
+        const nextId = nodesById.get(currentId)?.data?.loopNextId;
+        if (!nextId || nextId === rootId) break;
+        if (visited.has(nextId) || !nodesById.has(nextId)) break;
+
+        chain.push(nextId);
+        visited.add(nextId);
+        currentId = nextId;
+    }
+
+    return chain;
+}
+
+function getLegacyLoopChain(nodesById, rootId) {
+    const chain = [rootId];
+    const visited = new Set(chain);
+    let currentId = rootId;
+    let safety = nodesById.size + 1;
+
+    while (safety > 0) {
+        safety -= 1;
+        const nextId = nodesById.get(currentId)?.data?.loopNodeId;
+        if (!nextId || visited.has(nextId) || !nodesById.has(nextId)) break;
+
+        chain.push(nextId);
+        visited.add(nextId);
+        currentId = nextId;
+    }
+
+    return chain;
+}
+
+function extractLoopGroups(rawNodes) {
+    const nodesById = new Map(rawNodes.map((node) => [node.id, node]));
+    const rootIds = [];
+
+    rawNodes.forEach((node) => {
+        const data = node?.data || {};
+        if (data.loopRootId && data.loopRootId === node.id) {
+            rootIds.push(node.id);
+            return;
+        }
+
+        if (data.loopNextId && (!data.loopRootId || data.loopRootId === node.id)) {
+            rootIds.push(data.loopRootId || node.id);
+            return;
+        }
+
+        if (data.loopNodeId && !data.loopOriginId) {
+            rootIds.push(node.id);
+        }
+    });
+
+    const groups = [];
+    const assignedIds = new Set();
+
+    [...new Set(rootIds)].forEach((rootId) => {
+        if (!nodesById.has(rootId) || assignedIds.has(rootId)) return;
+
+        const rootNode = nodesById.get(rootId);
+        const chain = rootNode?.data?.loopNextId
+            ? getLoopChainFromNext(nodesById, rootId)
+            : getLegacyLoopChain(nodesById, rootId);
+
+        if (chain.length < 2) return;
+
+        chain.forEach((id) => assignedIds.add(id));
+        groups.push(chain);
+    });
+
+    return groups;
+}
+
+function getLoopLayoutPositions(nodesById, chainIds, direction) {
+    const positions = new Map();
+    const rootNode = nodesById.get(chainIds[0]);
+    if (!rootNode) return positions;
+
+    const generatedIds = chainIds.slice(1);
+    if (generatedIds.length === 0) return positions;
+
+    if (direction === 'TB') {
+        const totalWidth = (generatedIds.length - 1) * LOOP_STACK_SPACING;
+        const startX = rootNode.position.x - (totalWidth / 2);
+        const y = rootNode.position.y + LOOP_ROW_OFFSET;
+
+        generatedIds.forEach((nodeId, index) => {
+            positions.set(nodeId, {
+                x: Math.round(startX + (index * LOOP_STACK_SPACING)),
+                y: Math.round(y),
+            });
+        });
+
+        return positions;
+    }
+
+    const totalHeight = (generatedIds.length - 1) * LOOP_STACK_SPACING;
+    const startY = rootNode.position.y - (totalHeight / 2);
+    const x = rootNode.position.x + LOOP_COLUMN_OFFSET;
+
+    generatedIds.forEach((nodeId, index) => {
+        positions.set(nodeId, {
+            x: Math.round(x),
+            y: Math.round(startY + (index * LOOP_STACK_SPACING)),
+        });
+    });
+
+    return positions;
+}
+
+function applyLoopGroups(rawNodes, groups, direction) {
+    const nodeMap = new Map(
+        rawNodes.map((node) => [
+            node.id,
+            {
+                ...node,
+                data: stripLoopState(node.data),
+            },
+        ]),
+    );
+
+    groups.forEach((rawChain) => {
+        const chain = rawChain.filter((nodeId) => nodeMap.has(nodeId));
+        if (chain.length < 2) return;
+
+        const positions = getLoopLayoutPositions(nodeMap, chain, direction);
+        const rootId = chain[0];
+
+        chain.forEach((nodeId, index) => {
+            const node = nodeMap.get(nodeId);
+            if (!node) return;
+
+            const nextId = chain[(index + 1) % chain.length];
+            const prevId = chain[(index - 1 + chain.length) % chain.length];
+            const nextPosition = index === 0
+                ? node.position
+                : (positions.get(nodeId) || node.position);
+
+            nodeMap.set(nodeId, {
+                ...node,
+                position: nextPosition,
+                data: {
+                    ...node.data,
+                    loopRootId: rootId,
+                    loopPrevId: prevId,
+                    loopNextId: nextId,
+                    loopGenerated: index > 0,
+                    isLooping: index < chain.length - 1,
+                },
+            });
+        });
+    });
+
+    return rawNodes
+        .filter((node) => nodeMap.has(node.id))
+        .map((node) => nodeMap.get(node.id));
+}
+
+function createLoopEdge(sourceId, targetId, rootId, direction, role, index, count) {
+    return {
+        id: `${LOOP_EDGE_PREFIX}${rootId}-${sourceId}-${targetId}`,
+        source: sourceId,
+        target: targetId,
+        type: 'deleteEdge',
+        style: {
+            stroke: role === 'chain' ? 'rgba(245, 158, 11, 0.92)' : 'rgba(251, 191, 36, 0.94)',
+            strokeWidth: role === 'chain' ? 2.8 : 3,
+        },
+        data: {
+            edgeKind: 'loop',
+            loopEdgeRole: role,
+            loopEdgeIndex: index,
+            loopNodeCount: count,
+            loopDirection: direction,
+            loopGroupId: rootId,
+        },
+    };
+}
+
+function rebuildLoopEdges(rawNodes, rawEdges, direction) {
+    const baseEdges = rawEdges.filter((edge) => !isLoopEdge(edge));
+    const groups = extractLoopGroups(rawNodes);
+    const loopEdges = groups.flatMap((chain) => {
+        if (chain.length < 2) return [];
+
+        return chain.map((sourceId, index) => {
+            const targetId = chain[(index + 1) % chain.length];
+            const role = index === 0
+                ? 'entry'
+                : (index === chain.length - 1 ? 'close' : 'chain');
+
+            return createLoopEdge(sourceId, targetId, chain[0], direction, role, index, chain.length);
+        });
+    });
+
+    return [...baseEdges, ...loopEdges];
+}
+
+function prepareLoopGraph(rawNodes, rawEdges, direction) {
+    const groups = extractLoopGroups(rawNodes);
+    const nodes = applyLoopGroups(rawNodes, groups, direction);
+    const edges = rebuildLoopEdges(nodes, rawEdges, direction);
+    return { nodes, edges, groups };
+}
+
+function prepareLoopGraphFromGroups(rawNodes, rawEdges, groups, direction) {
+    const nodes = applyLoopGroups(rawNodes, groups, direction);
+    const edges = rebuildLoopEdges(nodes, rawEdges, direction);
+    return { nodes, edges };
 }
 
 function EditorContent() {
@@ -208,11 +451,16 @@ function EditorContent() {
         const draftEdges = Array.isArray(draftProject?.sharedSnapshot?.edges) && draftProject.sharedSnapshot.edges.length > 0
             ? draftProject.sharedSnapshot.edges
             : createInitialEdges();
+        const preparedDraftGraph = prepareLoopGraph(
+            applyProjectGoalToNodes(draftNodes, draftProject),
+            draftEdges,
+            direction,
+        );
 
         setIsHydrated(false);
         setSpaceTitle(t('editor.untitled'));
-        setNodes(alignGoalNode(applyProjectGoalToNodes(draftNodes, draftProject), direction));
-        setEdges(draftEdges);
+        setNodes(alignGoalNode(preparedDraftGraph.nodes, direction));
+        setEdges(preparedDraftGraph.edges);
         setMapState(createDefaultMapState());
         setActiveChatNodeId('1');
         setDraftMode(DEFAULT_SPACE_MODE);
@@ -281,19 +529,19 @@ function EditorContent() {
             const localEdges = Array.isArray(data.edges) && data.edges.length > 0 ? data.edges : null;
             const resolvedNodes = localNodes || projectNodes || createInitialNodes();
             const resolvedEdges = localEdges || projectEdges || createInitialEdges();
+            const preparedGraph = prepareLoopGraph(
+                applyProjectGoalToNodes(
+                    resolvedNodes,
+                    projectForSpace,
+                ),
+                resolvedEdges,
+                direction,
+            );
 
             setSpaceTitle(data.title || t('editor.untitled'));
             setMapState(normalizeMapState(data.map_state));
-            setNodes(
-                alignGoalNode(
-                    applyProjectGoalToNodes(
-                        resolvedNodes,
-                        projectForSpace,
-                    ),
-                    direction,
-                ),
-            );
-            setEdges(resolvedEdges);
+            setNodes(alignGoalNode(preparedGraph.nodes, direction));
+            setEdges(preparedGraph.edges);
             if (data.viewport && Object.keys(data.viewport).length > 0) {
                 setViewport({ x: data.viewport.x, y: data.viewport.y, zoom: data.viewport.zoom });
             }
@@ -376,7 +624,8 @@ function EditorContent() {
                 numBranches: n.data.numBranches, loopMode: n.data.loopMode,
                 selectedApiKey: n.data.selectedApiKey, branchCount: n.data.branchCount,
                 goalHistory: n.data.goalHistory, isLooping: n.data.isLooping,
-                loopNodeId: n.data.loopNodeId, loopOriginId: n.data.loopOriginId,
+                loopRootId: n.data.loopRootId, loopPrevId: n.data.loopPrevId,
+                loopNextId: n.data.loopNextId, loopGenerated: n.data.loopGenerated,
                 goalInteractiveStates: n.data.goalInteractiveStates,
                 goalSelectedOptions: n.data.goalSelectedOptions,
             } : {}
@@ -403,16 +652,18 @@ function EditorContent() {
         const sharedEdges = Array.isArray(project?.sharedSnapshot?.edges) && project.sharedSnapshot.edges.length > 0
             ? project.sharedSnapshot.edges
             : null;
-        const snapshotNodes = Array.isArray(snapshot.nodes) && snapshot.nodes.length > 0
-            ? cleanNodesForSave(snapshot.nodes)
+        const snapshotGraph = Array.isArray(snapshot.nodes) && snapshot.nodes.length > 0
+            ? prepareLoopGraph(snapshot.nodes, Array.isArray(snapshot.edges) ? snapshot.edges : [], direction)
             : null;
-        const snapshotEdges = Array.isArray(snapshot.edges) && snapshot.edges.length > 0
-            ? snapshot.edges
+        const sharedGraph = sharedNodes
+            ? prepareLoopGraph(sharedNodes, sharedEdges || [], direction)
             : null;
+        const snapshotNodes = snapshotGraph ? cleanNodesForSave(snapshotGraph.nodes) : null;
+        const snapshotEdges = snapshotGraph?.edges || null;
         const updates = {
             title: snapshot.title || t('editor.untitled'),
-            nodes: snapshotNodes || sharedNodes || cleanNodesForSave(createInitialNodes()),
-            edges: snapshotEdges || sharedEdges || createInitialEdges(),
+            nodes: snapshotNodes || (sharedGraph ? cleanNodesForSave(sharedGraph.nodes) : null) || cleanNodesForSave(createInitialNodes()),
+            edges: snapshotEdges || sharedGraph?.edges || createInitialEdges(),
             map_state: snapshot.mapState,
             project_id: snapshot.projectId || null,
             updated_at: new Date().toISOString(),
@@ -461,7 +712,7 @@ function EditorContent() {
         syncWorkspaceProjectFromSpace(newId, updates, snapshot.projectId || null);
         window.dispatchEvent(new CustomEvent('spaceTitleUpdated'));
         return newId;
-    }, [t]);
+    }, [direction, supabase, t]);
 
     const markDraftDirty = useCallback(() => {
         if (isDraft) {
@@ -485,11 +736,12 @@ function EditorContent() {
 
     const persistCurrentSpace = useCallback(async (titleOverride = spaceTitle) => {
         if (!spaceId || nodes.length === 0 || !isHydrated) return;
+        const preparedGraph = prepareLoopGraph(nodes, edges, direction);
 
         const updates = {
             title: titleOverride,
-            nodes: cleanNodesForSave(nodes),
-            edges,
+            nodes: cleanNodesForSave(preparedGraph.nodes),
+            edges: preparedGraph.edges,
             map_state: mapState,
             project_id: currentProjectId,
             updated_at: new Date().toISOString(),
@@ -504,7 +756,7 @@ function EditorContent() {
             updated_at: updates.updated_at,
         });
         syncWorkspaceProjectFromSpace(spaceId, updates, currentProjectId);
-    }, [currentProjectId, edges, isHydrated, mapState, nodes, spaceId, spaceTitle, updateRemoteSpace]);
+    }, [currentProjectId, direction, edges, isHydrated, mapState, nodes, spaceId, spaceTitle, updateRemoteSpace]);
 
     const saveTitle = async () => {
         const cleanedTitle = tempTitle.trim() || t('editor.untitled');
@@ -545,10 +797,17 @@ function EditorContent() {
 
     const onNodesChange = useCallback((changes) => {
         baseOnNodesChange(changes);
+        if (changes.some((change) => change.type === 'position')) {
+            setNodes((currentNodes) => {
+                const preparedGraph = prepareLoopGraph(currentNodes, edges, direction);
+                setEdges(preparedGraph.edges);
+                return alignGoalNode(preparedGraph.nodes, direction);
+            });
+        }
         if (changes.some((change) => change.type !== 'select')) {
             markDraftDirty();
         }
-    }, [baseOnNodesChange, markDraftDirty]);
+    }, [baseOnNodesChange, direction, edges, markDraftDirty, setEdges, setNodes]);
 
     const onEdgesChange = useCallback((changes) => {
         baseOnEdgesChange(changes);
@@ -560,6 +819,14 @@ function EditorContent() {
     useEffect(() => {
         setNodes((currentNodes) => alignGoalNode(currentNodes, direction));
     }, [direction, nodes, setNodes]);
+
+    useEffect(() => {
+        setNodes((currentNodes) => {
+            const preparedGraph = prepareLoopGraph(currentNodes, edges, direction);
+            setEdges(preparedGraph.edges);
+            return alignGoalNode(preparedGraph.nodes, direction);
+        });
+    }, [direction, setEdges, setNodes]);
 
     const updateMapState = useCallback((nextMapState) => {
         setMapState((current) => normalizeMapState(typeof nextMapState === 'function' ? nextMapState(current) : nextMapState));
@@ -581,85 +848,81 @@ function EditorContent() {
             const sourceNode = nds.find((node) => node.id === sourceId);
             if (!sourceNode) return nds;
 
-            const existingLoopNodeId = sourceNode.data?.loopNodeId || null;
-            if (existingLoopNodeId) {
-                setEdges((eds) => eds.filter((edge) => (
-                    edge.source !== existingLoopNodeId
-                    && edge.target !== existingLoopNodeId
-                    && edge.id !== `e-loop-forward-${sourceId}-${existingLoopNodeId}`
-                    && edge.id !== `e-loop-return-${existingLoopNodeId}-${sourceId}`
-                )));
+            const groups = extractLoopGroups(nds).map((group) => [...group]);
+            const groupIndex = groups.findIndex((group) => group.includes(sourceId));
+            let nextNodes = nds;
+            let removedNodeId = null;
 
-                return nds
-                    .filter((node) => node.id !== existingLoopNodeId)
-                    .map((node) => (
-                        node.id === sourceId
-                            ? { ...node, data: { ...node.data, isLooping: false, loopNodeId: null } }
-                            : node
-                    ));
+            if (groupIndex === -1) {
+                const newLoopNodeId = `loop-${crypto.randomUUID()}`;
+                const loopNode = {
+                    id: newLoopNodeId,
+                    type: 'loopNode',
+                    position: { ...sourceNode.position },
+                    data: {
+                        dir: direction,
+                        prompt: '',
+                        loopMode: sourceNode.data?.loopMode || 'perspective',
+                        systemPrompt: sourceNode.data?.systemPrompt || '',
+                        selectedApiKey: sourceNode.data?.selectedApiKey || 0,
+                    },
+                };
+
+                nextNodes = [...nds, loopNode];
+                groups.push([sourceId, newLoopNodeId]);
+            } else {
+                const chain = groups[groupIndex];
+                const sourceIndex = chain.indexOf(sourceId);
+                const isLastNodeInRing = sourceIndex === chain.length - 1;
+
+                if (isLastNodeInRing) {
+                    if (chain.length >= LOOP_MAX_NODES) {
+                        return nds;
+                    }
+
+                    const newLoopNodeId = `loop-${crypto.randomUUID()}`;
+                    const loopNode = {
+                        id: newLoopNodeId,
+                        type: 'loopNode',
+                        position: { ...sourceNode.position },
+                        data: {
+                            dir: direction,
+                            prompt: '',
+                            loopMode: sourceNode.data?.loopMode || 'perspective',
+                            systemPrompt: sourceNode.data?.systemPrompt || '',
+                            selectedApiKey: sourceNode.data?.selectedApiKey || 0,
+                        },
+                    };
+
+                    nextNodes = [...nds, loopNode];
+                    chain.splice(sourceIndex + 1, 0, newLoopNodeId);
+                } else {
+                    removedNodeId = chain[sourceIndex + 1];
+                    chain.splice(sourceIndex + 1, 1);
+                    nextNodes = nds.filter((node) => node.id !== removedNodeId);
+
+                    if (chain.length < 2) {
+                        groups.splice(groupIndex, 1);
+                    }
+                }
             }
 
-            const newLoopNodeId = `loop-${crypto.randomUUID()}`;
-            const offset = direction === 'LR'
-                ? { x: 260, y: -220 }
-                : { x: 260, y: 220 };
-            const loopNode = {
-                id: newLoopNodeId,
-                type: 'loopNode',
-                position: {
-                    x: sourceNode.position.x + offset.x,
-                    y: sourceNode.position.y + offset.y,
-                },
-                data: {
-                    dir: direction,
-                    prompt: '',
-                    systemPrompt: sourceNode.data?.systemPrompt || '',
-                    selectedApiKey: sourceNode.data?.selectedApiKey || 0,
-                    loopOriginId: sourceId,
-                },
-            };
+            const preparedGraph = prepareLoopGraphFromGroups(nextNodes, edges, groups, direction);
+            setEdges((eds) => {
+                const filteredEdges = removedNodeId
+                    ? eds.filter((edge) => edge.source !== removedNodeId && edge.target !== removedNodeId)
+                    : eds;
+                return rebuildLoopEdges(preparedGraph.nodes, filteredEdges, direction);
+            });
 
-            setEdges((eds) => ([
-                ...eds,
-                {
-                    id: `e-loop-forward-${sourceId}-${newLoopNodeId}`,
-                    source: sourceId,
-                    target: newLoopNodeId,
-                    sourceHandle: 'loop-forward-source',
-                    targetHandle: 'loop-forward-target',
-                    type: 'deleteEdge',
-                    style: {
-                        stroke: 'rgba(251, 191, 36, 0.92)',
-                        strokeWidth: 2.4,
-                    },
-                    data: { loopArc: 'forward', loopDirection: direction },
-                },
-                {
-                    id: `e-loop-return-${newLoopNodeId}-${sourceId}`,
-                    source: newLoopNodeId,
-                    target: sourceId,
-                    sourceHandle: 'loop-return-source',
-                    targetHandle: 'loop-return-target',
-                    type: 'deleteEdge',
-                    style: {
-                        stroke: 'rgba(251, 191, 36, 0.82)',
-                        strokeWidth: 2.2,
-                    },
-                    data: { loopArc: 'return', loopDirection: direction },
-                },
-            ]));
+            if (removedNodeId && activeChatNodeId === removedNodeId) {
+                setActiveChatNodeId(sourceId);
+            }
 
-            return [
-                ...nds.map((node) => (
-                    node.id === sourceId
-                        ? { ...node, data: { ...node.data, isLooping: true, loopNodeId: newLoopNodeId } }
-                        : node
-                )),
-                loopNode,
-            ];
+            return preparedGraph.nodes;
         });
         markDraftDirty();
-    }, [direction, markDraftDirty, setEdges, setNodes]);
+    }, [activeChatNodeId, direction, edges, markDraftDirty, setEdges, setNodes]);
 
     const onQuickAdd = useCallback((sourceId, type) => {
         const outgoingEdges = edges.filter(e => e.source === sourceId);
@@ -716,29 +979,46 @@ function EditorContent() {
 
     const onDeleteNode = useCallback((nodeId) => {
         setNodes((nds) => {
-            const autoLoopChildren = nds
-                .filter((node) => node.data?.loopOriginId === nodeId)
-                .map((node) => node.id);
-            const sourceNode = nds.find((node) => node.id === nodeId) || null;
-            const loopNodeId = sourceNode?.data?.loopNodeId || null;
-            const removedNodeIds = new Set([nodeId, ...autoLoopChildren, ...(loopNodeId ? [loopNodeId] : [])]);
+            const groups = extractLoopGroups(nds).map((group) => [...group]);
+            const groupIndex = groups.findIndex((group) => group.includes(nodeId));
+            const removedNodeIds = new Set([nodeId]);
+            let nextNodes = nds;
 
-            setEdges((eds) => eds.filter((edge) => !removedNodeIds.has(edge.source) && !removedNodeIds.has(edge.target)));
+            if (groupIndex !== -1) {
+                const chain = groups[groupIndex];
+                const nodeIndex = chain.indexOf(nodeId);
 
-            if (activeChatNodeId === nodeId || (loopNodeId && activeChatNodeId === loopNodeId)) {
+                if (nodeIndex === 0) {
+                    chain.forEach((id) => removedNodeIds.add(id));
+                    nextNodes = nds.filter((node) => !removedNodeIds.has(node.id));
+                    groups.splice(groupIndex, 1);
+                } else {
+                    chain.splice(nodeIndex, 1);
+                    nextNodes = nds.filter((node) => node.id !== nodeId);
+
+                    if (chain.length < 2) {
+                        groups.splice(groupIndex, 1);
+                    }
+                }
+            } else {
+                nextNodes = nds.filter((node) => node.id !== nodeId);
+            }
+
+            const preparedGraph = prepareLoopGraphFromGroups(nextNodes, edges, groups, direction);
+            setEdges((eds) => rebuildLoopEdges(
+                preparedGraph.nodes,
+                eds.filter((edge) => !removedNodeIds.has(edge.source) && !removedNodeIds.has(edge.target)),
+                direction,
+            ));
+
+            if (removedNodeIds.has(activeChatNodeId)) {
                 setActiveChatNodeId('1');
             }
 
-            return nds
-                .filter((node) => !removedNodeIds.has(node.id))
-                .map((node) => (
-                    node.data?.loopNodeId === nodeId
-                        ? { ...node, data: { ...node.data, isLooping: false, loopNodeId: null } }
-                        : node
-                ));
+            return preparedGraph.nodes;
         });
         markDraftDirty();
-    }, [setNodes, setEdges, activeChatNodeId, markDraftDirty]);
+    }, [activeChatNodeId, direction, edges, markDraftDirty, setEdges, setNodes]);
 
     const onConnect = useCallback((params) => {
         // Prevent self-loops
@@ -763,6 +1043,7 @@ function EditorContent() {
 
     const onDeleteEdge = useCallback((edgeId) => {
         const edgeToDelete = edges.find((edge) => edge.id === edgeId);
+        if (edgeToDelete?.data?.edgeKind === 'loop') return;
         setEdges(eds => eds.filter(e => e.id !== edgeId));
         window.requestAnimationFrame(() => {
             if (edgeToDelete?.source) updateNodeInternals(edgeToDelete.source);

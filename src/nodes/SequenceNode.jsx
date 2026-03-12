@@ -11,33 +11,14 @@ export default function SequenceNode({ data, id }) {
     const isLR = data.dir === 'LR';
     const sourcePos = isLR ? Position.Right : Position.Bottom;
     const targetPos = isLR ? Position.Left : Position.Top;
-    const showLoopHandles = Boolean(data.isLooping || data.loopNodeId || data.loopOriginId);
 
     useEffect(() => {
         try { updateNodeInternals(id); } catch (e) { }
-    }, [id, isLR, showLoopHandles, updateNodeInternals]);
+    }, [id, isLR, updateNodeInternals]);
 
     return (
         <div className="custom-node node-sequence">
             <Handle type="target" position={targetPos} className="custom-handle" />
-            {showLoopHandles && (
-                <>
-                    <Handle
-                        type="target"
-                        id="loop-return-target"
-                        position={isLR ? Position.Left : Position.Top}
-                        className="custom-handle"
-                        style={isLR ? { top: '50%' } : { left: '24%' }}
-                    />
-                    <Handle
-                        type="source"
-                        id="loop-forward-source"
-                        position={isLR ? Position.Right : Position.Bottom}
-                        className="custom-handle"
-                        style={isLR ? { top: '24%' } : { left: '76%' }}
-                    />
-                </>
-            )}
 
             <div className="node-header" style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>

@@ -2,12 +2,23 @@ import React from 'react';
 import { BaseEdge, EdgeLabelRenderer, getBezierPath } from '@xyflow/react';
 import { X } from 'lucide-react';
 
-function getLoopArcPath({ sourceX, sourceY, targetX, targetY, loopArc, loopDirection }) {
+function getLoopArcPath({ sourceX, sourceY, targetX, targetY, loopDirection, loopEdgeRole }) {
     if (loopDirection === 'TB') {
-        const offset = Math.max(100, Math.abs(targetY - sourceY) * 0.45);
-        const controlX = loopArc === 'forward'
-            ? Math.max(sourceX, targetX) + offset
-            : Math.min(sourceX, targetX) - offset;
+        if (loopEdgeRole === 'chain') {
+            const offset = Math.max(110, Math.abs(targetY - sourceY) * 0.55);
+            const controlY = Math.max(sourceY, targetY) + offset;
+
+            return {
+                edgePath: `M ${sourceX} ${sourceY} C ${sourceX} ${controlY}, ${targetX} ${controlY}, ${targetX} ${targetY}`,
+                labelX: sourceX + ((targetX - sourceX) / 2),
+                labelY: controlY,
+            };
+        }
+
+        const offset = Math.max(120, Math.abs(targetX - sourceX) * 0.4);
+        const controlX = loopEdgeRole === 'entry'
+            ? Math.min(sourceX, targetX) - offset
+            : Math.max(sourceX, targetX) + offset;
 
         return {
             edgePath: `M ${sourceX} ${sourceY} C ${controlX} ${sourceY}, ${controlX} ${targetY}, ${targetX} ${targetY}`,
@@ -16,8 +27,19 @@ function getLoopArcPath({ sourceX, sourceY, targetX, targetY, loopArc, loopDirec
         };
     }
 
-    const offset = Math.max(90, Math.abs(targetX - sourceX) * 0.35);
-    const controlY = loopArc === 'forward'
+    if (loopEdgeRole === 'chain') {
+        const offset = Math.max(110, Math.abs(targetX - sourceX) * 0.55);
+        const controlX = Math.max(sourceX, targetX) + offset;
+
+        return {
+            edgePath: `M ${sourceX} ${sourceY} C ${controlX} ${sourceY}, ${controlX} ${targetY}, ${targetX} ${targetY}`,
+            labelX: controlX,
+            labelY: sourceY + ((targetY - sourceY) / 2),
+        };
+    }
+
+    const offset = Math.max(120, Math.abs(targetY - sourceY) * 0.4);
+    const controlY = loopEdgeRole === 'entry'
         ? Math.min(sourceY, targetY) - offset
         : Math.max(sourceY, targetY) + offset;
 
@@ -40,14 +62,15 @@ export default function DeleteEdge({
     markerEnd,
     data
 }) {
-    const { edgePath, labelX, labelY } = data?.loopArc
+    const isLoopEdge = data?.edgeKind === 'loop' || data?.loopArc;
+    const { edgePath, labelX, labelY } = isLoopEdge
         ? getLoopArcPath({
             sourceX,
             sourceY,
             targetX,
             targetY,
-            loopArc: data.loopArc,
             loopDirection: data.loopDirection,
+            loopEdgeRole: data.loopEdgeRole || (data.loopArc === 'forward' ? 'entry' : 'close'),
         })
         : (() => {
             const [defaultEdgePath, defaultLabelX, defaultLabelY] = getBezierPath({
@@ -65,45 +88,47 @@ export default function DeleteEdge({
     return (
         <>
             <BaseEdge path={edgePath} markerEnd={markerEnd} style={style} />
-            <EdgeLabelRenderer>
-                <div
-                    style={{
-                        position: 'absolute',
-                        transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
-                        fontSize: 12,
-                        pointerEvents: 'all',
-                        zIndex: 10,
-                    }}
-                    className="nodrag nopan"
-                >
-                    <button
-                        onClick={(event) => {
-                            event.stopPropagation();
-                            if (data && data.onDelete) data.onDelete(id);
-                        }}
+            {!isLoopEdge && (
+                <EdgeLabelRenderer>
+                    <div
                         style={{
-                            width: '20px',
-                            height: '20px',
-                            background: 'rgba(255, 100, 100, 0.9)',
-                            color: 'white',
-                            border: '1px solid rgba(255,255,255,0.2)',
-                            borderRadius: '50%',
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            boxShadow: '0 2px 5px rgba(0,0,0,0.3)',
-                            padding: 0,
-                            transition: 'all 0.2s'
+                            position: 'absolute',
+                            transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
+                            fontSize: 12,
+                            pointerEvents: 'all',
+                            zIndex: 10,
                         }}
-                        title="Delete connection"
-                        onMouseEnter={(e) => { e.currentTarget.style.transform = 'scale(1.2)'; }}
-                        onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
+                        className="nodrag nopan"
                     >
-                        <X size={12} />
-                    </button>
-                </div>
-            </EdgeLabelRenderer>
+                        <button
+                            onClick={(event) => {
+                                event.stopPropagation();
+                                if (data && data.onDelete) data.onDelete(id);
+                            }}
+                            style={{
+                                width: '20px',
+                                height: '20px',
+                                background: 'rgba(255, 100, 100, 0.9)',
+                                color: 'white',
+                                border: '1px solid rgba(255,255,255,0.2)',
+                                borderRadius: '50%',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                boxShadow: '0 2px 5px rgba(0,0,0,0.3)',
+                                padding: 0,
+                                transition: 'all 0.2s'
+                            }}
+                            title="Delete connection"
+                            onMouseEnter={(e) => { e.currentTarget.style.transform = 'scale(1.2)'; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
+                        >
+                            <X size={12} />
+                        </button>
+                    </div>
+                </EdgeLabelRenderer>
+            )}
         </>
     );
 }

@@ -706,11 +706,11 @@ export default function ChatView({
             const currentBranchCount = node.data?.branchCount || 0;
             onUpdateNodeData(node.id, 'branchCount', currentBranchCount + 1);
         } else if (activeVariant.pendingAction === 'TOGGLE_LOOP_ON') {
-            if (!node.data?.loopNodeId && node.data?.onToggleLoop) {
+            if (!node.data?.isLooping && node.data?.onToggleLoop) {
                 node.data.onToggleLoop(node.id);
             }
         } else if (activeVariant.pendingAction === 'TOGGLE_LOOP_OFF') {
-            if (node.data?.loopNodeId && node.data?.onToggleLoop) {
+            if (node.data?.isLooping && node.data?.onToggleLoop) {
                 node.data.onToggleLoop(node.id);
             }
         }
