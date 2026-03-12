@@ -1,114 +1,92 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, Send, CheckSquare, Square } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowLeft, CheckSquare, ListTodo, Send, Square } from 'lucide-react';
 import { useLanguage } from './i18n';
+import {
+    buildInteractiveResponseText,
+    collectInteractiveProgress,
+    hasInteractiveSelection,
+    parseInteractiveContent,
+} from './lib/interactiveContent';
 
-// Parse AI response for interactive elements
-function parseInteractiveContent(text) {
-    const parts = [];
-    const lines = text.split('\n');
-    let currentText = '';
-    let inOptions = false;
-    let optionGroup = { type: null, items: [], title: '' };
+const GOAL_SYSTEM_PROMPT = `あなたは Plan 設計アシスタントです。この Plan Space では、ユーザーの目標、計画、報酬設計、改善ポイントを対話形式で整理してください。
 
-    const flushText = () => {
-        if (currentText.trim()) {
-            parts.push({ type: 'text', content: currentText.trim() });
-            currentText = '';
-        }
-    };
+重要なルール:
+1. まず目標と期限・タイムラインを確認してください。期限があるなら日付、なければ期間の目安を聞いてください。
+2. 次に計画を、段階・今週やること・次に着手することに分けて具体化してください。
+3. 必要なら報酬設計として、小さな達成報酬や節目のごほうびを提案してください。
+4. 必要なら改善として、詰まりそうな点、やり方の改善、継続のコツを聞いて整理してください。
+5. 一度に確認するテーマは1つにしてください。ただし必要なら1メッセージ内に質問ブロックを2つまで出して構いません。
+6. 質問形式は次のどれかを使ってください。
+   - 複数選択: 案内文のあとに \`- [ ] 選択肢\` を各行に並べる
+   - 単一選択: 案内文のあとに \`1. 選択肢\` \`2. 選択肢\` の形式で並べる
+   - 自由入力: 質問文だけを書く
+7. 必要に応じて、使える時間帯、作業ペース、苦手分野、作業環境も聞いてください。
+8. 標準運用として、週2回の軽い進捗確認で計画を微調整する前提にしてください。
+9. 4〜8往復くらいで十分に整理できたら、先頭に [GOAL_COMPLETE] を付けて次の5行で簡潔にまとめてください。
+   この Plan の目標: ...
+   タイムライン: ...
+   計画メモ: ...
+   報酬設計: ...
+   改善メモ: ...
+10. 返答は日本語で、自然で押しつけがましくないトーンにしてください。`;
 
-    const flushOptions = () => {
-        if (optionGroup.items.length > 0) {
-            parts.push({ ...optionGroup });
-            optionGroup = { type: null, items: [], title: '' };
-            inOptions = false;
-        }
-    };
-
-    for (const line of lines) {
-        const trimmed = line.trim();
-        // Checkbox pattern: □ or ☐ or [ ] or - [ ]
-        const cbMatch = trimmed.match(/^[□☐\-\*]?\s*[\[（(]?\s*[\]）)]?\s*(.+)$/);
-        const isCheckbox = trimmed.startsWith('□') || trimmed.startsWith('☐') || trimmed.match(/^-\s*\[\s*\]/);
-        // Numbered option: 1. or A) etc
-        const numMatch = trimmed.match(/^([1-9A-D][.)\]）])\s*(.+)$/);
-
-        if (isCheckbox) {
-            if (!inOptions || optionGroup.type !== 'checkbox') {
-                flushText();
-                flushOptions();
-                inOptions = true;
-                optionGroup = { type: 'checkbox', items: [], title: '' };
-            }
-            const label = trimmed.replace(/^[□☐\-\*]\s*[\[（(]?\s*[\]）)]?\s*/, '').trim();
-            optionGroup.items.push({ label, checked: false, id: `cb-${Math.random().toString(36).substr(2, 5)}` });
-        } else if (numMatch && inOptions && optionGroup.type === 'select') {
-            optionGroup.items.push({ label: numMatch[2], value: numMatch[1], id: `sel-${Math.random().toString(36).substr(2, 5)}` });
-        } else if (numMatch && !inOptions) {
-            flushText();
-            inOptions = true;
-            optionGroup = { type: 'select', items: [{ label: numMatch[2], value: numMatch[1], id: `sel-${Math.random().toString(36).substr(2, 5)}` }], title: '' };
-        } else {
-            if (inOptions) {
-                // Check if this line looks like it could be followed by options
-                if (trimmed.includes('選んで') || trimmed.includes('select') || trimmed.includes('choose') || trimmed.includes('该当') || trimmed.includes('チェック')) {
-                    flushOptions();
-                    flushText();
-                    optionGroup.title = trimmed;
-                } else if (trimmed === '') {
-                    // empty line — might end the group
-                } else {
-                    flushOptions();
-                    currentText += line + '\n';
-                }
-            } else {
-                currentText += line + '\n';
-            }
-        }
-    }
-    flushText();
-    flushOptions();
-    return parts;
-}
-
-export default function GoalWizard({ onClose, apiKeys, selectedApiKey, onSetGoal, initialHistory, onSaveHistory }) {
+export default function GoalWizard({
+    onClose,
+    apiKeys,
+    selectedApiKey,
+    onSetGoal,
+    initialHistory,
+    onSaveHistory,
+    initialInteractiveStates,
+    initialSelectedOptions,
+    onSaveInteractiveStates,
+    onSaveSelectedOptions,
+}) {
     const { t } = useLanguage();
     const [messages, setMessages] = useState(initialHistory || []);
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
-    const [interactiveStates, setInteractiveStates] = useState({});
-    const [selectedOptions, setSelectedOptions] = useState({});
+    const [interactiveStates, setInteractiveStates] = useState(initialInteractiveStates || {});
+    const [selectedOptions, setSelectedOptions] = useState(initialSelectedOptions || {});
+    const [showProgressPanel, setShowProgressPanel] = useState(false);
     const messagesEndRef = useRef(null);
+    const savedInteractiveStatesRef = useRef(JSON.stringify(initialInteractiveStates || {}));
+    const savedSelectedOptionsRef = useRef(JSON.stringify(initialSelectedOptions || {}));
 
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [messages]);
+    }, [messages, isLoading]);
 
-    // Persist history on every change
     useEffect(() => {
         if (onSaveHistory && messages.length > 0) {
             onSaveHistory(messages);
         }
-    }, [messages]);
+    }, [messages, onSaveHistory]);
 
-    const GOAL_SYSTEM_PROMPT = `あなたはワークスペースの目標設定アシスタントです。ユーザーがこの作業の目的や目標を定義するのを対話形式でサポートしてください。
+    useEffect(() => {
+        const nextSerialized = JSON.stringify(interactiveStates);
+        if (nextSerialized === savedInteractiveStatesRef.current) return;
+        savedInteractiveStatesRef.current = nextSerialized;
+        if (onSaveInteractiveStates) {
+            onSaveInteractiveStates(interactiveStates);
+        }
+    }, [interactiveStates, onSaveInteractiveStates]);
 
-重要なルール:
-1. **一度に1つの質問だけ**を聞いてください。複数の質問を同時に出さないでください。
-2. ユーザーの回答を受けて、次の1つの質問を出してください
-3. 質問形式は以下をランダムに使ってください（一問一答で）:
-   - チェックボックス形式 (複数選択可): 該当するものを選んでくださいの後に、□で始まる選択肢を各行に
-   - 番号選択形式 (単一選択): 最適なものを選んでくださいの後に、1. 2. 3. 4. で始まる選択肢を各行に
-   - 自由回答: 具体的な質問文を書くだけ（選択肢なし）
-4. 4〜6往復の会話で切りの良いところでまとめてください
-5. まとめる時は「[GOAL_COMPLETE]」マーカーをつけて、「このチャットの目標:」から始まる簡潔なまとめを書いてください
-6. 対話は自然で温かみのあるトーンで`;
+    useEffect(() => {
+        const nextSerialized = JSON.stringify(selectedOptions);
+        if (nextSerialized === savedSelectedOptionsRef.current) return;
+        savedSelectedOptionsRef.current = nextSerialized;
+        if (onSaveSelectedOptions) {
+            onSaveSelectedOptions(selectedOptions);
+        }
+    }, [onSaveSelectedOptions, selectedOptions]);
 
     const callAI = async (history) => {
         const apiKeyObj = apiKeys?.[selectedApiKey || 0];
         const keyToUse = apiKeyObj?.key?.trim();
         const provider = apiKeyObj?.provider || 'openai';
         const userModel = apiKeyObj?.model;
+
         if (!keyToUse) return t('chat.noApiKey');
 
         try {
@@ -116,43 +94,90 @@ export default function GoalWizard({ onClose, apiKeys, selectedApiKey, onSetGoal
                 const modelToUse = userModel || 'gemini-3.1-pro-preview';
                 const contents = [
                     { role: 'user', parts: [{ text: GOAL_SYSTEM_PROMPT }] },
-                    { role: 'model', parts: [{ text: 'はい、目標設定をお手伝いします。' }] }
+                    { role: 'model', parts: [{ text: 'はい、Plan を一緒に整理します。' }] },
                 ];
-                history.forEach(m => contents.push({ role: m.role === 'user' ? 'user' : 'model', parts: [{ text: m.content }] }));
-                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelToUse}:generateContent?key=${keyToUse}`, {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ contents })
+
+                history.forEach((message) => {
+                    contents.push({
+                        role: message.role === 'user' ? 'user' : 'model',
+                        parts: [{ text: message.content }],
+                    });
                 });
+
+                const response = await fetch(
+                    `https://generativelanguage.googleapis.com/v1beta/models/${modelToUse}:generateContent?key=${keyToUse}`,
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ contents }),
+                    },
+                );
                 const data = await response.json();
                 if (!response.ok) throw new Error(data.error?.message || 'Gemini Error');
                 return data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response.';
-            } else if (provider === 'anthropic') {
+            }
+
+            if (provider === 'anthropic') {
                 const modelToUse = userModel || 'claude-sonnet-4-6';
-                const msgs = history.map(m => ({ role: m.role === 'ai' ? 'assistant' : 'user', content: m.content }));
+                const messagesForApi = history.map((message) => ({
+                    role: message.role === 'ai' ? 'assistant' : 'user',
+                    content: message.content,
+                }));
+
                 const response = await fetch('https://api.anthropic.com/v1/messages', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'x-api-key': keyToUse, 'anthropic-version': '2023-06-01', 'anthropic-dangerously-allow-browser': 'true' },
-                    body: JSON.stringify({ model: modelToUse, max_tokens: 2048, system: GOAL_SYSTEM_PROMPT, messages: msgs })
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'x-api-key': keyToUse,
+                        'anthropic-version': '2023-06-01',
+                        'anthropic-dangerously-allow-browser': 'true',
+                    },
+                    body: JSON.stringify({
+                        model: modelToUse,
+                        max_tokens: 2048,
+                        system: GOAL_SYSTEM_PROMPT,
+                        messages: messagesForApi,
+                    }),
                 });
                 const data = await response.json();
                 if (!response.ok) throw new Error(data.error?.message || 'Anthropic Error');
                 return data.content?.[0]?.text || 'No response.';
-            } else {
-                const modelToUse = userModel || (provider === 'openai' ? 'gpt-5.3-chat-latest' : provider === 'openrouter' ? 'google/gemini-3.1-pro-preview' : 'glm-4-plus');
-                const endpoint = provider === 'openrouter' ? 'https://openrouter.ai/api/v1/chat/completions' :
-                    provider === 'glm' ? 'https://open.bigmodel.cn/api/paas/v4/chat/completions' : 'https://api.openai.com/v1/chat/completions';
-                const msgs = [{ role: 'system', content: GOAL_SYSTEM_PROMPT }];
-                history.forEach(m => msgs.push({ role: m.role === 'ai' ? 'assistant' : 'user', content: m.content }));
-                const response = await fetch(endpoint, {
-                    method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${keyToUse}` },
-                    body: JSON.stringify({ model: modelToUse, messages: msgs })
-                });
-                const data = await response.json();
-                if (!response.ok) throw new Error(data.error?.message || 'LLM Error');
-                return data.choices?.[0]?.message?.content || 'No response.';
             }
-        } catch (err) {
-            return `Error: ${err.message}`;
+
+            const modelToUse = userModel || (
+                provider === 'openai'
+                    ? 'gpt-5.3-chat-latest'
+                    : provider === 'openrouter'
+                        ? 'google/gemini-3.1-pro-preview'
+                        : 'glm-4-plus'
+            );
+            const endpoint = provider === 'openrouter'
+                ? 'https://openrouter.ai/api/v1/chat/completions'
+                : provider === 'glm'
+                    ? 'https://open.bigmodel.cn/api/paas/v4/chat/completions'
+                    : 'https://api.openai.com/v1/chat/completions';
+            const messagesForApi = [{ role: 'system', content: GOAL_SYSTEM_PROMPT }];
+
+            history.forEach((message) => {
+                messagesForApi.push({
+                    role: message.role === 'ai' ? 'assistant' : 'user',
+                    content: message.content,
+                });
+            });
+
+            const response = await fetch(endpoint, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${keyToUse}`,
+                },
+                body: JSON.stringify({ model: modelToUse, messages: messagesForApi }),
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error?.message || 'LLM Error');
+            return data.choices?.[0]?.message?.content || 'No response.';
+        } catch (error) {
+            return `Error: ${error.message}`;
         }
     };
 
@@ -160,82 +185,102 @@ export default function GoalWizard({ onClose, apiKeys, selectedApiKey, onSetGoal
         const text = overrideText || input.trim();
         if (!text || isLoading) return;
 
-        const userMsg = { role: 'user', content: text };
-        const updatedHistory = [...messages, userMsg];
-        setMessages(updatedHistory);
-        if (!overrideText) setInput('');
-        setIsLoading(true);
+        const userMessage = { role: 'user', content: text };
+        const nextHistory = [...messages, userMessage];
+        setMessages(nextHistory);
 
-        const reply = await callAI(updatedHistory);
-        const aiMsg = { role: 'ai', content: reply };
-        const finalHistory = [...updatedHistory, aiMsg];
+        if (!overrideText) {
+            setInput('');
+        }
+
+        setIsLoading(true);
+        const reply = await callAI(nextHistory);
+        const aiMessage = { role: 'ai', content: reply };
+        const finalHistory = [...nextHistory, aiMessage];
         setMessages(finalHistory);
         setIsLoading(false);
 
         if (reply.includes('[GOAL_COMPLETE]')) {
-            const goalText = reply.replace('[GOAL_COMPLETE]', '').trim();
-            onSetGoal(goalText);
+            onSetGoal(reply.replace('[GOAL_COMPLETE]', '').trim());
         }
     };
 
-    const toggleCheckbox = (msgIdx, itemId) => {
-        setInteractiveStates(prev => {
-            const key = `${msgIdx}-${itemId}`;
-            return { ...prev, [key]: !prev[key] };
-        });
-    };
+    const progressItems = useMemo(
+        () => collectInteractiveProgress(messages, interactiveStates),
+        [interactiveStates, messages],
+    );
+    const completedProgressCount = progressItems.filter((item) => item.checked).length;
 
-    const selectOption = (msgIdx, itemId) => {
-        setSelectedOptions(prev => ({
-            ...prev,
-            [msgIdx]: itemId
+    const toggleCheckbox = (messageIndex, itemId) => {
+        setInteractiveStates((previous) => ({
+            ...previous,
+            [`${messageIndex}-${itemId}`]: !previous[`${messageIndex}-${itemId}`],
         }));
     };
 
-    const submitInteractive = (msgIdx, parsed) => {
-        // Build response from interactive selections
-        let responseText = '';
-        parsed.forEach(part => {
-            if (part.type === 'checkbox') {
-                const selected = part.items.filter(item => interactiveStates[`${msgIdx}-${item.id}`]);
-                if (selected.length > 0) responseText += selected.map(s => s.label).join('、') + '\n';
-            } else if (part.type === 'select') {
-                const selId = selectedOptions[msgIdx];
-                const sel = part.items.find(it => it.id === selId);
-                if (sel) responseText += sel.label + '\n';
-            }
-        });
-        if (responseText.trim()) handleSend(responseText.trim());
+    const selectOption = (messageIndex, itemId) => {
+        setSelectedOptions((previous) => ({
+            ...previous,
+            [messageIndex]: itemId,
+        }));
     };
 
-    const renderAIMessage = (content, msgIdx) => {
+    const submitInteractive = (messageIndex, parsed) => {
+        const responseText = buildInteractiveResponseText(parsed, messageIndex, interactiveStates, selectedOptions);
+        if (responseText) {
+            handleSend(responseText);
+        }
+    };
+
+    const renderAIMessage = (content, messageIndex) => {
         const cleanContent = content.replace('[GOAL_COMPLETE]', '').trim();
         const parsed = parseInteractiveContent(cleanContent);
-        const hasInteractive = parsed.some(p => p.type === 'checkbox' || p.type === 'select');
+        const hasInteractive = parsed.some((part) => part.type === 'checkbox' || part.type === 'select');
+        const canSubmit = hasInteractiveSelection(parsed, messageIndex, interactiveStates, selectedOptions);
 
         return (
             <div>
-                {parsed.map((part, pi) => {
+                {parsed.map((part, partIndex) => {
                     if (part.type === 'text') {
-                        return <div key={pi} style={{ whiteSpace: 'pre-wrap', lineHeight: 1.7 }}>{part.content}</div>;
+                        return (
+                            <div key={partIndex} style={{ whiteSpace: 'pre-wrap', lineHeight: 1.7 }}>
+                                {part.content}
+                            </div>
+                        );
                     }
+
                     if (part.type === 'checkbox') {
                         return (
-                            <div key={pi} style={{ margin: '0.6rem 0' }}>
-                                {part.items.map(item => {
-                                    const checked = !!interactiveStates[`${msgIdx}-${item.id}`];
+                            <div key={partIndex} style={{ margin: '0.6rem 0' }}>
+                                {part.title && (
+                                    <div style={{ marginBottom: '0.45rem', fontSize: '0.84rem', color: 'var(--text-muted)' }}>
+                                        {part.title}
+                                    </div>
+                                )}
+                                {part.items.map((item) => {
+                                    const checked = Boolean(interactiveStates[`${messageIndex}-${item.id}`]);
                                     return (
-                                        <button key={item.id}
-                                            onClick={() => toggleCheckbox(msgIdx, item.id)}
+                                        <button
+                                            type="button"
+                                            key={item.id}
+                                            onClick={() => toggleCheckbox(messageIndex, item.id)}
                                             style={{
-                                                display: 'flex', alignItems: 'center', gap: '0.5rem',
-                                                width: '100%', padding: '0.55rem 0.75rem', marginBottom: '0.35rem',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                gap: '0.5rem',
+                                                width: '100%',
+                                                padding: '0.55rem 0.75rem',
+                                                marginBottom: '0.35rem',
                                                 background: checked ? 'rgba(92, 124, 250, 0.15)' : 'rgba(255,255,255,0.02)',
                                                 border: checked ? '1px solid rgba(92, 124, 250, 0.4)' : '1px solid var(--panel-border)',
                                                 boxShadow: checked ? '0 4px 12px rgba(92, 124, 250, 0.15)' : 'none',
-                                                borderRadius: '12px', cursor: 'pointer', color: 'var(--text-main)',
-                                                fontSize: '0.88rem', textAlign: 'left', transition: 'var(--transition-smooth)',
-                                                fontFamily: 'inherit'
+                                                borderRadius: '12px',
+                                                cursor: 'pointer',
+                                                color: 'var(--text-main)',
+                                                fontSize: '0.88rem',
+                                                textAlign: 'left',
+                                                transition: 'var(--transition-smooth)',
+                                                fontFamily: 'inherit',
                                             }}
                                         >
                                             {checked ? <CheckSquare size={16} color="var(--primary)" /> : <Square size={16} color="var(--text-muted)" />}
@@ -246,51 +291,88 @@ export default function GoalWizard({ onClose, apiKeys, selectedApiKey, onSetGoal
                             </div>
                         );
                     }
+
                     if (part.type === 'select') {
                         return (
-                            <div key={pi} style={{ margin: '0.6rem 0', display: 'grid', gridTemplateColumns: part.items.length <= 4 ? 'repeat(2, 1fr)' : '1fr', gap: '0.35rem' }}>
-                                {part.items.map(item => {
-                                    const isSelected = selectedOptions[msgIdx] === item.id;
-                                    return (
-                                        <button key={item.id}
-                                            onClick={() => selectOption(msgIdx, item.id)}
-                                            style={{
-                                                padding: '0.6rem 0.8rem',
-                                                background: isSelected ? 'rgba(92, 124, 250, 0.15)' : 'rgba(255,255,255,0.02)',
-                                                border: isSelected ? '2px solid var(--primary)' : '1px solid var(--panel-border)',
-                                                boxShadow: isSelected ? '0 4px 12px rgba(92, 124, 250, 0.2)' : 'none',
-                                                borderRadius: '14px', cursor: 'pointer', color: 'var(--text-main)',
-                                                fontSize: '0.85rem', textAlign: 'left', transition: 'var(--transition-smooth)',
-                                                fontFamily: 'inherit', fontWeight: isSelected ? 500 : 400,
-                                                display: 'flex', alignItems: 'center', gap: '0.4rem'
-                                            }}
-                                        >
-                                            <span style={{
-                                                width: '22px', height: '22px', borderRadius: '50%', flexShrink: 0,
-                                                background: isSelected ? 'var(--primary)' : 'rgba(255,255,255,0.06)',
-                                                color: isSelected ? 'white' : 'var(--text-muted)',
-                                                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                                fontSize: '0.72rem', fontWeight: 600
-                                            }}>
-                                                {item.value.replace(/[.)）\]]/g, '')}
-                                            </span>
-                                            {item.label}
-                                        </button>
-                                    );
-                                })}
+                            <div key={partIndex} style={{ margin: '0.6rem 0' }}>
+                                {part.title && (
+                                    <div style={{ marginBottom: '0.45rem', fontSize: '0.84rem', color: 'var(--text-muted)' }}>
+                                        {part.title}
+                                    </div>
+                                )}
+                                <div style={{ display: 'grid', gridTemplateColumns: part.items.length <= 4 ? 'repeat(2, 1fr)' : '1fr', gap: '0.35rem' }}>
+                                    {part.items.map((item) => {
+                                        const isSelected = selectedOptions[messageIndex] === item.id;
+                                        return (
+                                            <button
+                                                type="button"
+                                                key={item.id}
+                                                onClick={() => selectOption(messageIndex, item.id)}
+                                                style={{
+                                                    padding: '0.6rem 0.8rem',
+                                                    background: isSelected ? 'rgba(92, 124, 250, 0.15)' : 'rgba(255,255,255,0.02)',
+                                                    border: isSelected ? '2px solid var(--primary)' : '1px solid var(--panel-border)',
+                                                    boxShadow: isSelected ? '0 4px 12px rgba(92, 124, 250, 0.2)' : 'none',
+                                                    borderRadius: '14px',
+                                                    cursor: 'pointer',
+                                                    color: 'var(--text-main)',
+                                                    fontSize: '0.85rem',
+                                                    textAlign: 'left',
+                                                    transition: 'var(--transition-smooth)',
+                                                    fontFamily: 'inherit',
+                                                    fontWeight: isSelected ? 500 : 400,
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: '0.4rem',
+                                                }}
+                                            >
+                                                <span
+                                                    style={{
+                                                        width: '22px',
+                                                        height: '22px',
+                                                        borderRadius: '50%',
+                                                        flexShrink: 0,
+                                                        background: isSelected ? 'var(--primary)' : 'rgba(255,255,255,0.06)',
+                                                        color: isSelected ? 'white' : 'var(--text-muted)',
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        justifyContent: 'center',
+                                                        fontSize: '0.72rem',
+                                                        fontWeight: 600,
+                                                    }}
+                                                >
+                                                    {item.value.replace(/[.)\]]/g, '')}
+                                                </span>
+                                                {item.label}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
                             </div>
                         );
                     }
+
                     return null;
                 })}
-                {/* Submit button for interactive messages */}
-                {hasInteractive && msgIdx === messages.length - 1 && !content.includes('[GOAL_COMPLETE]') && (
+
+                {hasInteractive && messageIndex === messages.length - 1 && !content.includes('[GOAL_COMPLETE]') && (
                     <button
-                        onClick={() => submitInteractive(msgIdx, parsed)}
+                        type="button"
+                        onClick={() => submitInteractive(messageIndex, parsed)}
+                        disabled={!canSubmit}
                         style={{
-                            marginTop: '0.6rem', padding: '0.5rem 1.2rem', background: 'var(--primary)',
-                            color: 'white', border: 'none', borderRadius: '20px', cursor: 'pointer',
-                            fontSize: '0.85rem', fontWeight: 500, transition: 'all 0.2s', fontFamily: 'inherit'
+                            marginTop: '0.6rem',
+                            padding: '0.5rem 1.2rem',
+                            background: 'var(--primary)',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '20px',
+                            cursor: canSubmit ? 'pointer' : 'default',
+                            fontSize: '0.85rem',
+                            fontWeight: 500,
+                            transition: 'all 0.2s',
+                            fontFamily: 'inherit',
+                            opacity: canSubmit ? 1 : 0.55,
                         }}
                     >
                         回答を送信 →
@@ -300,55 +382,248 @@ export default function GoalWizard({ onClose, apiKeys, selectedApiKey, onSetGoal
         );
     };
 
+    const hasCompletedGoal = messages.some((message) => message.content.includes('[GOAL_COMPLETE]'));
+
     return (
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: 'var(--bg-dark)', height: '100%' }}>
-            <div style={{ padding: '0.9rem 1.5rem', borderBottom: '1px solid var(--panel-border)', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                <button onClick={onClose} className="btn-icon" style={{ width: '32px', height: '32px' }}><ArrowLeft size={16} /></button>
-                <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 500 }}>{t('goal.title')}</h3>
+            <div
+                style={{
+                    padding: '0.9rem 1.5rem',
+                    borderBottom: '1px solid var(--panel-border)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '0.75rem',
+                }}
+            >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', minWidth: 0 }}>
+                    <button type="button" onClick={onClose} className="btn-icon" style={{ width: '32px', height: '32px' }}>
+                        <ArrowLeft size={16} />
+                    </button>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', minWidth: 0, flexWrap: 'wrap' }}>
+                        <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 500 }}>{t('goal.title')}</h3>
+                        <button
+                            type="button"
+                            onClick={() => setShowProgressPanel((current) => !current)}
+                            style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.35rem',
+                                padding: '0.34rem 0.72rem',
+                                borderRadius: '999px',
+                                border: '1px solid var(--panel-border)',
+                                background: showProgressPanel ? 'rgba(92, 124, 250, 0.14)' : 'rgba(255,255,255,0.04)',
+                                color: 'var(--text-main)',
+                                cursor: 'pointer',
+                                fontSize: '0.76rem',
+                                fontFamily: 'inherit',
+                            }}
+                        >
+                            <ListTodo size={13} color="var(--primary)" />
+                            {progressItems.length > 0 ? `${t('goal.progress')} ${completedProgressCount}/${progressItems.length}` : t('goal.progress')}
+                        </button>
+                    </div>
+                </div>
             </div>
 
-            <div style={{ flex: 1, overflowY: 'auto', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem', maxWidth: '780px', width: '100%', margin: '0 auto' }}>
-                {messages.map((msg, idx) => (
-                    <div key={idx} style={{ display: 'flex', gap: '0.75rem', flexDirection: msg.role === 'user' ? 'row-reverse' : 'row' }}>
-                        <div style={{ width: '30px', height: '30px', borderRadius: '50%', flexShrink: 0, background: msg.role === 'user' ? 'var(--primary)' : 'rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.8rem' }}>
-                            {msg.role === 'user' ? '👤' : '🎯'}
+            <div
+                style={{
+                    flex: 1,
+                    overflowY: 'auto',
+                    padding: '1.5rem',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '1rem',
+                    maxWidth: '780px',
+                    width: '100%',
+                    margin: '0 auto',
+                }}
+            >
+                {showProgressPanel && (
+                    <div
+                        style={{
+                            background: 'var(--panel-bg)',
+                            border: '1px solid var(--panel-border)',
+                            borderRadius: '18px',
+                            padding: '1rem 1.1rem',
+                            boxShadow: 'var(--shadow-sm)',
+                            display: 'grid',
+                            gap: '0.65rem',
+                        }}
+                    >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.86rem', fontWeight: 600 }}>
+                            <ListTodo size={15} color="var(--primary)" />
+                            {t('goal.progress')}
+                            {progressItems.length > 0 && (
+                                <span style={{ fontSize: '0.76rem', color: 'var(--text-muted)', fontWeight: 500 }}>
+                                    {completedProgressCount}/{progressItems.length}
+                                </span>
+                            )}
                         </div>
-                        <div style={{
-                            background: msg.role === 'user' ? 'linear-gradient(135deg, var(--primary) 0%, #748ffc 100%)' : 'var(--panel-bg)',
-                            color: msg.role === 'user' ? 'white' : 'var(--text-main)',
-                            padding: '0.8rem 1.25rem',
-                            borderRadius: msg.role === 'user' ? '20px 20px 4px 20px' : '20px 20px 20px 4px',
-                            border: msg.role === 'ai' ? '1px solid var(--panel-border)' : '1px solid rgba(255,255,255,0.1)',
-                            boxShadow: msg.role === 'user' ? '0 4px 15px rgba(92, 124, 250, 0.25)' : 'var(--shadow-sm)',
-                            maxWidth: '85%', fontSize: '0.92rem', lineHeight: 1.75,
-                            backdropFilter: msg.role === 'ai' ? 'blur(20px)' : 'none',
-                            WebkitBackdropFilter: msg.role === 'ai' ? 'blur(20px)' : 'none'
-                        }}>
-                            {msg.role === 'ai' ? renderAIMessage(msg.content, idx) : msg.content}
+                        {progressItems.length === 0 ? (
+                            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.6 }}>
+                                {t('goal.progressEmpty')}
+                            </div>
+                        ) : (
+                            progressItems.map((item) => (
+                                <div
+                                    key={item.id}
+                                    style={{
+                                        display: 'flex',
+                                        alignItems: 'flex-start',
+                                        gap: '0.55rem',
+                                        padding: '0.52rem 0.6rem',
+                                        borderRadius: '12px',
+                                        background: item.checked ? 'rgba(52, 211, 153, 0.08)' : 'rgba(255,255,255,0.03)',
+                                        border: item.checked ? '1px solid rgba(52, 211, 153, 0.24)' : '1px solid rgba(255,255,255,0.05)',
+                                    }}
+                                >
+                                    {item.checked ? <CheckSquare size={16} color="var(--action)" /> : <Square size={16} color="var(--text-muted)" />}
+                                    <div style={{ minWidth: 0 }}>
+                                        <div style={{ fontSize: '0.84rem', lineHeight: 1.5 }}>{item.label}</div>
+                                        <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.18rem' }}>{item.groupTitle}</div>
+                                    </div>
+                                </div>
+                            ))
+                        )}
+                    </div>
+                )}
+
+                {messages.map((message, index) => (
+                    <div
+                        key={index}
+                        style={{
+                            display: 'flex',
+                            gap: '0.75rem',
+                            flexDirection: message.role === 'user' ? 'row-reverse' : 'row',
+                        }}
+                    >
+                        <div
+                            style={{
+                                width: '30px',
+                                height: '30px',
+                                borderRadius: '50%',
+                                flexShrink: 0,
+                                background: message.role === 'user' ? 'var(--primary)' : 'rgba(255,255,255,0.06)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontSize: '0.8rem',
+                            }}
+                        >
+                            {message.role === 'user' ? 'U' : 'AI'}
+                        </div>
+                        <div
+                            style={{
+                                background: message.role === 'user' ? 'linear-gradient(135deg, var(--primary) 0%, #748ffc 100%)' : 'var(--panel-bg)',
+                                color: message.role === 'user' ? 'white' : 'var(--text-main)',
+                                padding: '0.8rem 1.25rem',
+                                borderRadius: message.role === 'user' ? '20px 20px 4px 20px' : '20px 20px 20px 4px',
+                                border: message.role === 'ai' ? '1px solid var(--panel-border)' : '1px solid rgba(255,255,255,0.1)',
+                                boxShadow: message.role === 'user' ? '0 4px 15px rgba(92, 124, 250, 0.25)' : 'var(--shadow-sm)',
+                                maxWidth: '85%',
+                                fontSize: '0.92rem',
+                                lineHeight: 1.75,
+                                backdropFilter: message.role === 'ai' ? 'blur(20px)' : 'none',
+                                WebkitBackdropFilter: message.role === 'ai' ? 'blur(20px)' : 'none',
+                            }}
+                        >
+                            {message.role === 'ai' ? renderAIMessage(message.content, index) : message.content}
                         </div>
                     </div>
                 ))}
+
                 {isLoading && (
                     <div style={{ display: 'flex', gap: '0.75rem', animation: 'pulse 1.5s infinite' }}>
-                        <div style={{ width: '30px', height: '30px', borderRadius: '50%', background: 'rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>🎯</div>
-                        <div style={{ padding: '0.75rem 1rem', color: 'var(--text-muted)', fontSize: '0.85rem' }}>{t('goal.thinking')}</div>
+                        <div
+                            style={{
+                                width: '30px',
+                                height: '30px',
+                                borderRadius: '50%',
+                                background: 'rgba(255,255,255,0.06)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                            }}
+                        >
+                            AI
+                        </div>
+                        <div style={{ padding: '0.75rem 1rem', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                            {t('goal.thinking')}
+                        </div>
                     </div>
                 )}
-                {messages.some(m => m.content.includes('[GOAL_COMPLETE]')) && (
-                    <div style={{ textAlign: 'center', color: 'var(--action)', fontSize: '0.88rem', padding: '1rem', animation: 'fadeIn 0.5s' }}>✅ {t('goal.complete')}</div>
+
+                {hasCompletedGoal && (
+                    <div style={{ textAlign: 'center', color: 'var(--action)', fontSize: '0.88rem', padding: '1rem', animation: 'fadeIn 0.5s' }}>
+                        ✓ {t('goal.complete')}
+                    </div>
                 )}
                 <div ref={messagesEndRef} />
             </div>
 
             <div style={{ padding: '1.25rem 2rem', borderTop: '1px solid var(--panel-border)' }}>
-                <div style={{ display: 'flex', background: 'var(--panel-bg)', backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)', border: '1px solid var(--panel-border)', boxShadow: '0 8px 32px rgba(0,0,0,0.3)', borderRadius: '28px', overflow: 'hidden', padding: '0.35rem 0.35rem 0.35rem 1.25rem', alignItems: 'flex-end', maxWidth: '780px', margin: '0 auto', transition: 'var(--transition-smooth)', minHeight: '56px' }}>
-                    <textarea value={input} onChange={e => setInput(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+                <div
+                    style={{
+                        display: 'flex',
+                        background: 'var(--panel-bg)',
+                        backdropFilter: 'blur(24px)',
+                        WebkitBackdropFilter: 'blur(24px)',
+                        border: '1px solid var(--panel-border)',
+                        boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
+                        borderRadius: '28px',
+                        overflow: 'hidden',
+                        padding: '0.35rem 0.35rem 0.35rem 1.25rem',
+                        alignItems: 'flex-end',
+                        maxWidth: '780px',
+                        margin: '0 auto',
+                        transition: 'var(--transition-smooth)',
+                        minHeight: '56px',
+                    }}
+                >
+                    <textarea
+                        value={input}
+                        onChange={(event) => setInput(event.target.value)}
+                        onKeyDown={(event) => {
+                            if (event.key === 'Enter' && !event.shiftKey) {
+                                event.preventDefault();
+                                handleSend();
+                            }
+                        }}
                         placeholder={t('goal.placeholder')}
-                        style={{ flex: 1, background: 'transparent', border: 'none', color: 'var(--text-main)', resize: 'none', outline: 'none', padding: '0.4rem 0', minHeight: '32px', maxHeight: '120px', fontSize: '0.9rem', fontFamily: 'inherit' }}
-                        rows={1} />
-                    <button onClick={() => handleSend()} disabled={isLoading || !input.trim()}
-                        style={{ width: '34px', height: '34px', borderRadius: '50%', background: input.trim() ? 'var(--primary)' : 'rgba(255,255,255,0.05)', color: input.trim() ? 'white' : 'var(--text-muted)', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: input.trim() ? 'pointer' : 'default', transition: 'all 0.2s' }}>
+                        style={{
+                            flex: 1,
+                            background: 'transparent',
+                            border: 'none',
+                            color: 'var(--text-main)',
+                            resize: 'none',
+                            outline: 'none',
+                            padding: '0.4rem 0',
+                            minHeight: '32px',
+                            maxHeight: '120px',
+                            fontSize: '0.9rem',
+                            fontFamily: 'inherit',
+                        }}
+                        rows={1}
+                    />
+                    <button
+                        type="button"
+                        onClick={() => handleSend()}
+                        disabled={isLoading || !input.trim()}
+                        style={{
+                            width: '34px',
+                            height: '34px',
+                            borderRadius: '50%',
+                            background: input.trim() ? 'var(--primary)' : 'rgba(255,255,255,0.05)',
+                            color: input.trim() ? 'white' : 'var(--text-muted)',
+                            border: 'none',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            cursor: input.trim() ? 'pointer' : 'default',
+                            transition: 'all 0.2s',
+                        }}
+                    >
                         <Send size={15} />
                     </button>
                 </div>

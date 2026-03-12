@@ -3,9 +3,11 @@ import { X, Send, Bot, User, Trash2, Copy, Check, RefreshCw, GitBranch } from 'l
 import { supabase } from './lib/supabase';
 import { useParams } from 'react-router-dom';
 import { useLanguage } from './i18n';
+import { resolveSpaceRouteParams } from './lib/routes';
 
 export default function LinearChat({ isOpen, onClose, node, onUpdateNodeData, onBranchFromChat }) {
-    const { id: spaceId } = useParams();
+    const routeParams = useParams();
+    const { spaceId } = resolveSpaceRouteParams(routeParams);
     const { t } = useLanguage();
     const [input, setInput] = useState('');
     const [chatHistory, setChatHistory] = useState([]);

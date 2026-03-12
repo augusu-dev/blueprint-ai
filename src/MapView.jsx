@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+    AlarmClock,
     ChevronDown,
     ChevronLeft,
     ChevronRight,
@@ -13,6 +14,7 @@ import {
     Sparkles,
 } from 'lucide-react';
 import { HutSprite, LandmarkSprite, LionScoutSprite } from './MapSprites';
+import { deriveStudySettings } from './lib/studySettings';
 import {
     CAMERA_FOLLOW,
     CLICK_SPEED,
@@ -129,7 +131,7 @@ function getTileLabel(kind) {
     return TILE_LABELS[kind] || TILE_LABELS.grass;
 }
 
-export default function MapView({ spaceTitle, nodes, mapState, onMapStateChange, onOpenMode }) {
+export default function MapView({ spaceTitle, nodes, mapState, onMapStateChange, onOpenMode, currentProject }) {
     const normalizedMapState = useMemo(() => normalizeMapState(mapState), [mapState]);
     const pressedKeysRef = useRef(new Set());
     const destinationRef = useRef(null);
@@ -311,6 +313,14 @@ export default function MapView({ spaceTitle, nodes, mapState, onMapStateChange,
     const quests = useMemo(
         () => deriveQuests(spaceTitle, nodes, normalizedMapState),
         [spaceTitle, nodes, normalizedMapState],
+    );
+    const starterNode = useMemo(
+        () => nodes.find((node) => node.data?.isStarter) || null,
+        [nodes],
+    );
+    const studySettings = useMemo(
+        () => deriveStudySettings(currentProject?.sharedGoal || starterNode?.data?.systemPrompt || ''),
+        [currentProject?.sharedGoal, starterNode?.data?.systemPrompt],
     );
     const player = normalizedMapState.player;
     const camera = normalizedMapState.camera;
@@ -547,6 +557,43 @@ export default function MapView({ spaceTitle, nodes, mapState, onMapStateChange,
                     <IconDockButton icon={MessageSquare} title="チャットへ" onClick={() => onOpenMode('chat')} />
                     <IconDockButton icon={GitFork} title="グラフへ" onClick={() => onOpenMode('graph')} />
                     <IconDockButton icon={Compass} title="スタート地点へ" onClick={moveToBase} />
+                </div>
+
+                <div
+                    style={{
+                        position: 'absolute',
+                        top: '4.6rem',
+                        right: '1rem',
+                        zIndex: 20,
+                        display: 'grid',
+                        gap: '0.4rem',
+                        minWidth: '240px',
+                        padding: '0.72rem 0.85rem',
+                        borderRadius: '16px',
+                        background: 'rgba(44, 28, 18, 0.82)',
+                        color: '#fff8ef',
+                        boxShadow: '0 10px 24px rgba(59, 28, 10, 0.16)',
+                        backdropFilter: 'blur(10px)',
+                        WebkitBackdropFilter: 'blur(10px)',
+                    }}
+                >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', fontSize: '0.8rem', fontWeight: 700 }}>
+                        <AlarmClock size={15} color="#ffd469" />
+                        <span>期限・タイムライン</span>
+                    </div>
+                    <div style={{ fontSize: '0.77rem', lineHeight: 1.5, opacity: 0.92 }}>
+                        {studySettings.deadlineLabel
+                            ? `期限: ${studySettings.deadlineLabel}`
+                            : `タイムライン: ${studySettings.timelineLabel || '未設定'}`}
+                    </div>
+                    {studySettings.learningStyleLabel && (
+                        <div style={{ fontSize: '0.74rem', lineHeight: 1.45, opacity: 0.82 }}>
+                            学習スタイル: {studySettings.learningStyleLabel}
+                        </div>
+                    )}
+                    <div style={{ fontSize: '0.74rem', lineHeight: 1.45, opacity: 0.82 }}>
+                        微調整: {studySettings.reviewCadenceLabel}で進捗チェック
+                    </div>
                 </div>
 
                 <div style={{ position: 'absolute', inset: 0 }}>

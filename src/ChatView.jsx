@@ -801,6 +801,10 @@ export default function ChatView({
                 }}
                 initialHistory={node.data?.goalHistory || []}
                 onSaveHistory={(history) => onUpdateNodeData(node.id, 'goalHistory', history)}
+                initialInteractiveStates={node.data?.goalInteractiveStates || {}}
+                initialSelectedOptions={node.data?.goalSelectedOptions || {}}
+                onSaveInteractiveStates={(state) => onUpdateNodeData(node.id, 'goalInteractiveStates', state)}
+                onSaveSelectedOptions={(state) => onUpdateNodeData(node.id, 'goalSelectedOptions', state)}
             />
         );
     }
@@ -915,7 +919,7 @@ export default function ChatView({
                             {t('goal.title')}
                         </button>
                     )}
-                    <button
+                    <button hidden
                         onClick={onStartNewProject}
                         style={{
                             width: '38px',

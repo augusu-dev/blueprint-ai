@@ -1,16 +1,33 @@
 import { useState, useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useParams } from 'react-router-dom';
 import { supabase } from './lib/supabase'
 import { LanguageProvider, useLanguage } from './i18n';
 import AuthScreen from './AuthScreen';
 import Editor from './Editor';
 import ErrorBoundary from './ErrorBoundary';
-import { getSpacePath } from './lib/routes';
+import { getSpacePath, resolveSpaceRouteParams } from './lib/routes';
 import './index.css';
 
 function SpaceModeRedirect() {
   const { id } = useParams();
   return <Navigate to={getSpacePath(id)} replace />;
+}
+
+function SpaceRouteResolver() {
+  const params = useParams();
+  const location = useLocation();
+  const { spaceId, mode, isCanonical } = resolveSpaceRouteParams(params);
+
+  if (!spaceId) {
+    return <Navigate to="/" replace />;
+  }
+
+  const canonicalPath = getSpacePath(spaceId, mode);
+  if (!isCanonical || location.pathname !== canonicalPath) {
+    return <Navigate to={canonicalPath} replace />;
+  }
+
+  return <ErrorBoundary><Editor /></ErrorBoundary>;
 }
 
 function AppContent() {
@@ -63,8 +80,8 @@ function AppContent() {
             element={session ? <SpaceModeRedirect /> : <Navigate to="/auth" replace />}
           />
           <Route
-            path="/space/:id/:mode"
-            element={session ? <ErrorBoundary><Editor /></ErrorBoundary> : <Navigate to="/auth" replace />}
+            path="/space/:first/:second"
+            element={session ? <SpaceRouteResolver /> : <Navigate to="/auth" replace />}
           />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

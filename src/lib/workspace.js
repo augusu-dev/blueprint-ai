@@ -1,3 +1,5 @@
+import { deriveStudySettings } from './studySettings';
+
 const WORKSPACE_META_KEY = 'blueprint_workspace_meta_v1';
 
 function createDefaultWorkspaceMeta() {
@@ -23,14 +25,15 @@ function normalizeProject(project) {
 
 function normalizeWorkspaceMeta(raw) {
     const projects = Array.isArray(raw?.projects) ? raw.projects.map(normalizeProject) : [];
-    const spaces = Object.entries(raw?.spaces || {}).reduce((acc, [spaceId, value]) => {
-        if (!spaceId) return acc;
-        acc[spaceId] = {
+    const spaces = Object.entries(raw?.spaces || {}).reduce((accumulator, [spaceId, value]) => {
+        if (!spaceId) return accumulator;
+
+        accumulator[spaceId] = {
             pinned: Boolean(value?.pinned),
             projectId: value?.projectId || null,
             title: typeof value?.title === 'string' ? value.title : '',
         };
-        return acc;
+        return accumulator;
     }, {});
 
     return {
@@ -126,6 +129,7 @@ export function assignSpaceToProject(spaceId, projectId, title = '') {
         if (project.id === previousProjectId && previousProjectId !== projectId) {
             return { ...project, spaceIds: project.spaceIds.filter((id) => id !== spaceId) };
         }
+
         if (project.id === projectId) {
             return {
                 ...project,
@@ -133,6 +137,7 @@ export function assignSpaceToProject(spaceId, projectId, title = '') {
                 spaceIds: [...new Set([...project.spaceIds, spaceId])],
             };
         }
+
         return project;
     });
 
@@ -206,6 +211,7 @@ export function syncWorkspaceProjectFromSpace(spaceId, spaceData, explicitProjec
 export function getProjectContextPrompt(project) {
     if (!project) return '';
 
+    const studySettings = deriveStudySettings(project.sharedGoal);
     const sections = [
         '[プロジェクト共有コンテキスト]',
         `プロジェクト名: ${project.name}`,
@@ -219,6 +225,17 @@ export function getProjectContextPrompt(project) {
         sections.push(`共有メモ:\n${project.sharedMemory}`);
     }
 
-    sections.push('上記は同じプロジェクト内で共有される文脈です。必要に応じて回答へ反映してください。');
+    if (studySettings.deadlineLabel) {
+        sections.push(`期限: ${studySettings.deadlineLabel}`);
+    } else if (studySettings.timelineLabel) {
+        sections.push(`タイムライン: ${studySettings.timelineLabel}`);
+    }
+
+    if (studySettings.learningStyleLabel) {
+        sections.push(`学習スタイル: ${studySettings.learningStyleLabel}`);
+    }
+
+    sections.push(`標準レビュー運用: ${studySettings.reviewCadenceLabel}で軽いテストを回し、必要なら計画を微調整する。`);
+    sections.push('上記の文脈を踏まえて回答し、学習の進み具合に応じて調整案も提案してください。');
     return sections.join('\n');
 }

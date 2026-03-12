@@ -14,7 +14,7 @@ import {
     X,
 } from 'lucide-react';
 import { useLanguage } from './i18n';
-import { DEFAULT_SPACE_MODE, getSpacePath, isSpaceMode } from './lib/routes';
+import { DEFAULT_SPACE_MODE, getSpacePath, isSpaceMode, resolveSpaceRouteParams } from './lib/routes';
 import {
     assignSpaceToProject,
     createWorkspaceProject,
@@ -31,6 +31,7 @@ function SidebarSpaceRow({
     currentSpaceId,
     projectName,
     isPinned,
+    nested = false,
     onOpen,
     onPin,
     onDelete,
@@ -40,7 +41,7 @@ function SidebarSpaceRow({
             className="sidebar-item"
             onClick={() => onOpen(space.id)}
             style={{
-                padding: '0.52rem 0.6rem',
+                padding: nested ? '0.48rem 0.55rem 0.48rem 0.85rem' : '0.52rem 0.6rem',
                 display: 'flex',
                 alignItems: 'center',
                 gap: '0.5rem',
@@ -138,13 +139,15 @@ function SidebarSpaceRow({
 export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
     const { t } = useLanguage();
     const navigate = useNavigate();
-    const { id: currentSpaceId, mode } = useParams();
+    const routeParams = useParams();
+    const { spaceId: currentSpaceId, mode } = resolveSpaceRouteParams(routeParams);
     const [spaces, setSpaces] = useState([]);
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState('');
     const [workspaceMetaVersion, setWorkspaceMetaVersion] = useState(0);
     const [isCreatingProject, setIsCreatingProject] = useState(false);
     const [newProjectName, setNewProjectName] = useState('');
+    const [expandedProjectIds, setExpandedProjectIds] = useState({});
     const currentMode = isSpaceMode(mode) ? mode : DEFAULT_SPACE_MODE;
     const workspaceMeta = useMemo(() => {
         void workspaceMetaVersion;
@@ -152,6 +155,7 @@ export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
     }, [workspaceMetaVersion]);
     const routeProjectId = currentSpaceId ? (workspaceMeta.spaces[currentSpaceId]?.projectId || null) : null;
     const selectedProjectId = workspaceMeta.selectedProjectId || null;
+    const activeProjectId = selectedProjectId || routeProjectId || null;
     const activeProjectIdForDraft = selectedProjectId || routeProjectId || null;
 
     const fetchSpaces = useCallback(async () => {
@@ -227,7 +231,7 @@ export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
         onClose();
     }, [activeProjectIdForDraft, navigate, onClose]);
 
-    const handleDeleteSpace = useCallback(async (event, spaceId) => {
+    const handleDeleteSpace = async (event, spaceId) => {
         event.stopPropagation();
         if (!confirm(t('sidebar.deleteConfirm'))) return;
 
@@ -244,7 +248,7 @@ export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
 
         if (spaceId === currentSpaceId) navigate('/');
         fetchSpaces();
-    }, [currentSpaceId, fetchSpaces, navigate, t]);
+    };
 
     const handleCreateProject = useCallback(() => {
         const trimmedName = newProjectName.trim();
@@ -254,19 +258,19 @@ export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
         setIsCreatingProject(false);
     }, [newProjectName]);
 
-    const handleAssignCurrentSpaceToProject = useCallback(() => {
-        if (!currentSpaceId || !selectedProjectId) return;
+    const handleAssignCurrentSpaceToProject = () => {
+        if (!currentSpaceId || !activeProjectId) return;
         const activeSpace = spaces.find((space) => space.id === currentSpaceId);
-        assignSpaceToProject(currentSpaceId, selectedProjectId, activeSpace?.title || '');
+        assignSpaceToProject(currentSpaceId, activeProjectId, activeSpace?.title || '');
         try {
             const raw = localStorage.getItem(`blueprint_space_${currentSpaceId}`);
             if (raw) {
-                syncWorkspaceProjectFromSpace(currentSpaceId, JSON.parse(raw), selectedProjectId);
+                syncWorkspaceProjectFromSpace(currentSpaceId, JSON.parse(raw), activeProjectId);
             }
         } catch {
             // Ignore invalid local snapshots when assigning a project.
         }
-    }, [currentSpaceId, selectedProjectId, spaces]);
+    };
 
     const searchedSpaces = useMemo(() => (
         spaces.filter((space) => (
@@ -278,25 +282,52 @@ export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
         searchedSpaces.filter((space) => workspaceMeta.spaces[space.id]?.pinned)
     ), [searchedSpaces, workspaceMeta.spaces]);
 
-    const listedSpaces = useMemo(() => (
-        searchedSpaces.filter((space) => {
-            if (workspaceMeta.spaces[space.id]?.pinned) return false;
-            if (!selectedProjectId) return true;
-            return workspaceMeta.spaces[space.id]?.projectId === selectedProjectId;
-        })
-    ), [searchedSpaces, selectedProjectId, workspaceMeta.spaces]);
+    const unpinnedSpaces = useMemo(() => (
+        searchedSpaces.filter((space) => !workspaceMeta.spaces[space.id]?.pinned)
+    ), [searchedSpaces, workspaceMeta.spaces]);
 
-    const selectedProject = workspaceMeta.projects.find((project) => project.id === (selectedProjectId || routeProjectId)) || null;
+    const projectSpacesById = useMemo(() => (
+        workspaceMeta.projects.reduce((accumulator, project) => {
+            accumulator[project.id] = unpinnedSpaces.filter((space) => workspaceMeta.spaces[space.id]?.projectId === project.id);
+            return accumulator;
+        }, {})
+    ), [unpinnedSpaces, workspaceMeta.projects, workspaceMeta.spaces]);
+
+    const visibleProjects = useMemo(() => (
+        workspaceMeta.projects.filter((project) => {
+            if (!searchQuery) return true;
+            return project.name.toLowerCase().includes(searchQuery.toLowerCase()) || (projectSpacesById[project.id] || []).length > 0;
+        })
+    ), [projectSpacesById, searchQuery, workspaceMeta.projects]);
+
+    const unassignedSpaces = useMemo(() => (
+        unpinnedSpaces.filter((space) => !workspaceMeta.spaces[space.id]?.projectId)
+    ), [unpinnedSpaces, workspaceMeta.spaces]);
+
+    const selectedProject = workspaceMeta.projects.find((project) => project.id === activeProjectId) || null;
     const canAttachCurrentSpace = Boolean(
         currentSpaceId
-        && selectedProjectId
-        && workspaceMeta.spaces[currentSpaceId]?.projectId !== selectedProjectId,
+        && activeProjectId
+        && workspaceMeta.spaces[currentSpaceId]?.projectId !== activeProjectId,
     );
 
     const getProjectNameForSpace = useCallback((spaceId) => {
         const projectId = workspaceMeta.spaces[spaceId]?.projectId;
         return workspaceMeta.projects.find((project) => project.id === projectId)?.name || '';
     }, [workspaceMeta.projects, workspaceMeta.spaces]);
+
+    const handleProjectFolderClick = (projectId) => {
+        setSelectedProjectId(projectId);
+        if (!currentSpaceId) {
+            setDraftProjectId(projectId);
+        }
+        setExpandedProjectIds((current) => ({
+            ...current,
+                [projectId]: activeProjectId === projectId
+                ? !(current[projectId] ?? true)
+                : true,
+        }));
+    };
 
     return (
         <>
@@ -449,8 +480,8 @@ export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
                             padding: '0.46rem 0.55rem',
                             borderRadius: '8px',
                             border: '1px solid var(--panel-border)',
-                            background: !selectedProjectId ? 'rgba(108, 140, 255, 0.12)' : 'rgba(255,255,255,0.03)',
-                            color: !selectedProjectId ? '#dbe5ff' : 'var(--text-main)',
+                            background: !activeProjectId ? 'rgba(108, 140, 255, 0.12)' : 'rgba(255,255,255,0.03)',
+                            color: !activeProjectId ? '#dbe5ff' : 'var(--text-main)',
                             cursor: 'pointer',
                             display: 'flex',
                             alignItems: 'center',
@@ -463,65 +494,97 @@ export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
                         すべてのスペース
                     </button>
 
-                    {workspaceMeta.projects.map((project) => {
-                        const isSelected = selectedProjectId === project.id;
+                    {visibleProjects.map((project) => {
+                        const isSelected = activeProjectId === project.id;
+                        const isExpanded = expandedProjectIds[project.id] ?? isSelected;
+                        const projectSpaces = projectSpacesById[project.id] || [];
 
                         return (
-                            <button
+                            <div
                                 key={project.id}
-                                type="button"
-                                onClick={() => {
-                                    setSelectedProjectId(project.id);
-                                    if (!currentSpaceId) {
-                                        setDraftProjectId(project.id);
-                                    }
-                                }}
                                 style={{
-                                    width: '100%',
                                     marginBottom: '0.3rem',
-                                    padding: '0.46rem 0.55rem',
                                     borderRadius: '8px',
                                     border: '1px solid var(--panel-border)',
                                     background: isSelected ? 'rgba(108, 140, 255, 0.12)' : 'rgba(255,255,255,0.03)',
-                                    color: isSelected ? '#dbe5ff' : 'var(--text-main)',
-                                    cursor: 'pointer',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'space-between',
-                                    gap: '0.45rem',
-                                    fontSize: '0.76rem',
-                                    fontFamily: 'inherit',
                                 }}
                             >
-                                <span style={{ display: 'flex', alignItems: 'center', gap: '0.42rem', minWidth: 0 }}>
-                                    {isSelected ? <FolderOpen size={13} /> : <FolderClosed size={13} />}
-                                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{project.name}</span>
-                                </span>
-                                <span style={{ fontSize: '0.68rem', opacity: 0.75 }}>{project.spaceIds.length}</span>
-                            </button>
+                                <button
+                                    type="button"
+                                    onClick={() => handleProjectFolderClick(project.id)}
+                                    style={{
+                                        width: '100%',
+                                        padding: '0.46rem 0.55rem',
+                                        borderRadius: '8px',
+                                        border: 'none',
+                                        background: 'transparent',
+                                        color: isSelected ? '#dbe5ff' : 'var(--text-main)',
+                                        cursor: 'pointer',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'space-between',
+                                        gap: '0.45rem',
+                                        fontSize: '0.76rem',
+                                        fontFamily: 'inherit',
+                                    }}
+                                >
+                                    <span style={{ display: 'flex', alignItems: 'center', gap: '0.42rem', minWidth: 0 }}>
+                                        {isExpanded ? <FolderOpen size={13} /> : <FolderClosed size={13} />}
+                                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{project.name}</span>
+                                    </span>
+                                    <span style={{ fontSize: '0.68rem', opacity: 0.75 }}>{project.spaceIds.length}</span>
+                                </button>
+
+                                {isExpanded && (
+                                    <div style={{ padding: '0 0.2rem 0.3rem', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+                                        {projectSpaces.length === 0 ? (
+                                            <p style={{ padding: '0.65rem 0.6rem 0.2rem', margin: 0, color: 'var(--text-muted)', fontSize: '0.74rem' }}>
+                                                このプロジェクトのスペースはまだありません
+                                            </p>
+                                        ) : (
+                                            projectSpaces.map((space) => (
+                                                <SidebarSpaceRow
+                                                    key={space.id}
+                                                    space={space}
+                                                    currentSpaceId={currentSpaceId}
+                                                    projectName=""
+                                                    isPinned={Boolean(workspaceMeta.spaces[space.id]?.pinned)}
+                                                    nested
+                                                    onOpen={(spaceId) => {
+                                                        navigate(getSpacePath(spaceId, currentMode));
+                                                        onClose();
+                                                    }}
+                                                    onPin={() => togglePinnedSpace(space.id)}
+                                                    onDelete={handleDeleteSpace}
+                                                />
+                                            ))
+                                        )}
+
+                                        {canAttachCurrentSpace && activeProjectId === project.id && (
+                                            <button
+                                                type="button"
+                                                onClick={handleAssignCurrentSpaceToProject}
+                                                style={{
+                                                    width: '100%',
+                                                    marginTop: '0.2rem',
+                                                    padding: '0.45rem 0.55rem',
+                                                    borderRadius: '8px',
+                                                    border: '1px dashed rgba(108, 140, 255, 0.24)',
+                                                    background: 'rgba(108, 140, 255, 0.08)',
+                                                    color: '#dbe5ff',
+                                                    cursor: 'pointer',
+                                                    fontSize: '0.74rem',
+                                                    fontFamily: 'inherit',
+                                                }}
+                                            >
+                                                現在のスペースをこのプロジェクトに追加
+                                            </button>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
                         );
                     })}
-
-                    {canAttachCurrentSpace && (
-                        <button
-                            type="button"
-                            onClick={handleAssignCurrentSpaceToProject}
-                            style={{
-                                width: '100%',
-                                marginTop: '0.2rem',
-                                padding: '0.45rem 0.55rem',
-                                borderRadius: '8px',
-                                border: '1px dashed rgba(108, 140, 255, 0.24)',
-                                background: 'rgba(108, 140, 255, 0.08)',
-                                color: '#dbe5ff',
-                                cursor: 'pointer',
-                                fontSize: '0.74rem',
-                                fontFamily: 'inherit',
-                            }}
-                        >
-                            現在のスペースをこのプロジェクトに追加
-                        </button>
-                    )}
                 </div>
 
                 <div style={{ flex: 1, overflowY: 'auto', padding: '0.15rem 0.45rem 0.7rem', minWidth: '260px' }}>
@@ -554,14 +617,14 @@ export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
 
                             <div>
                                 <div style={{ padding: '0 0.45rem 0.35rem', fontSize: '0.72rem', color: 'var(--text-muted)', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
-                                    {selectedProject ? `${selectedProject.name}` : 'Spaces'}
+                                    {selectedProject ? '未分類のスペース' : 'Spaces'}
                                 </div>
-                                {listedSpaces.length === 0 ? (
+                                {unassignedSpaces.length === 0 ? (
                                     <p style={{ padding: '0.8rem', color: 'var(--text-muted)', fontSize: '0.78rem', textAlign: 'center' }}>
-                                        {selectedProject ? 'このプロジェクトのスペースはまだありません' : t('sidebar.empty')}
+                                        {t('sidebar.empty')}
                                     </p>
                                 ) : (
-                                    listedSpaces.map((space) => (
+                                    unassignedSpaces.map((space) => (
                                         <SidebarSpaceRow
                                             key={space.id}
                                             space={space}

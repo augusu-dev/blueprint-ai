@@ -11,7 +11,7 @@ import {
     useReactFlow,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Settings, X, LogOut, Columns, Rows, Menu, Save, Edit3, MessageSquare, GitFork, Check, Map as MapIcon } from 'lucide-react';
+import { Settings, X, LogOut, ArrowDown, ArrowRight, Menu, Save, Edit3, MessageSquare, GitFork, Check, Map as MapIcon } from 'lucide-react';
 import { supabase } from './lib/supabase';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useLanguage } from './i18n';
@@ -24,7 +24,7 @@ import LoopNode from './nodes/LoopNode';
 import BranchNode from './nodes/BranchNode';
 import GoalNode from './nodes/GoalNode';
 import DeleteEdge from './nodes/DeleteEdge';
-import { DEFAULT_SPACE_MODE, getSpacePath, isSpaceMode } from './lib/routes';
+import { DEFAULT_SPACE_MODE, getSpacePath, isSpaceMode, resolveSpaceRouteParams } from './lib/routes';
 import { createDefaultMapState, createInitialEdges, createInitialNodes, normalizeMapState } from './lib/space';
 import {
     getProjectContextPrompt,
@@ -44,8 +44,78 @@ const edgeTypes = {
     deleteEdge: DeleteEdge,
 };
 
+const DEFAULT_NODE_WIDTH = 280;
+const DEFAULT_NODE_HEIGHT = 150;
+const DEFAULT_GOAL_NODE_WIDTH = 380;
+const DEFAULT_GOAL_NODE_HEIGHT = 460;
+const GOAL_NODE_MARGIN = 72;
+
+function getNodeMeasure(node, key, fallback) {
+    return Number(node?.measured?.[key] || node?.[key] || fallback);
+}
+
+function getGoalAnchorPosition(rawNodes, direction) {
+    const goalNode = rawNodes.find((node) => node.type === 'goalNode');
+    if (!goalNode) return null;
+
+    const contentNodes = rawNodes.filter((node) => node.id !== goalNode.id);
+    if (contentNodes.length === 0) {
+        return direction === 'TB'
+            ? { x: 50, y: -432 }
+            : { x: -352, y: -55 };
+    }
+
+    const bounds = contentNodes.reduce((accumulator, node) => {
+        const x = Number(node?.position?.x || 0);
+        const y = Number(node?.position?.y || 0);
+        const width = getNodeMeasure(node, 'width', DEFAULT_NODE_WIDTH);
+        const height = getNodeMeasure(node, 'height', DEFAULT_NODE_HEIGHT);
+        return {
+            minX: Math.min(accumulator.minX, x),
+            minY: Math.min(accumulator.minY, y),
+            maxX: Math.max(accumulator.maxX, x + width),
+            maxY: Math.max(accumulator.maxY, y + height),
+        };
+    }, { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity });
+
+    const goalWidth = getNodeMeasure(goalNode, 'width', DEFAULT_GOAL_NODE_WIDTH);
+    const goalHeight = getNodeMeasure(goalNode, 'height', DEFAULT_GOAL_NODE_HEIGHT);
+
+    if (direction === 'TB') {
+        return {
+            x: Math.round(bounds.minX + ((bounds.maxX - bounds.minX - goalWidth) / 2)),
+            y: Math.round(bounds.minY - GOAL_NODE_MARGIN - goalHeight),
+        };
+    }
+
+    return {
+        x: Math.round(bounds.minX - GOAL_NODE_MARGIN - goalWidth),
+        y: Math.round(bounds.minY + ((bounds.maxY - bounds.minY - goalHeight) / 2)),
+    };
+}
+
+function alignGoalNode(rawNodes, direction) {
+    const goalNode = rawNodes.find((node) => node.type === 'goalNode');
+    const nextPosition = getGoalAnchorPosition(rawNodes, direction);
+
+    if (!goalNode || !nextPosition) return rawNodes;
+
+    const currentX = Number(goalNode?.position?.x || 0);
+    const currentY = Number(goalNode?.position?.y || 0);
+    if (currentX === nextPosition.x && currentY === nextPosition.y) {
+        return rawNodes;
+    }
+
+    return rawNodes.map((node) => (
+        node.id === goalNode.id
+            ? { ...node, position: nextPosition }
+            : node
+    ));
+}
+
 function EditorContent() {
-    const { id: spaceId, mode } = useParams();
+    const routeParams = useParams();
+    const { spaceId, mode } = resolveSpaceRouteParams(routeParams);
     const navigate = useNavigate();
     const { setViewport, updateNodeInternals } = useReactFlow();
     const { t, lang, setLang } = useLanguage();
@@ -138,7 +208,7 @@ function EditorContent() {
 
         setIsHydrated(false);
         setSpaceTitle(t('editor.untitled'));
-        setNodes(applyProjectGoalToNodes(createInitialNodes(), draftProject));
+        setNodes(alignGoalNode(applyProjectGoalToNodes(createInitialNodes(), draftProject), direction));
         setEdges(createInitialEdges());
         setMapState(createDefaultMapState());
         setActiveChatNodeId('1');
@@ -146,7 +216,7 @@ function EditorContent() {
         setDraftDirty(false);
         promoteDraftPromiseRef.current = null;
         setIsHydrated(true);
-    }, [applyProjectGoalToNodes, setEdges, setNodes, t]);
+    }, [applyProjectGoalToNodes, direction, setEdges, setNodes, t]);
 
     useEffect(() => {
         if (isDraft) return;
@@ -202,9 +272,12 @@ function EditorContent() {
             setSpaceTitle(data.title || t('editor.untitled'));
             setMapState(normalizeMapState(data.map_state));
             setNodes(
-                applyProjectGoalToNodes(
-                    Array.isArray(data.nodes) && data.nodes.length > 0 ? data.nodes : createInitialNodes(),
-                    projectForSpace,
+                alignGoalNode(
+                    applyProjectGoalToNodes(
+                        Array.isArray(data.nodes) && data.nodes.length > 0 ? data.nodes : createInitialNodes(),
+                        projectForSpace,
+                    ),
+                    direction,
                 ),
             );
             setEdges(Array.isArray(data.edges) && data.edges.length > 0 ? data.edges : createInitialEdges());
@@ -279,7 +352,7 @@ function EditorContent() {
             isCancelled = true;
             window.removeEventListener('spaceTitleUpdated', handleTitleUpdate);
         };
-    }, [applyProjectGoalToNodes, isDraft, mode, resetDraftState, setEdges, setNodes, setViewport, spaceId, t]);
+    }, [applyProjectGoalToNodes, direction, isDraft, mode, resetDraftState, setEdges, setNodes, setViewport, spaceId, t]);
 
     const cleanNodesForSave = (rawNodes) => {
         return rawNodes.map(n => ({
@@ -289,7 +362,9 @@ function EditorContent() {
                 chatHistory: n.data.chatHistory, response: n.data.response, isStarter: n.data.isStarter,
                 numBranches: n.data.numBranches, loopMode: n.data.loopMode,
                 selectedApiKey: n.data.selectedApiKey, branchCount: n.data.branchCount,
-                goalHistory: n.data.goalHistory, isLooping: n.data.isLooping
+                goalHistory: n.data.goalHistory, isLooping: n.data.isLooping,
+                goalInteractiveStates: n.data.goalInteractiveStates,
+                goalSelectedOptions: n.data.goalSelectedOptions,
             } : {}
         }));
     };
@@ -461,6 +536,10 @@ function EditorContent() {
         }
     }, [baseOnEdgesChange, markDraftDirty]);
 
+    useEffect(() => {
+        setNodes((currentNodes) => alignGoalNode(currentNodes, direction));
+    }, [direction, nodes, setNodes]);
+
     const updateMapState = useCallback((nextMapState) => {
         setMapState((current) => normalizeMapState(typeof nextMapState === 'function' ? nextMapState(current) : nextMapState));
         markDraftDirty();
@@ -595,6 +674,7 @@ function EditorContent() {
         const sharedGoal = starterNode?.data?.systemPrompt || currentProject?.sharedGoal || '';
         return nodes.map(n => ({
             ...n,
+            draggable: n.type === 'goalNode' ? false : n.draggable,
             data: {
                 ...n.data, dir: direction,
                 systemPrompt: n.data?.isStarter ? (n.data?.systemPrompt || currentProject?.sharedGoal || '') : (n.data?.systemPrompt || sharedGoal),
@@ -768,15 +848,17 @@ function EditorContent() {
                         </button>
 
                         {currentMode === 'graph' && (
-                            <button onClick={toggleDirection}
-                                style={{
-                                    background: 'rgba(255,255,255,0.04)', fontSize: '0.78rem', padding: '0.3rem 0.8rem',
+                        <button onClick={toggleDirection}
+                            aria-label={direction === 'LR' ? t('editor.ltr') : t('editor.ttb')}
+                            title={direction === 'LR' ? t('editor.ltr') : t('editor.ttb')}
+                            style={{
+                                    width: '36px', height: '36px', padding: 0,
+                                    background: 'rgba(255,255,255,0.04)',
                                     border: '1px solid var(--panel-border)', borderRadius: '20px',
-                                    display: 'flex', alignItems: 'center', gap: '0.3rem', color: 'var(--text-main)',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-main)',
                                     cursor: 'pointer', fontFamily: 'inherit'
                                 }}>
-                                {direction === 'LR' ? <Columns size={13} color="var(--primary)" /> : <Rows size={13} color="var(--primary)" />}
-                                {direction === 'LR' ? t('editor.ltr') : t('editor.ttb')}
+                                {direction === 'LR' ? <ArrowRight size={15} color="var(--primary)" /> : <ArrowDown size={15} color="var(--primary)" />}
                             </button>
                         )}
                     </div>
@@ -800,6 +882,7 @@ function EditorContent() {
                         spaceTitle={spaceTitle}
                         nodes={nodesWithData}
                         mapState={mapState}
+                        currentProject={currentProject}
                         onMapStateChange={updateMapState}
                         onOpenMode={(nextMode) => {
                             if (isDraft) {

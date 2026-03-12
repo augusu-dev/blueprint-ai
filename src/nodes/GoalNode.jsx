@@ -1,105 +1,45 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Handle, Position, useUpdateNodeInternals } from '@xyflow/react';
-import { Bot, Check, CheckSquare, Send, Square, Target, User } from 'lucide-react';
+import { Bot, Check, CheckSquare, ListTodo, Send, Square, Target, User } from 'lucide-react';
 import { useLanguage } from '../i18n';
+import {
+    buildInteractiveResponseText,
+    collectInteractiveProgress,
+    hasInteractiveSelection,
+    parseInteractiveContent,
+} from '../lib/interactiveContent';
 
-function parseInteractiveContent(text) {
-    const parts = [];
-    const lines = text.split('\n');
-    let currentText = '';
-    let inOptions = false;
-    let optionGroup = { type: null, items: [], title: '' };
-
-    const flushText = () => {
-        if (!currentText.trim()) return;
-        parts.push({ type: 'text', content: currentText.trim() });
-        currentText = '';
-    };
-
-    const flushOptions = () => {
-        if (optionGroup.items.length === 0) return;
-        parts.push({ ...optionGroup });
-        optionGroup = { type: null, items: [], title: '' };
-        inOptions = false;
-    };
-
-    for (const line of lines) {
-        const trimmed = line.trim();
-        const isCheckbox = /^-\s*\[\s*\]/.test(trimmed) || /^[-*]\s+/.test(trimmed);
-        const selectMatch = trimmed.match(/^([1-9A-D][.)\]])\s*(.+)$/);
-
-        if (isCheckbox) {
-            if (!inOptions || optionGroup.type !== 'checkbox') {
-                flushText();
-                flushOptions();
-                inOptions = true;
-                optionGroup = { type: 'checkbox', items: [], title: '' };
-            }
-            const label = trimmed.replace(/^[-*]\s*(\[\s*\])?\s*/, '').trim();
-            optionGroup.items.push({
-                label,
-                checked: false,
-                id: `cb-${Math.random().toString(36).slice(2, 7)}`,
-            });
-            continue;
-        }
-
-        if (selectMatch) {
-            if (!inOptions || optionGroup.type !== 'select') {
-                flushText();
-                flushOptions();
-                inOptions = true;
-                optionGroup = { type: 'select', items: [], title: '' };
-            }
-            optionGroup.items.push({
-                label: selectMatch[2],
-                value: selectMatch[1],
-                id: `sel-${Math.random().toString(36).slice(2, 7)}`,
-            });
-            continue;
-        }
-
-        if (inOptions) {
-            const looksLikeOptionTitle = trimmed.includes('select') || trimmed.includes('choose') || trimmed.includes('選ん');
-            if (looksLikeOptionTitle) {
-                flushOptions();
-                flushText();
-                optionGroup.title = trimmed;
-                continue;
-            }
-
-            if (trimmed !== '') {
-                flushOptions();
-                currentText += `${line}\n`;
-            }
-            continue;
-        }
-
-        currentText += `${line}\n`;
-    }
-
-    flushText();
-    flushOptions();
-    return parts;
-}
-
-const GOAL_SYSTEM_PROMPT = `あなたはワークスペースの目標設定アシスタントです。
-ユーザーがこのセッションの目的を明確にできるよう、短い対話で支援してください。
+const GOAL_SYSTEM_PROMPT = `あなたは Plan 設計アシスタントです。
+このセッションでは、目標、計画、報酬設計、改善ポイントを短い対話で整理してください。
 
 ルール:
-1. 一度に質問は1つだけにしてください。
-2. 回答を踏まえて次の1問を返してください。
-3. 必要なら選択肢やチェックリストを使ってください。
-4. 目標が固まったら [GOAL_COMPLETE] を先頭につけて、簡潔な目標文を返してください。
-5. 日本語で自然に返答してください。`;
+1. まず目標と期限・タイムラインを確認してください。
+2. 次に計画を、段階・今週やること・次にやることへ具体化してください。
+3. 必要なら報酬設計として、小さなごほうびや節目を提案してください。
+4. 必要なら改善として、詰まりそうな点や改善策を整理してください。
+5. 一度に質問は1つだけにしてください。
+6. 複数選択を出すときは \`- [ ] 選択肢\` の形式を使ってください。
+7. 単一選択を出すときは \`1. 選択肢\` の形式を使ってください。
+8. 標準運用として、週2回の軽い進捗確認で計画を微調整する前提にしてください。
+9. まとまったら [GOAL_COMPLETE] を先頭につけて、次の5行で簡潔にまとめてください。
+   この Plan の目標: ...
+   タイムライン: ...
+   計画メモ: ...
+   報酬設計: ...
+   改善メモ: ...
+10. 日本語で自然に返答してください。`;
 
 export default function GoalNode({ data, id }) {
     const { t } = useLanguage();
     const updateNodeInternals = useUpdateNodeInternals();
+    const isLR = data.dir === 'LR';
+    const sourcePos = isLR ? Position.Right : Position.Bottom;
     const {
         apiKeys = [],
         selectedApiKey = 0,
         goalHistory = [],
+        goalInteractiveStates = {},
+        goalSelectedOptions = {},
         onUpdateNodeData,
         onChange,
         onSetGoalFromNode,
@@ -108,9 +48,12 @@ export default function GoalNode({ data, id }) {
 
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
-    const [interactiveStates, setInteractiveStates] = useState({});
-    const [selectedOptions, setSelectedOptions] = useState({});
+    const [interactiveStates, setInteractiveStates] = useState(goalInteractiveStates);
+    const [selectedOptions, setSelectedOptions] = useState(goalSelectedOptions);
+    const [showProgressPanel, setShowProgressPanel] = useState(false);
     const messagesEndRef = useRef(null);
+    const savedInteractiveStatesRef = useRef(JSON.stringify(goalInteractiveStates || {}));
+    const savedSelectedOptionsRef = useRef(JSON.stringify(goalSelectedOptions || {}));
 
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -122,6 +65,22 @@ export default function GoalNode({ data, id }) {
         });
         return () => window.cancelAnimationFrame(frameId);
     }, [goalHistory.length, id, isLoading, updateNodeInternals]);
+
+    useEffect(() => {
+        const nextSerialized = JSON.stringify(interactiveStates);
+        if (nextSerialized === savedInteractiveStatesRef.current) return;
+        savedInteractiveStatesRef.current = nextSerialized;
+        if (!persistNodeData) return;
+        persistNodeData(id, 'goalInteractiveStates', interactiveStates);
+    }, [id, interactiveStates, persistNodeData]);
+
+    useEffect(() => {
+        const nextSerialized = JSON.stringify(selectedOptions);
+        if (nextSerialized === savedSelectedOptionsRef.current) return;
+        savedSelectedOptionsRef.current = nextSerialized;
+        if (!persistNodeData) return;
+        persistNodeData(id, 'goalSelectedOptions', selectedOptions);
+    }, [id, persistNodeData, selectedOptions]);
 
     const callAI = async (history) => {
         const apiKeyObj = apiKeys?.[selectedApiKey || 0];
@@ -136,8 +95,9 @@ export default function GoalNode({ data, id }) {
                 const modelToUse = userModel || 'gemini-3.1-pro-preview';
                 const contents = [
                     { role: 'user', parts: [{ text: GOAL_SYSTEM_PROMPT }] },
-                    { role: 'model', parts: [{ text: '承知しました。目標を一緒に整理しましょう。' }] },
+                    { role: 'model', parts: [{ text: 'はい、Plan を一緒に整理します。' }] },
                 ];
+
                 history.forEach((message) => {
                     contents.push({
                         role: message.role === 'user' ? 'user' : 'model',
@@ -198,6 +158,7 @@ export default function GoalNode({ data, id }) {
                     ? 'https://open.bigmodel.cn/api/paas/v4/chat/completions'
                     : 'https://api.openai.com/v1/chat/completions';
             const messages = [{ role: 'system', content: GOAL_SYSTEM_PROMPT }];
+
             history.forEach((message) => {
                 messages.push({
                     role: message.role === 'ai' ? 'assistant' : 'user',
@@ -226,29 +187,30 @@ export default function GoalNode({ data, id }) {
         if (!text || isLoading || !persistNodeData) return;
 
         const userMessage = { role: 'user', content: text };
-        const updatedHistory = [...goalHistory, userMessage];
-        persistNodeData(id, 'goalHistory', updatedHistory);
+        const nextHistory = [...goalHistory, userMessage];
+        persistNodeData(id, 'goalHistory', nextHistory);
 
-        if (!overrideText) setInput('');
+        if (!overrideText) {
+            setInput('');
+        }
+
         setIsLoading(true);
-
-        const reply = await callAI(updatedHistory);
+        const reply = await callAI(nextHistory);
         const aiMessage = { role: 'ai', content: reply };
-        const finalHistory = [...updatedHistory, aiMessage];
+        const finalHistory = [...nextHistory, aiMessage];
         persistNodeData(id, 'goalHistory', finalHistory);
         setIsLoading(false);
 
         if (reply.includes('[GOAL_COMPLETE]') && onSetGoalFromNode) {
-            const goalText = reply.replace('[GOAL_COMPLETE]', '').trim();
-            onSetGoalFromNode(id, goalText);
+            onSetGoalFromNode(id, reply.replace('[GOAL_COMPLETE]', '').trim());
         }
     };
 
     const toggleCheckbox = (messageIndex, itemId) => {
-        setInteractiveStates((previous) => {
-            const key = `${messageIndex}-${itemId}`;
-            return { ...previous, [key]: !previous[key] };
-        });
+        setInteractiveStates((previous) => ({
+            ...previous,
+            [`${messageIndex}-${itemId}`]: !previous[`${messageIndex}-${itemId}`],
+        }));
     };
 
     const selectOption = (messageIndex, itemId) => {
@@ -256,27 +218,23 @@ export default function GoalNode({ data, id }) {
     };
 
     const submitInteractive = (messageIndex, parsed) => {
-        let responseText = '';
-        parsed.forEach((part) => {
-            if (part.type === 'checkbox') {
-                const selected = part.items.filter((item) => interactiveStates[`${messageIndex}-${item.id}`]);
-                if (selected.length > 0) responseText += `${selected.map((item) => item.label).join(', ')}\n`;
-            }
-
-            if (part.type === 'select') {
-                const selectedId = selectedOptions[messageIndex];
-                const selected = part.items.find((item) => item.id === selectedId);
-                if (selected) responseText += `${selected.label}\n`;
-            }
-        });
-
-        if (responseText.trim()) handleSend(responseText.trim());
+        const responseText = buildInteractiveResponseText(parsed, messageIndex, interactiveStates, selectedOptions);
+        if (responseText) {
+            handleSend(responseText);
+        }
     };
+
+    const progressItems = useMemo(
+        () => collectInteractiveProgress(goalHistory, interactiveStates),
+        [goalHistory, interactiveStates],
+    );
+    const completedProgressCount = progressItems.filter((item) => item.checked).length;
 
     const renderAIMessage = (content, messageIndex) => {
         const cleanContent = content.replace('[GOAL_COMPLETE]', '').trim();
         const parsed = parseInteractiveContent(cleanContent);
         const hasInteractive = parsed.some((part) => part.type === 'checkbox' || part.type === 'select');
+        const canSubmit = hasInteractiveSelection(parsed, messageIndex, interactiveStates, selectedOptions);
 
         return (
             <div>
@@ -292,6 +250,11 @@ export default function GoalNode({ data, id }) {
                     if (part.type === 'checkbox') {
                         return (
                             <div key={partIndex} className="nodrag nopan" style={{ margin: '0.4rem 0' }}>
+                                {part.title && (
+                                    <div style={{ marginBottom: '0.3rem', fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+                                        {part.title}
+                                    </div>
+                                )}
                                 {part.items.map((item) => {
                                     const checked = Boolean(interactiveStates[`${messageIndex}-${item.id}`]);
                                     return (
@@ -327,50 +290,57 @@ export default function GoalNode({ data, id }) {
 
                     if (part.type === 'select') {
                         return (
-                            <div key={partIndex} className="nodrag nopan" style={{ margin: '0.4rem 0', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                                {part.items.map((item) => {
-                                    const isSelected = selectedOptions[messageIndex] === item.id;
-                                    return (
-                                        <div
-                                            key={item.id}
-                                            onClick={() => selectOption(messageIndex, item.id)}
-                                            style={{
-                                                padding: '0.4rem 0.6rem',
-                                                background: isSelected ? 'rgba(92, 124, 250, 0.15)' : 'rgba(255,255,255,0.02)',
-                                                border: isSelected ? '1px solid var(--primary)' : '1px solid var(--panel-border)',
-                                                boxShadow: isSelected ? '0 2px 8px rgba(92, 124, 250, 0.2)' : 'none',
-                                                borderRadius: '8px',
-                                                cursor: 'pointer',
-                                                color: 'var(--text-main)',
-                                                fontSize: '0.75rem',
-                                                textAlign: 'left',
-                                                transition: 'var(--transition-smooth)',
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                gap: '0.3rem',
-                                            }}
-                                        >
-                                            <span
+                            <div key={partIndex} className="nodrag nopan" style={{ margin: '0.4rem 0' }}>
+                                {part.title && (
+                                    <div style={{ marginBottom: '0.3rem', fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+                                        {part.title}
+                                    </div>
+                                )}
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                                    {part.items.map((item) => {
+                                        const isSelected = selectedOptions[messageIndex] === item.id;
+                                        return (
+                                            <div
+                                                key={item.id}
+                                                onClick={() => selectOption(messageIndex, item.id)}
                                                 style={{
-                                                    width: '18px',
-                                                    height: '18px',
-                                                    borderRadius: '50%',
-                                                    flexShrink: 0,
-                                                    background: isSelected ? 'var(--primary)' : 'rgba(255,255,255,0.06)',
-                                                    color: isSelected ? 'white' : 'var(--text-muted)',
+                                                    padding: '0.4rem 0.6rem',
+                                                    background: isSelected ? 'rgba(92, 124, 250, 0.15)' : 'rgba(255,255,255,0.02)',
+                                                    border: isSelected ? '1px solid var(--primary)' : '1px solid var(--panel-border)',
+                                                    boxShadow: isSelected ? '0 2px 8px rgba(92, 124, 250, 0.2)' : 'none',
+                                                    borderRadius: '8px',
+                                                    cursor: 'pointer',
+                                                    color: 'var(--text-main)',
+                                                    fontSize: '0.75rem',
+                                                    textAlign: 'left',
+                                                    transition: 'var(--transition-smooth)',
                                                     display: 'flex',
                                                     alignItems: 'center',
-                                                    justifyContent: 'center',
-                                                    fontSize: '0.65rem',
-                                                    fontWeight: 600,
+                                                    gap: '0.3rem',
                                                 }}
                                             >
-                                                {item.value.replace(/[.)\]]/g, '')}
-                                            </span>
-                                            {item.label}
-                                        </div>
-                                    );
-                                })}
+                                                <span
+                                                    style={{
+                                                        width: '18px',
+                                                        height: '18px',
+                                                        borderRadius: '50%',
+                                                        flexShrink: 0,
+                                                        background: isSelected ? 'var(--primary)' : 'rgba(255,255,255,0.06)',
+                                                        color: isSelected ? 'white' : 'var(--text-muted)',
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        justifyContent: 'center',
+                                                        fontSize: '0.65rem',
+                                                        fontWeight: 600,
+                                                    }}
+                                                >
+                                                    {item.value.replace(/[.)\]]/g, '')}
+                                                </span>
+                                                {item.label}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
                             </div>
                         );
                     }
@@ -380,8 +350,10 @@ export default function GoalNode({ data, id }) {
 
                 {hasInteractive && messageIndex === goalHistory.length - 1 && !content.includes('[GOAL_COMPLETE]') && (
                     <button
+                        type="button"
                         className="nodrag nopan"
                         onClick={() => submitInteractive(messageIndex, parsed)}
+                        disabled={!canSubmit}
                         style={{
                             marginTop: '0.4rem',
                             padding: '0.35rem 0.8rem',
@@ -389,13 +361,14 @@ export default function GoalNode({ data, id }) {
                             color: 'white',
                             border: 'none',
                             borderRadius: '12px',
-                            cursor: 'pointer',
+                            cursor: canSubmit ? 'pointer' : 'default',
                             fontSize: '0.75rem',
                             fontWeight: 500,
                             transition: 'var(--transition-smooth)',
+                            opacity: canSubmit ? 1 : 0.55,
                         }}
                     >
-                        選択を送信
+                        回答を送信
                     </button>
                 )}
             </div>
@@ -445,8 +418,31 @@ export default function GoalNode({ data, id }) {
                     <Target size={14} />
                 </div>
                 <div>
-                    <h3 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-main)' }}>{t('goal.title')}</h3>
-                    <p style={{ margin: 0, fontSize: '0.65rem', color: 'var(--text-muted)' }}>固定サイズのまま、内部スクロールで使えます</p>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
+                        <h3 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-main)' }}>{t('goal.title')}</h3>
+                        <button
+                            type="button"
+                            className="nodrag nopan"
+                            onClick={() => setShowProgressPanel((current) => !current)}
+                            style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.22rem',
+                                padding: '0.16rem 0.42rem',
+                                borderRadius: '999px',
+                                border: '1px solid rgba(255,255,255,0.08)',
+                                background: showProgressPanel ? 'rgba(92, 124, 250, 0.14)' : 'rgba(255,255,255,0.04)',
+                                color: 'var(--text-main)',
+                                cursor: 'pointer',
+                                fontSize: '0.62rem',
+                                fontFamily: 'inherit',
+                            }}
+                        >
+                            <ListTodo size={11} color="var(--primary)" />
+                            {progressItems.length > 0 ? `${completedProgressCount}/${progressItems.length}` : t('goal.progress')}
+                        </button>
+                    </div>
+                    <p style={{ margin: 0, fontSize: '0.65rem', color: 'var(--text-muted)' }}>目標・計画・報酬・改善を整理します</p>
                 </div>
             </div>
 
@@ -462,10 +458,60 @@ export default function GoalNode({ data, id }) {
                     gap: '0.75rem',
                 }}
             >
+                {showProgressPanel && (
+                    <div
+                        className="nodrag nopan"
+                        style={{
+                            padding: '0.7rem 0.75rem',
+                            borderRadius: '12px',
+                            border: '1px solid var(--panel-border)',
+                            background: 'rgba(255,255,255,0.03)',
+                            display: 'grid',
+                            gap: '0.45rem',
+                        }}
+                    >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.76rem', fontWeight: 600 }}>
+                            <ListTodo size={13} color="var(--primary)" />
+                            {t('goal.progress')}
+                            {progressItems.length > 0 && (
+                                <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 500 }}>
+                                    {completedProgressCount}/{progressItems.length}
+                                </span>
+                            )}
+                        </div>
+                        {progressItems.length === 0 ? (
+                            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                                {t('goal.progressEmpty')}
+                            </div>
+                        ) : (
+                            progressItems.map((item) => (
+                                <div
+                                    key={item.id}
+                                    style={{
+                                        display: 'flex',
+                                        alignItems: 'flex-start',
+                                        gap: '0.45rem',
+                                        padding: '0.42rem 0.48rem',
+                                        borderRadius: '10px',
+                                        background: item.checked ? 'rgba(52, 211, 153, 0.08)' : 'rgba(255,255,255,0.02)',
+                                        border: item.checked ? '1px solid rgba(52, 211, 153, 0.24)' : '1px solid rgba(255,255,255,0.05)',
+                                    }}
+                                >
+                                    {item.checked ? <CheckSquare size={14} color="var(--action)" /> : <Square size={14} color="var(--text-muted)" />}
+                                    <div style={{ minWidth: 0 }}>
+                                        <div style={{ fontSize: '0.75rem', lineHeight: 1.45 }}>{item.label}</div>
+                                        <div style={{ fontSize: '0.64rem', color: 'var(--text-muted)', marginTop: '0.12rem' }}>{item.groupTitle}</div>
+                                    </div>
+                                </div>
+                            ))
+                        )}
+                    </div>
+                )}
+
                 {goalHistory.length === 0 && (
                     <div style={{ padding: '1rem', textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
                         <Bot size={24} style={{ opacity: 0.3, marginBottom: '0.4rem' }} />
-                        <p style={{ margin: 0 }}>ここで目標を会話形式で決められます。</p>
+                        <p style={{ margin: 0 }}>ここで Plan を対話形式で整理できます。</p>
                     </div>
                 )}
 
@@ -513,7 +559,17 @@ export default function GoalNode({ data, id }) {
 
                 {isLoading && (
                     <div style={{ display: 'flex', gap: '0.5rem', animation: 'pulse 1.5s infinite' }}>
-                        <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: 'rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <div
+                            style={{
+                                width: '24px',
+                                height: '24px',
+                                borderRadius: '50%',
+                                background: 'rgba(255,255,255,0.06)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                            }}
+                        >
                             <Target size={12} color="var(--primary)" />
                         </div>
                         <div style={{ padding: '0.55rem 0.8rem', color: 'var(--text-muted)', fontSize: '0.8rem' }}>{t('goal.thinking')}</div>
@@ -569,6 +625,7 @@ export default function GoalNode({ data, id }) {
                         rows={1}
                     />
                     <button
+                        type="button"
                         onClick={() => handleSend()}
                         disabled={isLoading || !input.trim() || !persistNodeData}
                         style={{
@@ -593,10 +650,14 @@ export default function GoalNode({ data, id }) {
 
             <Handle
                 type="source"
-                position={Position.Right}
+                position={sourcePos}
                 id="goal"
                 style={{
-                    right: -10,
+                    right: isLR ? -10 : undefined,
+                    bottom: isLR ? undefined : -10,
+                    left: isLR ? undefined : '50%',
+                    top: isLR ? '50%' : undefined,
+                    transform: isLR ? 'translateY(-50%)' : 'translateX(-50%)',
                     width: 16,
                     height: 16,
                     background: 'var(--primary)',

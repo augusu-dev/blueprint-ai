@@ -102,11 +102,13 @@ const translations = {
         'chat.actionRejected': 'アクションを破棄しました',
 
         // Goal Wizard
-        'goal.title': '🎯 目標を決める',
+        'goal.title': 'Plan',
         'goal.back': 'チャットに戻る',
-        'goal.placeholder': 'このスペースの目的や目標を教えてください...',
+        'goal.placeholder': 'この Plan で目標、計画、報酬設計、改善したいことを教えてください...',
         'goal.thinking': '考え中...',
-        'goal.complete': '目標設定が完了しました。チャットに戻ります...',
+        'goal.complete': 'Plan の整理が完了しました。チャットに戻ります...',
+        'goal.progress': 'タスク進捗',
+        'goal.progressEmpty': 'チェック付きタスクが出ると、ここに進捗が表示されます。',
 
         // Nodes
         'node.addNode': 'ノードを追加',
@@ -218,11 +220,13 @@ const translations = {
         'chat.actionExecuted': 'Action executed',
         'chat.actionRejected': 'Action rejected',
 
-        'goal.title': '🎯 Set Goal',
+        'goal.title': 'Plan',
         'goal.back': 'Back to Chat',
-        'goal.placeholder': 'Describe the purpose or goal of this space...',
+        'goal.placeholder': 'Describe the goal, plan, rewards, or improvements for this Plan...',
         'goal.thinking': 'Thinking...',
-        'goal.complete': 'Goal setting complete. Returning to chat...',
+        'goal.complete': 'Plan setup complete. Returning to chat...',
+        'goal.progress': 'Task Progress',
+        'goal.progressEmpty': 'Checklist tasks will appear here when the plan conversation creates them.',
 
         'node.addNode': 'Add node',
         'node.systemPrompt': 'System Prompt',
@@ -332,11 +336,13 @@ const translations = {
         'chat.actionExecuted': '操作已执行',
         'chat.actionRejected': '操作已拒绝',
 
-        'goal.title': '🎯 设定目标',
+        'goal.title': 'Plan',
         'goal.back': '返回聊天',
-        'goal.placeholder': '描述此空间的目的或目标...',
+        'goal.placeholder': '输入这个 Plan 中要整理的目标、计划、奖励设计或改进点...',
         'goal.thinking': '思考中...',
-        'goal.complete': '目标设定完成，返回聊天...',
+        'goal.complete': 'Plan 整理完成，返回聊天...',
+        'goal.progress': '任务进度',
+        'goal.progressEmpty': '当对话生成带复选框的任务时，这里会显示进度。',
 
         'node.addNode': '添加节点',
         'node.systemPrompt': '系统提示',
