@@ -24,9 +24,16 @@
     position: absolute;
     inset: -6px;
     border-radius: 24px;
-    border: 2px dashed rgba(248, 113, 113, 0.95);
+    border: 3px solid rgba(248, 113, 113, 0.95);
     pointer-events: none;
-    animation: shared-node-dash 1.4s linear infinite;
+    box-shadow: 0 0 0 6px rgba(248, 113, 113, 0.12);
+}
+
+.glass-panel.node-shared-edit {
+    border-color: rgba(248, 113, 113, 0.95) !important;
+    box-shadow:
+        0 0 0 6px rgba(248, 113, 113, 0.12),
+        0 14px 40px rgba(248, 113, 113, 0.16) !important;
 }
 
 .custom-node.node-muted-edit {
@@ -37,15 +44,6 @@
     opacity: 0.35 !important;
     cursor: default !important;
     pointer-events: none;
-}
-
-@keyframes shared-node-dash {
-    from {
-        transform: translateX(0);
-    }
-    to {
-        transform: translateX(8px);
-    }
 }
 
 .node-header {

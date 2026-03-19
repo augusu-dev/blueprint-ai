@@ -1535,7 +1535,7 @@ function EditorContent() {
                 width: '100vw',
                 overflow: 'hidden',
                 boxShadow: isGraphEditMode
-                    ? 'inset 0 0 0 2px rgba(248, 113, 113, 0.58), 0 0 0 4px rgba(248, 113, 113, 0.12)'
+                    ? 'inset 0 0 0 5px rgba(248, 113, 113, 0.72), inset 0 0 0 12px rgba(248, 113, 113, 0.10), 0 0 0 1px rgba(248, 113, 113, 0.18)'
                     : 'none',
             }}
         >

@@ -396,8 +396,12 @@ export default function GoalNode({ data, id }) {
                 overflow: 'visible',
                 position: 'relative',
                 borderRadius: '16px',
-                border: '1px solid var(--primary)',
-                boxShadow: '0 8px 32px rgba(92, 124, 250, 0.15)',
+                border: data.showSharedHighlight
+                    ? '3px solid rgba(248, 113, 113, 0.95)'
+                    : '1px solid var(--primary)',
+                boxShadow: data.showSharedHighlight
+                    ? '0 0 0 6px rgba(248, 113, 113, 0.12), 0 14px 40px rgba(248, 113, 113, 0.16)'
+                    : '0 8px 32px rgba(92, 124, 250, 0.15)',
             }}
         >
             <div

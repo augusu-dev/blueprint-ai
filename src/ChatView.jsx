@@ -1122,8 +1122,8 @@ export default function ChatView({
                                 <button
                                     onClick={() => handleDeletePrompt(column.userIndex)}
                                     style={userDeleteButtonStyle}
-                                    title="邵ｺ阮吶・郢晏干ﾎ溽ｹ晢ｽｳ郢晏干繝ｨ郢ｧ雋樒ｎ鬮ｯ・､"
-                                    aria-label="邵ｺ阮吶・郢晏干ﾎ溽ｹ晢ｽｳ郢晏干繝ｨ郢ｧ雋樒ｎ鬮ｯ・､"
+                                    title="この候補を削除"
+                                    aria-label="この候補を削除"
                                 >
                                     <Trash2 size={11} />
                                 </button>
@@ -1153,10 +1153,11 @@ export default function ChatView({
                                 <button
                                     onClick={() => handleToggleReplyCollapse(column.replyIndex)}
                                     style={iconActionStyle}
-                                    title={replyCollapsed ? '陜玲ｨ抵ｽｭ譁撰ｽ帝勗・ｨ驕会ｽｺ' : '陜玲ｨ抵ｽｭ譁撰ｽ定ｬ壼･・企｡・ｳ郢ｧﾂ'}
+                                    title={replyCollapsed ? '返信を展開' : '返信を折りたたむ'}
+                                    aria-label={replyCollapsed ? '返信を展開' : '返信を折りたたむ'}
                                 >
                                     {replyCollapsed ? <ChevronDown size={11} /> : <ChevronUp size={11} />}
-                                    {replyCollapsed ? '陜玲ｨ抵ｽｭ譁撰ｽ帝勗・ｨ驕会ｽｺ' : '陜玲ｨ抵ｽｭ譁撰ｽ定ｬ壼･・企｡・ｳ郢ｧﾂ'}
+                                    {replyCollapsed ? '返信を展開' : '返信を折りたたむ'}
                                 </button>
                             )}
 
@@ -1165,10 +1166,11 @@ export default function ChatView({
                                     onClick={() => handleGeneratePrompt(column.userIndex)}
                                     disabled={isLoading}
                                     style={generatePromptButtonStyle}
-                                    title="邵ｺ阮吶・郢晏干ﾎ溽ｹ晢ｽｳ郢晏干繝ｨ邵ｺ・ｧ陜玲ｨ抵ｽｭ譁撰ｽ帝墓ｻ薙・"
+                                    title="質問を送る"
+                                    aria-label="質問を送る"
                                 >
                                     <Sparkles size={11} />
-                                    {isGeneratingPrompt ? '騾墓ｻ薙・闕ｳ・ｭ...' : '陜玲ｨ抵ｽｭ譁撰ｽ帝墓ｻ薙・'}
+                                    {isGeneratingPrompt ? '送信中...' : '質問を送る'}
                                 </button>
                             )}
                         </div>
@@ -1209,24 +1211,89 @@ export default function ChatView({
                                         justifyContent: 'center',
                                         boxShadow: '0 10px 20px rgba(29, 33, 44, 0.08)',
                                     }}
-                                >
+                                    >
                                     <Bot size={14} color="#6f7688" />
                                 </div>
                             </div>
-                            <div
-                                ref={(element) => {
-                                    if (element) messageContentRefs.current[column.replyIndex] = element;
-                                    else delete messageContentRefs.current[column.replyIndex];
-                                }}
-                                onMouseUp={() => setTimeout(() => handleTextSelection(column.replyIndex), 0)}
-                                onTouchEnd={() => setTimeout(() => handleTextSelection(column.replyIndex), 0)}
-                                style={{
-                                    ...assistantBubbleStyle,
-                                    ...bubbleWidthStyle,
-                                    minWidth: 0,
-                                }}
-                            >
-                                {renderMessageContent(replyMessage, column.replyIndex)}
+                            <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
+                                {responseVariantCount > 1 && (
+                                    <>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleSwitchResponseVariant(column.replyIndex, -1)}
+                                            disabled={activeResponseVariantIndex <= 0}
+                                            aria-label="Previous reply"
+                                            style={{
+                                                ...iconActionStyle,
+                                                position: 'absolute',
+                                                left: '-0.15rem',
+                                                top: '50%',
+                                                transform: 'translateY(-50%)',
+                                                zIndex: 2,
+                                                width: '30px',
+                                                height: '30px',
+                                                borderRadius: '50%',
+                                                background: 'rgba(255,255,255,0.96)',
+                                                boxShadow: '0 10px 24px rgba(17, 31, 66, 0.10)',
+                                            }}
+                                        >
+                                            <ChevronLeft size={14} />
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleSwitchResponseVariant(column.replyIndex, 1)}
+                                            disabled={activeResponseVariantIndex >= responseVariantCount - 1}
+                                            aria-label="Next reply"
+                                            style={{
+                                                ...iconActionStyle,
+                                                position: 'absolute',
+                                                right: '-0.15rem',
+                                                top: '50%',
+                                                transform: 'translateY(-50%)',
+                                                zIndex: 2,
+                                                width: '30px',
+                                                height: '30px',
+                                                borderRadius: '50%',
+                                                background: 'rgba(255,255,255,0.96)',
+                                                boxShadow: '0 10px 24px rgba(17, 31, 66, 0.10)',
+                                            }}
+                                        >
+                                            <ChevronRight size={14} />
+                                        </button>
+                                    </>
+                                )}
+                                <div
+                                    ref={(element) => {
+                                        if (element) messageContentRefs.current[column.replyIndex] = element;
+                                        else delete messageContentRefs.current[column.replyIndex];
+                                    }}
+                                    onMouseUp={() => setTimeout(() => handleTextSelection(column.replyIndex), 0)}
+                                    onTouchEnd={() => setTimeout(() => handleTextSelection(column.replyIndex), 0)}
+                                    style={{
+                                        ...assistantBubbleStyle,
+                                        ...bubbleWidthStyle,
+                                        minWidth: 0,
+                                        paddingLeft: responseVariantCount > 1 ? '2.1rem' : assistantBubbleStyle.paddingLeft,
+                                        paddingRight: responseVariantCount > 1 ? '2.1rem' : assistantBubbleStyle.paddingRight,
+                                    }}
+                                >
+                                    {responseVariantCount > 1 && (
+                                        <div
+                                            style={{
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                marginBottom: '0.55rem',
+                                                fontSize: '0.7rem',
+                                                color: '#8b91a1',
+                                                fontWeight: 600,
+                                            }}
+                                        >
+                                            {activeResponseVariantIndex + 1}/{responseVariantCount}
+                                        </div>
+                                    )}
+                                    {renderMessageContent(replyMessage, column.replyIndex)}
+                                </div>
                             </div>
                         </div>
 
@@ -1250,14 +1317,14 @@ export default function ChatView({
                             >
                                 <div style={{ fontSize: '0.88rem', color: '#22314d', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
                                     <Sparkles size={14} color="#63a9ff" />
-                                    選択範囲を説明
+                                    選択範囲の説明を作成
                                 </div>
                                 <div style={{ fontSize: '0.82rem', color: '#63a9ff', lineHeight: 1.7 }}>
-                                    「{selectionDraft.text}」
+                                    ?{selectionDraft.text}?
                                 </div>
                                 <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
                                     <button style={cardActionStyle} onClick={handleCreateExplanation} disabled={isExplaining}>
-                                        <Sparkles size={12} /> {isExplaining ? '生成中...' : '説明する'}
+                                        <Sparkles size={12} /> {isExplaining ? '生成中...' : '説明を作成'}
                                     </button>
                                     <button style={cardActionStyle} onClick={() => setSelectionDraft(null)}>
                                         閉じる
@@ -1292,20 +1359,20 @@ export default function ChatView({
                                     </div>
                                     {replyExplanations.length > 1 && (
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                                            <button style={iconActionStyle} disabled={activeExplanationIndex <= 0} onClick={() => shiftExplanation(column.replyIndex, -1)} aria-label="Previous explanation">
+                                            <button style={iconActionStyle} disabled={activeExplanationIndex <= 0} onClick={() => shiftExplanation(column.replyIndex, -1)} aria-label="前の説明">
                                                 <ChevronLeft size={12} />
                                             </button>
                                             <span style={{ fontSize: '0.72rem', color: '#63779a', minWidth: '36px', textAlign: 'center' }}>
                                                 {activeExplanationIndex + 1}/{replyExplanations.length}
                                             </span>
-                                            <button style={iconActionStyle} disabled={activeExplanationIndex >= replyExplanations.length - 1} onClick={() => shiftExplanation(column.replyIndex, 1)} aria-label="Next explanation">
+                                            <button style={iconActionStyle} disabled={activeExplanationIndex >= replyExplanations.length - 1} onClick={() => shiftExplanation(column.replyIndex, 1)} aria-label="次の説明">
                                                 <ChevronRight size={12} />
                                             </button>
                                         </div>
                                     )}
                                 </div>
                                 <div style={{ fontSize: '0.82rem', color: '#63a9ff', lineHeight: 1.7 }}>
-                                    「{currentExplanation.text}」
+                                    ?{currentExplanation.text}?
                                 </div>
                                 <div style={{ fontSize: '0.86rem', color: '#22314d', lineHeight: 1.9 }}>
                                     {currentExplanation.summary}
@@ -1399,30 +1466,6 @@ export default function ChatView({
                             <button style={iconActionStyle} onClick={() => handleRetry(column.replyIndex)} disabled={isLoading} title={t('chat.retry')} aria-label={t('chat.retry')}>
                                 <RefreshCw size={14} />
                             </button>
-
-                            {responseVariantCount > 1 && (
-                                <div style={{ ...actionStripStyle, paddingLeft: '0.28rem', marginLeft: '0.08rem', borderLeft: '1px solid rgba(68, 76, 95, 0.12)' }}>
-                                    <button
-                                        style={iconActionStyle}
-                                        disabled={activeResponseVariantIndex <= 0}
-                                        onClick={() => handleSwitchResponseVariant(column.replyIndex, -1)}
-                                        aria-label="Previous reply"
-                                    >
-                                        <ChevronLeft size={14} />
-                                    </button>
-                                    <span style={{ fontSize: '0.7rem', color: '#8b91a1', minWidth: '44px', textAlign: 'center' }}>
-                                        {activeResponseVariantIndex + 1}/{responseVariantCount}
-                                    </span>
-                                    <button
-                                        style={iconActionStyle}
-                                        disabled={activeResponseVariantIndex >= responseVariantCount - 1}
-                                        onClick={() => handleSwitchResponseVariant(column.replyIndex, 1)}
-                                        aria-label="Next reply"
-                                    >
-                                        <ChevronRight size={14} />
-                                    </button>
-                                </div>
-                            )}
 
                             <button style={iconActionStyle} onClick={() => handleBranch(column.replyIndex)} disabled={branchCount >= 10} title={branchCount >= 10 ? t('chat.branchMax') : t('chat.branch')} aria-label={branchCount >= 10 ? t('chat.branchMax') : t('chat.branch')}>
                                 <GitBranch size={14} />
