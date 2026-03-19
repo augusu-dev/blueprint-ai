@@ -11,7 +11,7 @@ import {
     useReactFlow,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Settings, X, LogOut, ArrowDown, ArrowRight, Menu, Edit3, MessageSquare, GitFork, Map as MapIcon } from 'lucide-react';
+import { Settings, X, LogOut, Menu, Edit3, MessageSquare, GitFork, Map as MapIcon } from 'lucide-react';
 import { supabase } from './lib/supabase';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useLanguage } from './i18n';
@@ -375,7 +375,7 @@ function EditorContent() {
     const [mapState, setMapState] = useState(createDefaultMapState);
     const [spaceTitle, setSpaceTitle] = useState(t('editor.loading'));
     const [isHydrated, setIsHydrated] = useState(false);
-    const [direction, setDirection] = useState('LR');
+    const direction = 'LR';
     const [showSettings, setShowSettings] = useState(false);
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
@@ -1101,8 +1101,6 @@ function EditorContent() {
         }));
     }, [nodes, edges, direction, currentProject, projectContextPrompt, updateNodeData, toggleLoopForNode, onAddBranch, onQuickAdd, onDeleteNode, apiKeys, navigate, spaceId, isDraft]);
 
-    const toggleDirection = () => setDirection(d => d === 'LR' ? 'TB' : 'LR');
-
     useEffect(() => {
         const timer = setTimeout(() => {
             nodes.forEach(node => {
@@ -1238,20 +1236,6 @@ function EditorContent() {
                             })}
                         </div>
 
-                        {currentMode === 'graph' && (
-                        <button onClick={toggleDirection}
-                            aria-label={direction === 'LR' ? t('editor.ltr') : t('editor.ttb')}
-                            title={direction === 'LR' ? t('editor.ltr') : t('editor.ttb')}
-                            style={{
-                                    width: '36px', height: '36px', padding: 0,
-                                    background: 'rgba(255,255,255,0.04)',
-                                    border: '1px solid var(--panel-border)', borderRadius: '20px',
-                                    display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-main)',
-                                    cursor: 'pointer', fontFamily: 'inherit'
-                                }}>
-                                {direction === 'LR' ? <ArrowRight size={15} color="var(--primary)" /> : <ArrowDown size={15} color="var(--primary)" />}
-                            </button>
-                        )}
                     </div>
                 </div>
 
@@ -1295,6 +1279,7 @@ function EditorContent() {
                             edgeTypes={edgeTypes}
                             fitView
                             colorMode="system"
+                            zoomActivationKeyCode="Control"
                         >
                             <Controls />
                             <MiniMap nodeStrokeWidth={3} zoomable pannable />

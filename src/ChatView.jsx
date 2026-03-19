@@ -9,7 +9,6 @@ import {
     Copy,
     ExternalLink,
     GitBranch,
-    Pin,
     RefreshCw,
     Send,
     Sparkles,
@@ -202,6 +201,14 @@ export default function ChatView({
     const [selectedImprovementVersionId, setSelectedImprovementVersionId] = useState(null);
     const messagesEndRef = useRef(null);
     const messageContentRefs = useRef({});
+    const workflowRailRef = useRef(null);
+    const workflowDragStateRef = useRef({
+        active: false,
+        pointerId: null,
+        startX: 0,
+        scrollLeft: 0,
+    });
+    const [isWorkflowDragging, setIsWorkflowDragging] = useState(false);
 
     useEffect(() => {
         if (!node) return;
@@ -267,13 +274,6 @@ export default function ChatView({
             const apiKeyObj = apiKeys?.[node?.data?.selectedApiKey || 0];
             const { key } = resolveModelSelection(apiKeyObj);
             if (!key) return;
-            /*
-
-            const titlePrompt = `次の最初のメッセージ「${messageText}」をもとに、このワークスペースのタイトルを10文字以内で1つだけ返してください。説明は不要です。`;
-            */
-            /*
-            const titlePrompt = `次の最初のメッセージをもとに、このスペースの短いタイトルを日本語で1つだけ作成してください。記号や引用符は不要です。\n\n${messageText}`;
-            */
             const titlePrompt = `Create one short Japanese title for this space from the first message below. Return only the title with no quotes or extra punctuation.\n\n${messageText}`;
             let newTitle = (await requestChatText({
                 apiKeyEntry: apiKeyObj,
@@ -380,20 +380,20 @@ export default function ChatView({
             const before = sourceContent.slice(Math.max(0, selectionDraft.start - 120), selectionDraft.start);
             const after = sourceContent.slice(selectionDraft.end, Math.min(sourceContent.length, selectionDraft.end + 120));
             const prompt = [
-                '次の選択箇所を日本語でやさしく短く説明してください。',
-                '条件:',
-                '- 最大300文字',
-                '- 難しい言い換えは避ける',
-                '- その場で理解できる説明にする',
+                'Explain the selected passage in concise Japanese.',
+                'Rules:',
+                '- Keep it within 300 Japanese characters.',
+                '- Use plain, easy-to-read language.',
+                '- Focus on what the passage means in this context.',
                 '',
-                `選択箇所: 「${selectionDraft.text}」`,
+                `Selected text: "${selectionDraft.text}"`,
                 '',
-                `前後文脈: 「${before}<<${selectionDraft.text}>>${after}」`,
+                `Context: ${before}<<${selectionDraft.text}>>${after}`,
             ].join('\n');
 
             const explanationText = truncateInlineExplanation(await callAI(
                 [{ role: 'user', content: prompt }],
-                'あなたは学習支援の説明役です。最大300文字で、自然な日本語で簡潔に説明してください。',
+                'Return only a short Japanese explanation of the selected text.',
             ));
 
             const explanation = {
@@ -663,6 +663,96 @@ export default function ChatView({
         return segments;
     };
 
+    const conversationColumns = useMemo(() => {
+        const columns = [];
+
+        for (let index = 0; index < chatHistory.length; index += 1) {
+            const message = chatHistory[index];
+            if (!message) continue;
+
+            if (message.role === 'user') {
+                const replyIndex = chatHistory[index + 1]?.role === 'ai' ? index + 1 : null;
+                columns.push({
+                    key: message.id || `user-${index}`,
+                    userIndex: index,
+                    replyIndex,
+                });
+                if (replyIndex !== null) {
+                    index += 1;
+                }
+                continue;
+            }
+
+            columns.push({
+                key: message.id || `ai-${index}`,
+                userIndex: null,
+                replyIndex: index,
+            });
+        }
+
+        return columns;
+    }, [chatHistory]);
+
+    const workflowPromptCount = conversationColumns.filter((column) => column.userIndex !== null).length;
+    const isWorkflowMode = workflowPromptCount >= 2;
+
+    const isInteractiveDragTarget = (target) => (
+        target instanceof Element
+        && Boolean(target.closest('button, input, textarea, select, a, [role="button"]'))
+    );
+
+    const stopWorkflowDrag = (pointerId = null) => {
+        const rail = workflowRailRef.current;
+        const currentPointerId = pointerId ?? workflowDragStateRef.current.pointerId;
+        if (rail && currentPointerId !== null) {
+            try {
+                rail.releasePointerCapture?.(currentPointerId);
+            } catch {
+                // Ignore pointer capture cleanup failures.
+            }
+        }
+
+        workflowDragStateRef.current = {
+            active: false,
+            pointerId: null,
+            startX: 0,
+            scrollLeft: 0,
+        };
+        setIsWorkflowDragging(false);
+    };
+
+    const handleWorkflowPointerDown = (event) => {
+        if (event.pointerType === 'mouse' && event.button !== 0) return;
+        if (isInteractiveDragTarget(event.target)) return;
+
+        const rail = workflowRailRef.current;
+        if (!rail || rail.scrollWidth <= rail.clientWidth) return;
+
+        workflowDragStateRef.current = {
+            active: true,
+            pointerId: event.pointerId,
+            startX: event.clientX,
+            scrollLeft: rail.scrollLeft,
+        };
+        rail.setPointerCapture?.(event.pointerId);
+        setIsWorkflowDragging(true);
+    };
+
+    const handleWorkflowPointerMove = (event) => {
+        const rail = workflowRailRef.current;
+        const dragState = workflowDragStateRef.current;
+        if (!rail || !dragState.active) return;
+
+        const deltaX = event.clientX - dragState.startX;
+        rail.scrollLeft = dragState.scrollLeft - deltaX;
+    };
+
+    const handleWorkflowPointerUp = (event) => {
+        stopWorkflowDrag(event.pointerId);
+    };
+
+    useEffect(() => () => stopWorkflowDrag(), []);
+
     const planAccess = useMemo(() => (
         spaceId
             ? getProjectPlanAccess(spaceId)
@@ -732,11 +822,11 @@ export default function ChatView({
     const projectRewardSection = planAccess.project?.planSections?.reward || { history: [], interactiveStates: {}, selectedOptions: {} };
     const selectedImprovementSection = selectedImprovementVersion || { history: [], interactiveStates: {}, selectedOptions: {} };
     const readOnlyMessage = !planAccess.isProjectSpace && activePlanSection !== 'goal'
-        ? 'このスペースでは目標のみ設定できます。'
+        ? 'このスペースでは目標のみ編集できます。'
         : activePlanSection !== 'goal' && !planAccess.isPlanSpace
             ? 'このセクションはプロジェクトの Plan Space でのみ編集できます。'
             : activePlanSection === 'improvement' && isViewingArchivedImprovement
-                ? '過去バージョンは閲覧のみです。復元すると編集できます。'
+                ? '過去バージョンを表示中です。復元するまで編集できません。'
                 : '';
     const isPlanSectionReadOnly = Boolean(readOnlyMessage);
     const sectionTabs = [
@@ -839,8 +929,6 @@ export default function ChatView({
     }
 
     const branchCount = node.data?.branchCount || 0;
-    const pinnedMessages = [];
-    const handleTogglePinnedMessage = () => {};
     const iconActionStyle = {
         width: '30px',
         height: '30px',
@@ -933,6 +1021,453 @@ export default function ChatView({
         lineHeight: 1.78,
         border: '1px solid rgba(34, 37, 47, 0.06)',
     };
+    const getWorkflowColumnOffset = (columnIndex) => Math.min(columnIndex * 52, 156);
+    const renderConversationColumn = (column, columnIndex) => {
+        const userMessage = column.userIndex !== null ? chatHistory[column.userIndex] : null;
+        const replyMessage = column.replyIndex !== null ? normalizeAiMessage(chatHistory[column.replyIndex]) : null;
+        const replyCollapsed = replyMessage ? isReplyCollapsed(replyMessage) : false;
+        const replyVariant = replyMessage ? getActiveResponseVariant(replyMessage) : null;
+        const displayedReplyContent = replyVariant?.content || replyMessage?.content || '';
+        const pendingAction = replyVariant?.pendingAction || null;
+        const actionStatus = replyVariant?.actionStatus || null;
+        const responseVariantCount = replyMessage?.responseVariants?.length || 0;
+        const activeResponseVariantIndex = replyMessage?.activeVariantIndex || 0;
+        const canGeneratePrompt = userMessage && column.replyIndex === null;
+        const isGeneratingPrompt = userMessage && generatingPromptIndex === column.userIndex;
+        const replyExplanations = replyMessage ? getInlineExplanations(replyMessage) : [];
+        const activeExplanationIndex = replyExplanations.findIndex((item) => item.id === activeExplanation?.explanationId);
+        const currentExplanation = activeExplanation?.messageIndex === column.replyIndex && activeExplanationIndex >= 0
+            ? replyExplanations[activeExplanationIndex]
+            : null;
+        const columnOffset = isWorkflowMode ? getWorkflowColumnOffset(columnIndex) : 0;
+        const columnWidth = isWorkflowMode ? 'clamp(280px, 44vw, 430px)' : '100%';
+        const columnShellStyle = isWorkflowMode
+            ? {
+                flex: `0 0 ${columnWidth}`,
+                width: columnWidth,
+                minWidth: columnWidth,
+                marginTop: `${columnOffset}px`,
+                padding: '0.95rem 0.9rem 1rem',
+                borderRadius: '30px',
+                background: 'linear-gradient(180deg, rgba(255,255,255,0.82) 0%, rgba(247,243,250,0.94) 100%)',
+                border: '1px solid rgba(126, 136, 166, 0.12)',
+                boxShadow: '0 18px 38px rgba(24, 27, 35, 0.08)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '1rem',
+                position: 'relative',
+                minHeight: '220px',
+            }
+            : {
+                width: '100%',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '1.5rem',
+            };
+        const bubbleWidthStyle = {
+            maxWidth: isWorkflowMode ? '100%' : undefined,
+            width: isWorkflowMode ? '100%' : undefined,
+        };
+        const floatingCardWidth = isWorkflowMode ? 'calc(100% - 2.7rem)' : 'min(560px, calc(100% - 2.5rem))';
+        const actionCardWidth = isWorkflowMode ? 'calc(100% - 2.7rem)' : 'min(400px, calc(100% - 2.5rem))';
+
+        return (
+            <div key={column.key} style={columnShellStyle}>
+                {isWorkflowMode && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', paddingLeft: '0.1rem' }}>
+                        <div style={{ width: '8px', height: '8px', borderRadius: '999px', background: 'rgba(116, 129, 255, 0.82)' }} />
+                        <span style={{ fontSize: '0.72rem', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#7a8194', fontWeight: 600 }}>
+                            Step {columnIndex + 1}
+                        </span>
+                    </div>
+                )}
+
+                {userMessage && (
+                    <div
+                        className="chat-msg-wrapper"
+                        style={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'flex-end',
+                            animation: 'fadeIn 0.2s ease',
+                            width: '100%',
+                            minWidth: 0,
+                        }}
+                    >
+                        <div
+                            style={{
+                                display: 'flex',
+                                gap: '0.65rem',
+                                flexDirection: 'row-reverse',
+                                maxWidth: isWorkflowMode ? '100%' : '78%',
+                                minWidth: 0,
+                                width: isWorkflowMode ? '100%' : 'auto',
+                            }}
+                        >
+                            <div style={avatarColumnStyle}>
+                                <div
+                                    style={{
+                                        width: '34px',
+                                        height: '34px',
+                                        borderRadius: '50%',
+                                        background: '#eadff8',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        boxShadow: '0 8px 20px rgba(174, 150, 223, 0.2)',
+                                    }}
+                                >
+                                    <User size={14} color="#664b8d" />
+                                </div>
+                                <button
+                                    onClick={() => handleDeletePrompt(column.userIndex)}
+                                    style={userDeleteButtonStyle}
+                                    title="邵ｺ阮吶・郢晏干ﾎ溽ｹ晢ｽｳ郢晏干繝ｨ郢ｧ雋樒ｎ鬮ｯ・､"
+                                    aria-label="邵ｺ阮吶・郢晏干ﾎ溽ｹ晢ｽｳ郢晏干繝ｨ郢ｧ雋樒ｎ鬮ｯ・､"
+                                >
+                                    <Trash2 size={11} />
+                                </button>
+                            </div>
+                            <div
+                                style={{
+                                    ...userBubbleStyle,
+                                    ...bubbleWidthStyle,
+                                    minWidth: 0,
+                                }}
+                            >
+                                {userMessage.content}
+                            </div>
+                        </div>
+
+                        <div
+                            style={{
+                                marginTop: '0.35rem',
+                                marginRight: '2.55rem',
+                                alignSelf: 'flex-end',
+                                ...actionStripStyle,
+                                justifyContent: 'flex-end',
+                                maxWidth: isWorkflowMode ? 'calc(100% - 2.55rem)' : undefined,
+                            }}
+                        >
+                            {column.replyIndex !== null && (
+                                <button
+                                    onClick={() => handleToggleReplyCollapse(column.replyIndex)}
+                                    style={iconActionStyle}
+                                    title={replyCollapsed ? '陜玲ｨ抵ｽｭ譁撰ｽ帝勗・ｨ驕会ｽｺ' : '陜玲ｨ抵ｽｭ譁撰ｽ定ｬ壼･・企｡・ｳ郢ｧﾂ'}
+                                >
+                                    {replyCollapsed ? <ChevronDown size={11} /> : <ChevronUp size={11} />}
+                                    {replyCollapsed ? '陜玲ｨ抵ｽｭ譁撰ｽ帝勗・ｨ驕会ｽｺ' : '陜玲ｨ抵ｽｭ譁撰ｽ定ｬ壼･・企｡・ｳ郢ｧﾂ'}
+                                </button>
+                            )}
+
+                            {canGeneratePrompt && (
+                                <button
+                                    onClick={() => handleGeneratePrompt(column.userIndex)}
+                                    disabled={isLoading}
+                                    style={generatePromptButtonStyle}
+                                    title="邵ｺ阮吶・郢晏干ﾎ溽ｹ晢ｽｳ郢晏干繝ｨ邵ｺ・ｧ陜玲ｨ抵ｽｭ譁撰ｽ帝墓ｻ薙・"
+                                >
+                                    <Sparkles size={11} />
+                                    {isGeneratingPrompt ? '騾墓ｻ薙・闕ｳ・ｭ...' : '陜玲ｨ抵ｽｭ譁撰ｽ帝墓ｻ薙・'}
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                )}
+
+                {replyMessage && !replyCollapsed && (
+                    <div
+                        className="chat-msg-wrapper"
+                        style={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'flex-start',
+                            animation: 'fadeIn 0.2s ease',
+                            width: '100%',
+                            minWidth: 0,
+                        }}
+                    >
+                        <div
+                            style={{
+                                display: 'flex',
+                                gap: '0.65rem',
+                                flexDirection: 'row',
+                                maxWidth: isWorkflowMode ? '100%' : '72%',
+                                minWidth: 0,
+                                width: isWorkflowMode ? '100%' : 'auto',
+                            }}
+                        >
+                            <div style={avatarColumnStyle}>
+                                <div
+                                    style={{
+                                        width: '34px',
+                                        height: '34px',
+                                        borderRadius: '50%',
+                                        background: '#ffffff',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        boxShadow: '0 10px 20px rgba(29, 33, 44, 0.08)',
+                                    }}
+                                >
+                                    <Bot size={14} color="#6f7688" />
+                                </div>
+                            </div>
+                            <div
+                                ref={(element) => {
+                                    if (element) messageContentRefs.current[column.replyIndex] = element;
+                                    else delete messageContentRefs.current[column.replyIndex];
+                                }}
+                                onMouseUp={() => setTimeout(() => handleTextSelection(column.replyIndex), 0)}
+                                onTouchEnd={() => setTimeout(() => handleTextSelection(column.replyIndex), 0)}
+                                style={{
+                                    ...assistantBubbleStyle,
+                                    ...bubbleWidthStyle,
+                                    minWidth: 0,
+                                }}
+                            >
+                                {renderMessageContent(replyMessage, column.replyIndex)}
+                            </div>
+                        </div>
+
+                        {selectionDraft?.messageIndex === column.replyIndex && (
+                            <div
+                                style={{
+                                    marginLeft: '2.7rem',
+                                    marginTop: '0.5rem',
+                                    padding: '0.95rem 1.05rem',
+                                    borderRadius: '18px',
+                                    background: 'linear-gradient(180deg, rgba(235,242,255,0.96) 0%, rgba(219,231,255,0.93) 100%)',
+                                    border: '1px solid rgba(125,161,255,0.35)',
+                                    boxShadow: '0 16px 34px rgba(17,31,66,0.18)',
+                                    width: floatingCardWidth,
+                                    maxWidth: isWorkflowMode ? 'none' : '560px',
+                                    minWidth: 0,
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    gap: '0.75rem',
+                                }}
+                            >
+                                <div style={{ fontSize: '0.88rem', color: '#22314d', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                                    <Sparkles size={14} color="#63a9ff" />
+                                    選択範囲を説明
+                                </div>
+                                <div style={{ fontSize: '0.82rem', color: '#63a9ff', lineHeight: 1.7 }}>
+                                    「{selectionDraft.text}」
+                                </div>
+                                <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
+                                    <button style={cardActionStyle} onClick={handleCreateExplanation} disabled={isExplaining}>
+                                        <Sparkles size={12} /> {isExplaining ? '生成中...' : '説明する'}
+                                    </button>
+                                    <button style={cardActionStyle} onClick={() => setSelectionDraft(null)}>
+                                        閉じる
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {currentExplanation && (
+                            <div
+                                style={{
+                                    marginLeft: '2.7rem',
+                                    marginTop: '0.5rem',
+                                    padding: '1rem 1.1rem',
+                                    background: 'linear-gradient(180deg, rgba(235,242,255,0.96) 0%, rgba(219,231,255,0.93) 100%)',
+                                    border: '1px solid rgba(125,161,255,0.35)',
+                                    borderRadius: '18px',
+                                    boxShadow: '0 18px 36px rgba(17,31,66,0.18)',
+                                    display: 'inline-flex',
+                                    flexDirection: 'column',
+                                    gap: '0.8rem',
+                                    width: floatingCardWidth,
+                                    maxWidth: isWorkflowMode ? 'none' : '560px',
+                                    minWidth: 0,
+                                    animation: 'fadeIn 0.2s ease',
+                                }}
+                            >
+                                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.7rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                                    <div style={{ fontSize: '0.88rem', color: '#22314d', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                                        <Sparkles size={14} color="#63a9ff" />
+                                        説明
+                                    </div>
+                                    {replyExplanations.length > 1 && (
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                                            <button style={iconActionStyle} disabled={activeExplanationIndex <= 0} onClick={() => shiftExplanation(column.replyIndex, -1)} aria-label="Previous explanation">
+                                                <ChevronLeft size={12} />
+                                            </button>
+                                            <span style={{ fontSize: '0.72rem', color: '#63779a', minWidth: '36px', textAlign: 'center' }}>
+                                                {activeExplanationIndex + 1}/{replyExplanations.length}
+                                            </span>
+                                            <button style={iconActionStyle} disabled={activeExplanationIndex >= replyExplanations.length - 1} onClick={() => shiftExplanation(column.replyIndex, 1)} aria-label="Next explanation">
+                                                <ChevronRight size={12} />
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
+                                <div style={{ fontSize: '0.82rem', color: '#63a9ff', lineHeight: 1.7 }}>
+                                    「{currentExplanation.text}」
+                                </div>
+                                <div style={{ fontSize: '0.86rem', color: '#22314d', lineHeight: 1.9 }}>
+                                    {currentExplanation.summary}
+                                </div>
+                                <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
+                                    <button style={cardActionStyle} onClick={() => openExplanation(column.replyIndex, currentExplanation.id)}>
+                                        もう一度見る
+                                    </button>
+                                    <button style={cardActionStyle} onClick={() => setActiveExplanation(null)}>
+                                        閉じる
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {pendingAction && (
+                            <div
+                                style={{
+                                    marginLeft: '2.7rem',
+                                    marginTop: '0.5rem',
+                                    padding: '0.85rem 1rem',
+                                    background: 'rgba(92, 124, 250, 0.08)',
+                                    border: '1px solid rgba(92, 124, 250, 0.25)',
+                                    borderRadius: '12px',
+                                    display: 'inline-flex',
+                                    flexDirection: 'column',
+                                    gap: '0.6rem',
+                                    width: actionCardWidth,
+                                    maxWidth: isWorkflowMode ? 'none' : '400px',
+                                    minWidth: 0,
+                                    animation: 'fadeIn 0.3s ease',
+                                }}
+                            >
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-main)', fontSize: '0.85rem', fontWeight: 500 }}>
+                                    <Bot size={14} color="var(--primary)" />
+                                    {pendingAction === 'CREATE_NODE'
+                                        ? t('chat.aiSuggestsBranch')
+                                        : pendingAction === 'TOGGLE_LOOP_ON'
+                                            ? t('chat.aiSuggestsLoopOn')
+                                            : 'AI Suggests Action'}
+                                </div>
+
+                                {actionStatus === 'pending' ? (
+                                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                        <button
+                                            onClick={() => handleActionApprove(column.replyIndex)}
+                                            style={{
+                                                padding: '0.4rem 0.8rem',
+                                                background: 'var(--primary)',
+                                                color: 'white',
+                                                border: 'none',
+                                                borderRadius: '6px',
+                                                fontSize: '0.8rem',
+                                                cursor: 'pointer',
+                                                transition: 'var(--transition-smooth)',
+                                                fontWeight: 500,
+                                            }}
+                                        >
+                                            <Check size={12} style={{ display: 'inline', marginRight: '4px', verticalAlign: '-2px' }} />
+                                            {t('chat.approve')}
+                                        </button>
+                                        <button
+                                            onClick={() => handleActionReject(column.replyIndex)}
+                                            style={{
+                                                padding: '0.4rem 0.8rem',
+                                                background: 'rgba(255,100,100,0.15)',
+                                                color: '#ff6b6b',
+                                                border: '1px solid rgba(255,100,100,0.3)',
+                                                borderRadius: '6px',
+                                                fontSize: '0.8rem',
+                                                cursor: 'pointer',
+                                                transition: 'var(--transition-smooth)',
+                                            }}
+                                        >
+                                            {t('chat.reject')}
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <div style={{ color: actionStatus === 'approved' ? 'var(--action)' : 'var(--text-muted)', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                                        {actionStatus === 'approved' ? <Check size={12} /> : null}
+                                        {actionStatus === 'approved' ? t('chat.actionExecuted') : t('chat.actionRejected')}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        <div className="chat-actions" style={{ marginLeft: '2.7rem', marginTop: '0.4rem', ...actionStripStyle }}>
+                            <button style={iconActionStyle} onClick={() => handleCopy(displayedReplyContent, column.replyIndex)} title={copiedIdx === column.replyIndex ? t('chat.copied') : t('chat.copy')} aria-label={copiedIdx === column.replyIndex ? t('chat.copied') : t('chat.copy')}>
+                                {copiedIdx === column.replyIndex ? <Check size={14} /> : <Copy size={14} />}
+                            </button>
+                            <button style={iconActionStyle} onClick={() => handleRetry(column.replyIndex)} disabled={isLoading} title={t('chat.retry')} aria-label={t('chat.retry')}>
+                                <RefreshCw size={14} />
+                            </button>
+
+                            {responseVariantCount > 1 && (
+                                <div style={{ ...actionStripStyle, paddingLeft: '0.28rem', marginLeft: '0.08rem', borderLeft: '1px solid rgba(68, 76, 95, 0.12)' }}>
+                                    <button
+                                        style={iconActionStyle}
+                                        disabled={activeResponseVariantIndex <= 0}
+                                        onClick={() => handleSwitchResponseVariant(column.replyIndex, -1)}
+                                        aria-label="Previous reply"
+                                    >
+                                        <ChevronLeft size={14} />
+                                    </button>
+                                    <span style={{ fontSize: '0.7rem', color: '#8b91a1', minWidth: '44px', textAlign: 'center' }}>
+                                        {activeResponseVariantIndex + 1}/{responseVariantCount}
+                                    </span>
+                                    <button
+                                        style={iconActionStyle}
+                                        disabled={activeResponseVariantIndex >= responseVariantCount - 1}
+                                        onClick={() => handleSwitchResponseVariant(column.replyIndex, 1)}
+                                        aria-label="Next reply"
+                                    >
+                                        <ChevronRight size={14} />
+                                    </button>
+                                </div>
+                            )}
+
+                            <button style={iconActionStyle} onClick={() => handleBranch(column.replyIndex)} disabled={branchCount >= 10} title={branchCount >= 10 ? t('chat.branchMax') : t('chat.branch')} aria-label={branchCount >= 10 ? t('chat.branchMax') : t('chat.branch')}>
+                                <GitBranch size={14} />
+                            </button>
+
+                            {branchCount > 0 && (
+                                <div style={{ ...actionStripStyle, paddingLeft: '0.28rem', marginLeft: '0.08rem', borderLeft: '1px solid rgba(68, 76, 95, 0.12)' }}>
+                                    <button
+                                        style={iconActionStyle}
+                                        disabled={activeBranchView <= 0}
+                                        onClick={() => setActiveBranchView((value) => Math.max(0, value - 1))}
+                                        aria-label="Previous branch"
+                                    >
+                                        <ChevronLeft size={14} />
+                                    </button>
+                                    <span style={{ fontSize: '0.7rem', color: '#8b91a1', minWidth: '20px', textAlign: 'center' }}>
+                                        {activeBranchView + 1}
+                                    </span>
+                                    <button
+                                        style={iconActionStyle}
+                                        disabled={activeBranchView >= branchCount}
+                                        onClick={() => setActiveBranchView((value) => Math.min(branchCount, value + 1))}
+                                        aria-label="Next branch"
+                                    >
+                                        <ChevronRight size={14} />
+                                    </button>
+
+                                    {activeBranchView > 0 && onNavigateToBranch && (
+                                        <button
+                                            style={iconActionStyle}
+                                            onClick={() => onNavigateToBranch(node.id, activeBranchView)}
+                                            title={t('chat.moveTo')}
+                                            aria-label={t('chat.moveTo')}
+                                        >
+                                            <ExternalLink size={14} />
+                                        </button>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                )}
+            </div>
+        );
+    };
     return (
         <div
             style={{
@@ -1012,50 +1547,6 @@ export default function ChatView({
                     minWidth: 0,
                 }}
             >
-                {false && (
-                    <div
-                        style={{
-                            display: 'flex',
-                            flexDirection: 'column',
-                            gap: '0.55rem',
-                            marginBottom: '0.25rem',
-                        }}
-                    >
-                        <div style={{ fontSize: '0.72rem', color: '#8b91a1', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
-                            ピン留め
-                        </div>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.55rem' }}>
-                            {pinnedMessages.map((message) => (
-                                <button
-                                    key={message.id}
-                                    type="button"
-                                    onClick={() => handleTogglePinnedMessage(message.id)}
-                                    style={{
-                                        maxWidth: '260px',
-                                        textAlign: 'left',
-                                        padding: '0.72rem 0.9rem',
-                                        borderRadius: '18px',
-                                        border: '1px solid rgba(38, 43, 53, 0.08)',
-                                        background: '#ffffff',
-                                        color: '#3a4152',
-                                        boxShadow: '0 12px 28px rgba(29, 33, 44, 0.08)',
-                                        cursor: 'pointer',
-                                    }}
-                                    title="ピンを外す"
-                                >
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', marginBottom: '0.28rem', color: '#8b91a1', fontSize: '0.72rem' }}>
-                                        <Pin size={12} />
-                                        {message.role === 'user' ? 'プロンプト' : '回答'}
-                                    </div>
-                                    <div style={{ fontSize: '0.82rem', lineHeight: 1.55, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                        {message.content}
-                                    </div>
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-                )}
-
                 {chatHistory.length === 0 ? (
                     <div
                         style={{
@@ -1069,378 +1560,57 @@ export default function ChatView({
                         <p style={{ fontSize: '0.96rem', fontWeight: 400 }}>{t('chat.empty')}</p>
                     </div>
                 ) : (
-                    chatHistory.map((rawMessage, idx) => {
-                        const message = rawMessage.role === 'ai' ? normalizeAiMessage(rawMessage) : rawMessage;
-                        const activeVariant = message.role === 'ai' ? getActiveResponseVariant(message) : null;
-                        const displayedContent = activeVariant?.content || message.content || '';
-                        const pendingAction = activeVariant?.pendingAction || null;
-                        const actionStatus = activeVariant?.actionStatus || null;
-                        const responseVariantCount = message.role === 'ai' ? message.responseVariants.length : 0;
-                        const activeResponseVariantIndex = message.role === 'ai' ? message.activeVariantIndex : 0;
-                        const linkedReplyIndex = message.role === 'user' && chatHistory[idx + 1]?.role === 'ai' ? idx + 1 : null;
-                        const linkedReplyCollapsed = linkedReplyIndex !== null ? isReplyCollapsed(chatHistory[linkedReplyIndex]) : false;
-                        const canGeneratePrompt = message.role === 'user' && linkedReplyIndex === null;
-                        const isGeneratingPrompt = generatingPromptIndex === idx;
-                        const explanations = getInlineExplanations(message);
-                        const activeExplanationIndex = explanations.findIndex((item) => item.id === activeExplanation?.explanationId);
-                        const currentExplanation = activeExplanation?.messageIndex === idx && activeExplanationIndex >= 0
-                            ? explanations[activeExplanationIndex]
-                            : null;
-
-                        if (message.role === 'ai' && isReplyCollapsed(message)) {
-                            return null;
-                        }
-
-                        return (
-                            <div
-                                key={idx}
-                                className="chat-msg-wrapper"
-                                style={{
-                                    display: 'flex',
-                                    flexDirection: 'column',
-                                    alignItems: message.role === 'user' ? 'flex-end' : 'flex-start',
-                                    animation: 'fadeIn 0.2s ease',
-                                    width: '100%',
-                                    minWidth: 0,
-                                }}
-                            >
-                                <div
-                                        style={{
-                                            display: 'flex',
-                                            gap: '0.65rem',
-                                            flexDirection: message.role === 'user' ? 'row-reverse' : 'row',
-                                            maxWidth: message.role === 'user' ? '78%' : '72%',
-                                            minWidth: 0,
-                                        }}
-                                    >
-                                        <div style={avatarColumnStyle}>
-                                            <div
-                                                style={{
-                                                    width: '34px',
-                                                    height: '34px',
-                                                    borderRadius: '50%',
-                                                    background: message.role === 'user' ? '#eadff8' : '#ffffff',
-                                                    display: 'flex',
-                                                    alignItems: 'center',
-                                                    justifyContent: 'center',
-                                                    boxShadow: message.role === 'user' ? '0 8px 20px rgba(174, 150, 223, 0.2)' : '0 10px 20px rgba(29, 33, 44, 0.08)',
-                                                }}
-                                            >
-                                                {message.role === 'user' ? <User size={14} color="#664b8d" /> : <Bot size={14} color="#6f7688" />}
-                                            </div>
-                                            {message.role === 'user' && (
-                                                <button
-                                                    onClick={() => handleDeletePrompt(idx)}
-                                                    style={userDeleteButtonStyle}
-                                                    title="このプロンプトを削除"
-                                                    aria-label="このプロンプトを削除"
-                                                >
-                                                    <Trash2 size={11} />
-                                                </button>
-                                            )}
-                                        </div>
-                                    <div
-                                        ref={(element) => {
-                                            if (element) messageContentRefs.current[idx] = element;
-                                            else delete messageContentRefs.current[idx];
-                                        }}
-                                        onMouseUp={() => {
-                                            if (message.role === 'ai') {
-                                                setTimeout(() => handleTextSelection(idx), 0);
-                                            }
-                                        }}
-                                        onTouchEnd={() => {
-                                            if (message.role === 'ai') {
-                                                setTimeout(() => handleTextSelection(idx), 0);
-                                            }
-                                        }}
-                                        style={{
-                                            ...(message.role === 'user' ? userBubbleStyle : assistantBubbleStyle),
-                                            minWidth: 0,
-                                        }}
-                                    >
-                                        {renderMessageContent(message, idx)}
-                                    </div>
-                                </div>
-
-                                {message.role === 'user' && (
-                                    <div
-                                        style={{
-                                            marginTop: '0.35rem',
-                                            marginRight: '2.55rem',
-                                            alignSelf: 'flex-end',
-                                            ...actionStripStyle,
-                                            justifyContent: 'flex-end',
-                                        }}
-                                    >
-                                        {linkedReplyIndex !== null && (
-                                            <button
-                                                onClick={() => handleToggleReplyCollapse(linkedReplyIndex)}
-                                                style={iconActionStyle}
-                                                title={linkedReplyCollapsed ? '回答を表示' : '回答を折り畳む'}
-                                            >
-                                                {linkedReplyCollapsed ? <ChevronDown size={11} /> : <ChevronUp size={11} />}
-                                                {linkedReplyCollapsed ? '回答を表示' : '回答を折り畳む'}
-                                            </button>
-                                        )}
-
-                                        {canGeneratePrompt && (
-                                            <button
-                                                onClick={() => handleGeneratePrompt(idx)}
-                                                disabled={isLoading}
-                                                style={generatePromptButtonStyle}
-                                                title="このプロンプトで回答を生成"
-                                            >
-                                                <Sparkles size={11} />
-                                                {isGeneratingPrompt ? '生成中...' : '回答を生成'}
-                                            </button>
-                                        )}
-                                    </div>
-                                )}
-
-                                {selectionDraft?.messageIndex === idx && (
-                                    <div
-                                        style={{
-                                            marginLeft: '2.5rem',
-                                            marginTop: '0.5rem',
-                                            padding: '0.95rem 1.05rem',
-                                            borderRadius: '18px',
-                                            background: 'linear-gradient(180deg, rgba(235,242,255,0.96) 0%, rgba(219,231,255,0.93) 100%)',
-                                            border: '1px solid rgba(125,161,255,0.35)',
-                                            boxShadow: '0 16px 34px rgba(17,31,66,0.18)',
-                                            width: 'min(560px, calc(100% - 2.5rem))',
-                                            maxWidth: '560px',
-                                            minWidth: 0,
-                                            display: 'flex',
-                                            flexDirection: 'column',
-                                            gap: '0.75rem',
-                                        }}
-                                    >
-                                        <div style={{ fontSize: '0.88rem', color: '#22314d', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
-                                            <Sparkles size={14} color="#63a9ff" />
-                                            この部分を説明します
-                                        </div>
-                                        <div style={{ fontSize: '0.82rem', color: '#63a9ff', lineHeight: 1.7 }}>
-                                            「{selectionDraft.text}」
-                                        </div>
-                                        <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
-                                            <button style={cardActionStyle} onClick={handleCreateExplanation} disabled={isExplaining}>
-                                                <Sparkles size={12} /> {isExplaining ? '説明中...' : '説明する'}
-                                            </button>
-                                            <button style={cardActionStyle} onClick={() => setSelectionDraft(null)}>
-                                                閉じる
-                                            </button>
-                                        </div>
-                                    </div>
-                                )}
-
-                                {currentExplanation && (
-                                    <div
-                                        style={{
-                                            marginLeft: '2.5rem',
-                                            marginTop: '0.5rem',
-                                            padding: '1rem 1.1rem',
-                                            background: 'linear-gradient(180deg, rgba(235,242,255,0.96) 0%, rgba(219,231,255,0.93) 100%)',
-                                            border: '1px solid rgba(125,161,255,0.35)',
-                                            borderRadius: '18px',
-                                            boxShadow: '0 18px 36px rgba(17,31,66,0.18)',
-                                            display: 'inline-flex',
-                                            flexDirection: 'column',
-                                            gap: '0.8rem',
-                                            width: 'min(560px, calc(100% - 2.5rem))',
-                                            maxWidth: '560px',
-                                            minWidth: 0,
-                                            animation: 'fadeIn 0.2s ease',
-                                        }}
-                                    >
-                                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.7rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                                            <div style={{ fontSize: '0.88rem', color: '#22314d', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
-                                                <Sparkles size={14} color="#63a9ff" />
-                                                この部分の説明
-                                            </div>
-                                            {explanations.length > 1 && (
-                                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                                                    <button style={iconActionStyle} disabled={activeExplanationIndex <= 0} onClick={() => shiftExplanation(idx, -1)} aria-label="Previous explanation">
-                                                        <ChevronLeft size={12} />
-                                                    </button>
-                                                    <span style={{ fontSize: '0.72rem', color: '#63779a', minWidth: '36px', textAlign: 'center' }}>
-                                                        {activeExplanationIndex + 1}/{explanations.length}
-                                                    </span>
-                                                    <button style={iconActionStyle} disabled={activeExplanationIndex >= explanations.length - 1} onClick={() => shiftExplanation(idx, 1)} aria-label="Next explanation">
-                                                        <ChevronRight size={12} />
-                                                    </button>
-                                                </div>
-                                            )}
-                                        </div>
-                                        <div style={{ fontSize: '0.82rem', color: '#63a9ff', lineHeight: 1.7 }}>
-                                            「{currentExplanation.text}」
-                                        </div>
-                                        <div style={{ fontSize: '0.86rem', color: '#22314d', lineHeight: 1.9 }}>
-                                            {currentExplanation.summary}
-                                        </div>
-                                        <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
-                                            <button style={cardActionStyle} onClick={() => openExplanation(idx, currentExplanation.id)}>
-                                                もう一度
-                                            </button>
-                                            <button style={cardActionStyle} onClick={() => setActiveExplanation(null)}>
-                                                閉じる
-                                            </button>
-                                        </div>
-                                    </div>
-                                )}
-
-                                {message.role === 'ai' && pendingAction && (
-                                    <div
-                                        style={{
-                                            marginLeft: '2.5rem',
-                                            marginTop: '0.5rem',
-                                            padding: '0.85rem 1rem',
-                                            background: 'rgba(92, 124, 250, 0.08)',
-                                            border: '1px solid rgba(92, 124, 250, 0.25)',
-                                            borderRadius: '12px',
-                                            display: 'inline-flex',
-                                            flexDirection: 'column',
-                                            gap: '0.6rem',
-                                            width: 'min(400px, calc(100% - 2.5rem))',
-                                            maxWidth: '400px',
-                                            minWidth: 0,
-                                            animation: 'fadeIn 0.3s ease',
-                                        }}
-                                    >
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-main)', fontSize: '0.85rem', fontWeight: 500 }}>
-                                            <Bot size={14} color="var(--primary)" />
-                                            {pendingAction === 'CREATE_NODE'
-                                                ? t('chat.aiSuggestsBranch')
-                                                : pendingAction === 'TOGGLE_LOOP_ON'
-                                                    ? t('chat.aiSuggestsLoopOn')
-                                                    : 'AI Suggests Action'}
-                                        </div>
-
-                                        {actionStatus === 'pending' ? (
-                                            <div style={{ display: 'flex', gap: '0.5rem' }}>
-                                                <button
-                                                    onClick={() => handleActionApprove(idx)}
-                                                    style={{
-                                                        padding: '0.4rem 0.8rem',
-                                                        background: 'var(--primary)',
-                                                        color: 'white',
-                                                        border: 'none',
-                                                        borderRadius: '6px',
-                                                        fontSize: '0.8rem',
-                                                        cursor: 'pointer',
-                                                        transition: 'var(--transition-smooth)',
-                                                        fontWeight: 500,
-                                                    }}
-                                                >
-                                                    <Check size={12} style={{ display: 'inline', marginRight: '4px', verticalAlign: '-2px' }} />
-                                                    {t('chat.approve')}
-                                                </button>
-                                                <button
-                                                    onClick={() => handleActionReject(idx)}
-                                                    style={{
-                                                        padding: '0.4rem 0.8rem',
-                                                        background: 'rgba(255,100,100,0.15)',
-                                                        color: '#ff6b6b',
-                                                        border: '1px solid rgba(255,100,100,0.3)',
-                                                        borderRadius: '6px',
-                                                        fontSize: '0.8rem',
-                                                        cursor: 'pointer',
-                                                        transition: 'var(--transition-smooth)',
-                                                    }}
-                                                >
-                                                    {t('chat.reject')}
-                                                </button>
-                                            </div>
-                                        ) : (
-                                            <div style={{ color: actionStatus === 'approved' ? 'var(--action)' : 'var(--text-muted)', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                                                {actionStatus === 'approved' ? <Check size={12} /> : null}
-                                                {actionStatus === 'approved' ? t('chat.actionExecuted') : t('chat.actionRejected')}
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
-
-                                {message.role === 'ai' && (
-                                    <div className="chat-actions" style={{ marginLeft: '2.6rem', marginTop: '0.4rem', ...actionStripStyle }}>
-                                        <button style={iconActionStyle} onClick={() => handleCopy(displayedContent, idx)} title={copiedIdx === idx ? t('chat.copied') : t('chat.copy')} aria-label={copiedIdx === idx ? t('chat.copied') : t('chat.copy')}>
-                                            {copiedIdx === idx ? <Check size={14} /> : <Copy size={14} />}
-                                        </button>
-                                        <button style={iconActionStyle} onClick={() => handleRetry(idx)} disabled={isLoading} title={t('chat.retry')} aria-label={t('chat.retry')}>
-                                            <RefreshCw size={14} />
-                                        </button>
-
-                                        {responseVariantCount > 1 && (
-                                            <div style={{ ...actionStripStyle, paddingLeft: '0.28rem', marginLeft: '0.08rem', borderLeft: '1px solid rgba(68, 76, 95, 0.12)' }}>
-                                                <button
-                                                    style={iconActionStyle}
-                                                    disabled={activeResponseVariantIndex <= 0}
-                                                    onClick={() => handleSwitchResponseVariant(idx, -1)}
-                                                    aria-label="Previous reply"
-                                                >
-                                                    <ChevronLeft size={14} />
-                                                </button>
-                                                <span style={{ ...counterTextStyle, minWidth: '44px' }}>
-                                                    回答 {activeResponseVariantIndex + 1}/{responseVariantCount}
-                                                </span>
-                                                <span style={{ fontSize: '0.7rem', color: '#8b91a1', minWidth: '44px', textAlign: 'center' }}>
-                                                    {activeResponseVariantIndex + 1}/{responseVariantCount}
-                                                </span>
-                                                <button
-                                                    style={iconActionStyle}
-                                                    disabled={activeResponseVariantIndex >= responseVariantCount - 1}
-                                                    onClick={() => handleSwitchResponseVariant(idx, 1)}
-                                                    aria-label="Next reply"
-                                                >
-                                                    <ChevronRight size={14} />
-                                                </button>
-                                            </div>
-                                        )}
-
-                                        <button style={iconActionStyle} onClick={() => handleBranch(idx)} disabled={branchCount >= 10} title={branchCount >= 10 ? t('chat.branchMax') : t('chat.branch')} aria-label={branchCount >= 10 ? t('chat.branchMax') : t('chat.branch')}>
-                                            <GitBranch size={14} />
-                                        </button>
-
-                                        {branchCount > 0 && (
-                                            <div style={{ ...actionStripStyle, paddingLeft: '0.28rem', marginLeft: '0.08rem', borderLeft: '1px solid rgba(68, 76, 95, 0.12)' }}>
-                                                <button
-                                                    style={iconActionStyle}
-                                                    disabled={activeBranchView <= 0}
-                                                    onClick={() => setActiveBranchView((value) => Math.max(0, value - 1))}
-                                                    aria-label="Previous branch"
-                                                >
-                                                    <ChevronLeft size={14} />
-                                                </button>
-                                                <span style={{ fontSize: '0.7rem', color: '#8b91a1', minWidth: '20px', textAlign: 'center' }}>
-                                                    {activeBranchView + 1}
-                                                </span>
-                                                <button
-                                                    style={iconActionStyle}
-                                                    disabled={activeBranchView >= branchCount}
-                                                    onClick={() => setActiveBranchView((value) => Math.min(branchCount, value + 1))}
-                                                    aria-label="Next branch"
-                                                >
-                                                    <ChevronRight size={14} />
-                                                </button>
-
-                                                {activeBranchView > 0 && onNavigateToBranch && (
-                                                    <button
-                                                        style={iconActionStyle}
-                                                        onClick={() => onNavigateToBranch(node.id, activeBranchView)}
-                                                        title={t('chat.moveTo')}
-                                                        aria-label={t('chat.moveTo')}
-                                                    >
-                                                        <ExternalLink size={14} />
-                                                    </button>
-                                                )}
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
-                            </div>
-                        );
-                    })
+                    <div
+                        ref={workflowRailRef}
+                        onPointerDown={isWorkflowMode ? handleWorkflowPointerDown : undefined}
+                        onPointerMove={isWorkflowMode ? handleWorkflowPointerMove : undefined}
+                        onPointerUp={isWorkflowMode ? handleWorkflowPointerUp : undefined}
+                        onPointerCancel={isWorkflowMode ? handleWorkflowPointerUp : undefined}
+                        onPointerLeave={isWorkflowMode ? handleWorkflowPointerUp : undefined}
+                        style={{
+                            display: 'flex',
+                            alignItems: 'flex-start',
+                            gap: isWorkflowMode ? '0.85rem' : '1.5rem',
+                            minWidth: 0,
+                            width: '100%',
+                            overflowX: isWorkflowMode ? 'auto' : 'visible',
+                            overflowY: 'visible',
+                            paddingBottom: isWorkflowMode ? '1rem' : 0,
+                            cursor: isWorkflowMode ? (isWorkflowDragging ? 'grabbing' : 'grab') : 'default',
+                            userSelect: isWorkflowMode && isWorkflowDragging ? 'none' : 'auto',
+                            touchAction: isWorkflowMode ? 'pan-x pan-y' : 'auto',
+                            scrollbarWidth: isWorkflowMode ? 'thin' : 'none',
+                        }}
+                    >
+                        <div
+                            style={{
+                                display: 'flex',
+                                alignItems: 'flex-start',
+                                gap: isWorkflowMode ? '0.85rem' : 0,
+                                minWidth: isWorkflowMode ? 'max-content' : 0,
+                                width: isWorkflowMode ? 'max-content' : '100%',
+                            }}
+                        >
+                            {conversationColumns.map((column, columnIndex) => (
+                                <React.Fragment key={column.key}>
+                                    {isWorkflowMode && columnIndex > 0 && (
+                                        <div
+                                            style={{
+                                                flex: '0 0 48px',
+                                                width: '48px',
+                                                alignSelf: 'flex-start',
+                                                marginTop: `${Math.max(64, getWorkflowColumnOffset(columnIndex) + 26)}px`,
+                                                borderTop: '2px dashed rgba(125, 161, 255, 0.45)',
+                                                opacity: 0.92,
+                                            }}
+                                        />
+                                    )}
+                                    {renderConversationColumn(column, columnIndex)}
+                                </React.Fragment>
+                            ))}
+                        </div>
+                    </div>
                 )}
-
                 {isLoading && (
                     <div style={{ display: 'flex', gap: '0.65rem', animation: 'pulse 1.5s infinite', marginLeft: '0.2rem' }}>
                         <div style={{ width: '30px', height: '30px', borderRadius: '50%', background: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, boxShadow: '0 10px 20px rgba(29, 33, 44, 0.08)' }}>
@@ -1519,9 +1689,12 @@ export default function ChatView({
                     </button>
                 </div>
                 <div style={{ display: 'none' }}>
-                    Enterでプロンプト追加 / 生成は各メッセージから
+                    Enter縺ｧ繝励Ο繝ｳ繝励ヨ霑ｽ蜉 / 逕滓・縺ｯ蜷・Γ繝・そ繝ｼ繧ｸ縺九ｉ
                 </div>
             </div>
         </div>
     );
 }
+
+
+

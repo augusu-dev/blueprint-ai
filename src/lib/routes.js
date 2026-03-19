@@ -1,5 +1,6 @@
 export const SPACE_MODES = ['chat', 'graph', 'map'];
 export const DEFAULT_SPACE_MODE = 'chat';
+export const SPACE_ROUTE_PREFIX = 'S';
 
 export function isSpaceMode(mode) {
     return SPACE_MODES.includes(mode);
@@ -7,7 +8,7 @@ export function isSpaceMode(mode) {
 
 export function getSpacePath(spaceId, mode = DEFAULT_SPACE_MODE) {
     const safeMode = isSpaceMode(mode) ? mode : DEFAULT_SPACE_MODE;
-    return `/space/${safeMode}/${spaceId}`;
+    return `/${SPACE_ROUTE_PREFIX}/${safeMode}/${spaceId}`;
 }
 
 export function resolveSpaceRouteParams(params = {}) {
