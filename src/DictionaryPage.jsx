@@ -2,24 +2,19 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
     BookOpen,
-    CheckSquare,
     ChevronDown,
     ChevronLeft,
-    ChevronRight,
     ChevronUp,
     Search,
-    Sparkles,
-    Square,
     Trash2,
 } from 'lucide-react';
 import { useLanguage } from './i18n';
 import { getSpacePath } from './lib/routes';
 import { resolveSpaceTitle } from './lib/space';
 import {
-    loadDictionaryEntries,
-    removeDictionaryEntries,
-    saveDictionaryEntries,
-    updateDictionaryEntry,
+    loadAllDictionaryEntries,
+    removeDictionaryEntriesById,
+    updateDictionaryEntryById,
     upsertDictionaryEntry,
 } from './lib/dictionary';
 import {
@@ -42,8 +37,9 @@ function loadApiKeys() {
 
 function loadSpaceTitle(spaceId, fallback) {
     try {
+        if (!spaceId) return fallback;
         const stored = localStorage.getItem(`blueprint_space_${spaceId}`);
-        if (!stored) return fallback;
+        if (!stored) return resolveSpaceTitle(spaceId, '', fallback);
         const parsed = JSON.parse(stored);
         return resolveSpaceTitle(spaceId, parsed?.title, fallback);
     } catch {
@@ -62,17 +58,35 @@ function sortEntries(entries, sortMode, collator) {
     return nextEntries.sort((left, right) => new Date(right.createdAt) - new Date(left.createdAt));
 }
 
+function getEntrySpaceTitle(entry) {
+    return resolveSpaceTitle(entry?.spaceId, loadSpaceTitle(entry?.spaceId, 'space'), 'space');
+}
+
+const iconButtonStyle = {
+    width: '30px',
+    height: '30px',
+    borderRadius: '999px',
+    border: '1px solid rgba(68, 76, 95, 0.12)',
+    background: 'rgba(255,255,255,0.78)',
+    color: '#707789',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    boxShadow: '0 8px 18px rgba(29, 33, 44, 0.08)',
+};
+
 export default function DictionaryPage() {
     const { t } = useLanguage();
     const navigate = useNavigate();
-    const { id: spaceId } = useParams();
+    const { id: currentSpaceId } = useParams();
     const [entries, setEntries] = useState([]);
     const [searchQuery, setSearchQuery] = useState('');
     const [sortMode, setSortMode] = useState('newest');
     const [selectedIds, setSelectedIds] = useState([]);
     const [selectedApiIndex, setSelectedApiIndex] = useState(() => {
         try {
-            const raw = localStorage.getItem(`blueprint_dictionary_selected_api_${spaceId || 'default'}`);
+            const raw = localStorage.getItem('blueprint_dictionary_selected_api_global');
             const parsed = Number.parseInt(raw || '0', 10);
             return Number.isInteger(parsed) && parsed >= 0 ? parsed : 0;
         } catch {
@@ -82,32 +96,40 @@ export default function DictionaryPage() {
     const [apiKeys, setApiKeys] = useState(() => loadApiKeys());
     const [isGenerating, setIsGenerating] = useState({});
     const [statusMessage, setStatusMessage] = useState('');
-    const [spaceTitle, setSpaceTitle] = useState(() => loadSpaceTitle(spaceId, t('editor.untitled')));
+    const [spaceTitle, setSpaceTitle] = useState(() => loadSpaceTitle(currentSpaceId, t('editor.untitled')));
 
     useEffect(() => {
-        setSpaceTitle(loadSpaceTitle(spaceId, t('editor.untitled')));
-        setEntries(loadDictionaryEntries(spaceId));
+        setEntries(loadAllDictionaryEntries());
         setApiKeys(loadApiKeys());
-    }, [spaceId, t]);
+        setSpaceTitle(loadSpaceTitle(currentSpaceId, t('editor.untitled')));
+    }, [currentSpaceId, t]);
 
     useEffect(() => {
-        const handleDictionaryUpdated = (event) => {
-            if (!event?.detail || event.detail.spaceId === spaceId) {
-                setEntries(loadDictionaryEntries(spaceId));
-            }
+        const handleDictionaryUpdated = () => {
+            setEntries(loadAllDictionaryEntries());
+            setSpaceTitle(loadSpaceTitle(currentSpaceId, t('editor.untitled')));
         };
         const handleStorage = (event) => {
             if (!event || event.key === 'blueprint_api_keys') {
                 setApiKeys(loadApiKeys());
             }
+            if (!event || String(event.key || '').startsWith('blueprint_dictionary_')) {
+                setEntries(loadAllDictionaryEntries());
+            }
+        };
+        const handleSpaceTitleUpdated = () => {
+            setEntries(loadAllDictionaryEntries());
+            setSpaceTitle(loadSpaceTitle(currentSpaceId, t('editor.untitled')));
         };
         window.addEventListener('dictionaryUpdated', handleDictionaryUpdated);
         window.addEventListener('storage', handleStorage);
+        window.addEventListener('spaceTitleUpdated', handleSpaceTitleUpdated);
         return () => {
             window.removeEventListener('dictionaryUpdated', handleDictionaryUpdated);
             window.removeEventListener('storage', handleStorage);
+            window.removeEventListener('spaceTitleUpdated', handleSpaceTitleUpdated);
         };
-    }, [spaceId]);
+    }, [currentSpaceId, t]);
 
     useEffect(() => {
         const nextIndex = Math.min(selectedApiIndex, Math.max(0, apiKeys.length - 1));
@@ -117,8 +139,8 @@ export default function DictionaryPage() {
     }, [apiKeys.length, selectedApiIndex]);
 
     useEffect(() => {
-        localStorage.setItem(`blueprint_dictionary_selected_api_${spaceId || 'default'}`, String(selectedApiIndex));
-    }, [selectedApiIndex, spaceId]);
+        localStorage.setItem('blueprint_dictionary_selected_api_global', String(selectedApiIndex));
+    }, [selectedApiIndex]);
 
     useEffect(() => {
         setSelectedIds((current) => current.filter((id) => entries.some((entry) => entry.id === id)));
@@ -130,19 +152,20 @@ export default function DictionaryPage() {
     );
     const selectedApiEntry = apiKeys[selectedApiIndex] || apiKeys[0] || null;
     const sortedEntries = useMemo(
-        () => sortEntries(entries.filter((entry) => (
-            !searchQuery.trim()
-            || entry.term.includes(searchQuery.trim())
-            || entry.explanation.includes(searchQuery.trim())
-        )), sortMode, collator),
+        () => sortEntries(entries.filter((entry) => {
+            const query = searchQuery.trim();
+            if (!query) return true;
+            return entry.term.includes(query)
+                || entry.explanation.includes(query)
+                || getEntrySpaceTitle(entry).includes(query);
+        }), sortMode, collator),
         [collator, entries, searchQuery, sortMode],
     );
     const selectedCount = selectedIds.length;
     const allVisibleSelected = sortedEntries.length > 0 && sortedEntries.every((entry) => selectedIds.includes(entry.id));
 
-    const persistEntries = (nextEntries) => {
-        const normalized = saveDictionaryEntries(spaceId, nextEntries);
-        setEntries(normalized);
+    const refreshEntries = () => {
+        setEntries(loadAllDictionaryEntries());
     };
 
     const handleToggleSelectAll = () => {
@@ -164,18 +187,19 @@ export default function DictionaryPage() {
 
     const handleDeleteSelected = () => {
         if (selectedIds.length === 0) return;
-        removeDictionaryEntries(spaceId, selectedIds);
+        removeDictionaryEntriesById(selectedIds);
         setSelectedIds([]);
-        setEntries(loadDictionaryEntries(spaceId));
+        refreshEntries();
         setStatusMessage('選択した項目を削除しました');
     };
 
     const handleToggleCollapsed = (entry) => {
-        persistEntries(entries.map((item) => (
-            item.id === entry.id
-                ? { ...item, collapsed: !item.collapsed, updatedAt: new Date().toISOString() }
-                : item
-        )));
+        updateDictionaryEntryById(entry.id, (current) => ({
+            ...current,
+            collapsed: !current.collapsed,
+            updatedAt: new Date().toISOString(),
+        }));
+        refreshEntries();
     };
 
     const handleGenerateExplanation = async (entry) => {
@@ -208,14 +232,15 @@ export default function DictionaryPage() {
                 throw new Error('No response.');
             }
 
-            upsertDictionaryEntry(spaceId, {
+            upsertDictionaryEntry(entry.spaceId, {
                 id: entry.id,
+                spaceId: entry.spaceId,
                 term: entry.term,
                 explanation: rawText,
                 collapsed: true,
                 createdAt: entry.createdAt,
             });
-            setEntries(loadDictionaryEntries(spaceId));
+            refreshEntries();
         } catch (error) {
             setStatusMessage(`説明文の作成に失敗しました: ${error.message}`);
         } finally {
@@ -237,22 +262,27 @@ export default function DictionaryPage() {
     };
 
     const handleDeleteEntry = (entryId) => {
-        removeDictionaryEntries(spaceId, [entryId]);
+        removeDictionaryEntriesById([entryId]);
         setSelectedIds((current) => current.filter((id) => id !== entryId));
-        setEntries(loadDictionaryEntries(spaceId));
+        refreshEntries();
     };
 
     const handleAddFromSearch = () => {
         const term = searchQuery.trim();
-        if (!term) return;
-        upsertDictionaryEntry(spaceId, { term, explanation: '', collapsed: true });
-        setEntries(loadDictionaryEntries(spaceId));
+        if (!term || !currentSpaceId) return;
+        upsertDictionaryEntry(currentSpaceId, {
+            spaceId: currentSpaceId,
+            term,
+            explanation: '',
+            collapsed: true,
+        });
+        refreshEntries();
         setSearchQuery('');
         setStatusMessage('辞書に追加しました');
     };
 
     const goBackToSpace = () => {
-        navigate(getSpacePath(spaceId));
+        navigate(getSpacePath(currentSpaceId));
     };
 
     return (
@@ -293,9 +323,9 @@ export default function DictionaryPage() {
                 <button
                     type="button"
                     className="btn-icon"
-                    style={{ width: '36px', height: '36px', opacity: 0.95 }}
-                    title="Dictionary"
-                    aria-label="Dictionary"
+                    style={{ width: '36px', height: '36px', marginTop: 'auto', opacity: 0.95 }}
+                    title="辞書"
+                    aria-label="辞書"
                 >
                     <BookOpen size={17} />
                 </button>
@@ -314,26 +344,25 @@ export default function DictionaryPage() {
                 >
                     <div style={{ minWidth: 0 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0, flexWrap: 'wrap' }}>
-                            <div style={{
-                                width: '34px',
-                                height: '34px',
-                                borderRadius: '12px',
-                                background: 'linear-gradient(135deg, rgba(108,140,255,0.95), rgba(96,165,250,0.95))',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                color: 'white',
-                                boxShadow: '0 8px 24px rgba(108, 140, 255, 0.25)',
-                            }}
+                            <div
+                                style={{
+                                    width: '34px',
+                                    height: '34px',
+                                    borderRadius: '12px',
+                                    background: 'linear-gradient(135deg, rgba(108,140,255,0.95), rgba(96,165,250,0.95))',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    color: 'white',
+                                    boxShadow: '0 8px 24px rgba(108, 140, 255, 0.25)',
+                                }}
                             >
                                 <BookOpen size={16} />
                             </div>
                             <div style={{ minWidth: 0 }}>
-                                <h1 style={{ margin: 0, fontSize: '1rem', fontWeight: 700 }}>
-                                    辞書
-                                </h1>
+                                <h1 style={{ margin: 0, fontSize: '1rem', fontWeight: 700 }}>辞書</h1>
                                 <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                                    {spaceTitle}
+                                    すべてのスペースの単語一覧
                                 </div>
                             </div>
                             <button
@@ -351,7 +380,7 @@ export default function DictionaryPage() {
                                     cursor: 'pointer',
                                 }}
                             >
-                                スペースへ戻る
+                                {spaceTitle} に戻る
                             </button>
                         </div>
                     </div>
@@ -363,17 +392,17 @@ export default function DictionaryPage() {
                                 className="node-select-sm"
                                 value={selectedApiIndex}
                                 onChange={(event) => setSelectedApiIndex(Number.parseInt(event.target.value, 10))}
-                                style={{ minWidth: '220px', background: '#ffffff' }}
+                                style={{ minWidth: '240px', background: '#ffffff' }}
                             >
                                 {apiKeys.length === 0 ? (
                                     <option value={0}>未設定</option>
                                 ) : (
                                     apiKeys.map((item, index) => {
                                         const provider = getProviderDefinition(item.provider);
-                                        const label = `${provider.label} / ${item.model}`;
+                                        const selectedModel = resolveModelSelection(item).model;
                                         return (
                                             <option key={`${item.provider}-${index}`} value={index}>
-                                                Key {index + 1} - {label}
+                                                Key {index + 1} - {provider.label} / {selectedModel}
                                             </option>
                                         );
                                     })
@@ -394,60 +423,35 @@ export default function DictionaryPage() {
                     }}
                 >
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
-                        <button
-                            type="button"
-                            onClick={() => setSortMode('newest')}
-                            style={{
-                                border: '1px solid rgba(108,140,255,0.18)',
-                                borderRadius: '999px',
-                                background: sortMode === 'newest' ? 'rgba(108,140,255,0.12)' : 'rgba(255,255,255,0.72)',
-                                color: sortMode === 'newest' ? '#5a74d7' : 'var(--text-muted)',
-                                padding: '0.35rem 0.75rem',
-                                fontSize: '0.75rem',
-                                cursor: 'pointer',
-                                fontFamily: 'inherit',
-                            }}
-                        >
-                            新しい順
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => setSortMode('oldest')}
-                            style={{
-                                border: '1px solid rgba(108,140,255,0.18)',
-                                borderRadius: '999px',
-                                background: sortMode === 'oldest' ? 'rgba(108,140,255,0.12)' : 'rgba(255,255,255,0.72)',
-                                color: sortMode === 'oldest' ? '#5a74d7' : 'var(--text-muted)',
-                                padding: '0.35rem 0.75rem',
-                                fontSize: '0.75rem',
-                                cursor: 'pointer',
-                                fontFamily: 'inherit',
-                            }}
-                        >
-                            古い順
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => setSortMode('alpha')}
-                            style={{
-                                border: '1px solid rgba(108,140,255,0.18)',
-                                borderRadius: '999px',
-                                background: sortMode === 'alpha' ? 'rgba(108,140,255,0.12)' : 'rgba(255,255,255,0.72)',
-                                color: sortMode === 'alpha' ? '#5a74d7' : 'var(--text-muted)',
-                                padding: '0.35rem 0.75rem',
-                                fontSize: '0.75rem',
-                                cursor: 'pointer',
-                                fontFamily: 'inherit',
-                            }}
-                        >
-                            アルファベット & ひらがな順
-                        </button>
+                        {[
+                            ['newest', '新しい順'],
+                            ['oldest', '古い順'],
+                            ['alpha', 'アルファベット / ひらがな順'],
+                        ].map(([id, label]) => (
+                            <button
+                                key={id}
+                                type="button"
+                                onClick={() => setSortMode(id)}
+                                style={{
+                                    border: '1px solid rgba(108,140,255,0.18)',
+                                    borderRadius: '999px',
+                                    background: sortMode === id ? 'rgba(108,140,255,0.12)' : 'rgba(255,255,255,0.72)',
+                                    color: sortMode === id ? '#5a74d7' : 'var(--text-muted)',
+                                    padding: '0.35rem 0.75rem',
+                                    fontSize: '0.75rem',
+                                    cursor: 'pointer',
+                                    fontFamily: 'inherit',
+                                }}
+                            >
+                                {label}
+                            </button>
+                        ))}
                     </div>
 
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                         <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
                             <input type="checkbox" checked={allVisibleSelected} onChange={handleToggleSelectAll} />
-                            全選択
+                            すべて選択
                         </label>
                         <button
                             type="button"
@@ -486,7 +490,7 @@ export default function DictionaryPage() {
                         <input
                             value={searchQuery}
                             onChange={(event) => setSearchQuery(event.target.value)}
-                            placeholder="語句や説明を検索"
+                            placeholder="単語・説明・スペース名で検索"
                             style={{
                                 flex: 1,
                                 border: 'none',
@@ -500,19 +504,19 @@ export default function DictionaryPage() {
                         <button
                             type="button"
                             onClick={handleAddFromSearch}
-                            disabled={!searchQuery.trim()}
+                            disabled={!searchQuery.trim() || !currentSpaceId}
                             style={{
                                 border: 'none',
                                 borderRadius: '999px',
-                                background: searchQuery.trim() ? 'rgba(108,140,255,0.12)' : 'rgba(108,140,255,0.04)',
-                                color: searchQuery.trim() ? '#5a74d7' : 'var(--text-muted)',
+                                background: searchQuery.trim() && currentSpaceId ? 'rgba(108,140,255,0.12)' : 'rgba(108,140,255,0.04)',
+                                color: searchQuery.trim() && currentSpaceId ? '#5a74d7' : 'var(--text-muted)',
                                 padding: '0.32rem 0.7rem',
                                 fontSize: '0.74rem',
-                                cursor: searchQuery.trim() ? 'pointer' : 'default',
+                                cursor: searchQuery.trim() && currentSpaceId ? 'pointer' : 'default',
                                 fontFamily: 'inherit',
                             }}
                         >
-                            追加
+                            現在のスペースに追加
                         </button>
                     </div>
                 </div>
@@ -547,7 +551,7 @@ export default function DictionaryPage() {
                                 まだ辞書項目がありません
                             </div>
                             <div style={{ fontSize: '0.82rem', lineHeight: 1.7 }}>
-                                チャットで選択した語句を「辞書」に送るとここに追加されます。
+                                チャットで辞書に追加した単語や、このページで追加した単語がここに並びます。
                             </div>
                         </div>
                     ) : (
@@ -599,23 +603,26 @@ export default function DictionaryPage() {
                                             }}
                                         >
                                             {entry.term}
+                                            <div style={{ fontSize: '0.72rem', color: '#7b8397', fontWeight: 500, marginTop: '0.2rem' }}>
+                                                {getEntrySpaceTitle(entry)}
+                                            </div>
                                         </button>
                                         <button
                                             type="button"
                                             onClick={() => handleToggleCollapsed(entry)}
                                             style={{
-                                                ...buttonIconStyle,
+                                                ...iconButtonStyle,
                                                 background: collapsed ? 'rgba(255,255,255,0.8)' : 'rgba(108,140,255,0.12)',
                                             }}
-                                            aria-label={collapsed ? '展開' : '折りたたむ'}
-                                            title={collapsed ? '展開' : '折りたたむ'}
+                                            aria-label={collapsed ? '開く' : '閉じる'}
+                                            title={collapsed ? '開く' : '閉じる'}
                                         >
                                             {collapsed ? <ChevronDown size={13} /> : <ChevronUp size={13} />}
                                         </button>
                                         <button
                                             type="button"
                                             onClick={() => handleDeleteEntry(entry.id)}
-                                            style={buttonIconStyle}
+                                            style={iconButtonStyle}
                                             aria-label="削除"
                                             title="削除"
                                         >
@@ -624,34 +631,42 @@ export default function DictionaryPage() {
                                     </div>
 
                                     {!collapsed && (
-                                        <div style={{
-                                            padding: '0 0.95rem 0.95rem',
-                                            borderTop: '1px solid rgba(125,161,255,0.12)',
-                                        }}>
-                                            <div style={{
-                                                padding: '0.9rem 0.95rem',
-                                                borderRadius: '16px',
-                                                background: 'linear-gradient(180deg, rgba(235,242,255,0.95) 0%, rgba(219,231,255,0.92) 100%)',
-                                                border: '1px solid rgba(125,161,255,0.25)',
-                                                color: '#22314d',
-                                                fontSize: '0.88rem',
-                                                lineHeight: 1.85,
-                                                whiteSpace: 'pre-wrap',
-                                            }}>
+                                        <div
+                                            style={{
+                                                padding: '0 0.95rem 0.95rem',
+                                                borderTop: '1px solid rgba(125,161,255,0.12)',
+                                            }}
+                                        >
+                                            <div
+                                                style={{
+                                                    padding: '0.9rem 0.95rem',
+                                                    borderRadius: '16px',
+                                                    background: 'linear-gradient(180deg, rgba(235,242,255,0.95) 0%, rgba(219,231,255,0.92) 100%)',
+                                                    border: '1px solid rgba(125,161,255,0.25)',
+                                                    color: '#22314d',
+                                                    fontSize: '0.88rem',
+                                                    lineHeight: 1.85,
+                                                    whiteSpace: 'pre-wrap',
+                                                }}
+                                            >
                                                 {isGeneratingEntry
                                                     ? '説明文を作成中...'
-                                                    : entry.explanation || 'まだ説明文がありません。単語をクリックすると作成します。'}
+                                                    : entry.explanation || 'まだ説明文がありません。クリックすると説明文を生成します。'}
                                             </div>
                                         </div>
                                     )}
 
                                     {collapsed && (
-                                        <div style={{
-                                            padding: '0 0.95rem 0.9rem',
-                                            color: 'var(--text-muted)',
-                                            fontSize: '0.78rem',
-                                        }}>
-                                            {isGeneratingEntry ? '説明文を作成中...' : (entry.explanation ? 'クリックで説明を表示' : 'クリックして説明を作成')}
+                                        <div
+                                            style={{
+                                                padding: '0 0.95rem 0.9rem',
+                                                color: 'var(--text-muted)',
+                                                fontSize: '0.78rem',
+                                            }}
+                                        >
+                                            {isGeneratingEntry
+                                                ? '説明文を作成中...'
+                                                : (entry.explanation ? 'クリックで説明を表示' : 'クリックで説明文を生成')}
                                         </div>
                                     )}
                                 </div>
@@ -663,17 +678,3 @@ export default function DictionaryPage() {
         </div>
     );
 }
-
-const buttonIconStyle = {
-    width: '30px',
-    height: '30px',
-    borderRadius: '999px',
-    border: '1px solid rgba(68, 76, 95, 0.12)',
-    background: 'rgba(255,255,255,0.78)',
-    color: '#707789',
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    cursor: 'pointer',
-    boxShadow: '0 8px 18px rgba(29, 33, 44, 0.08)',
-};

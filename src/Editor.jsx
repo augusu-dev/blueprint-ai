@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
+﻿import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import {
     ReactFlow,
     ReactFlowProvider,
@@ -34,9 +34,11 @@ import {
 } from './lib/space';
 import {
     createEmptyApiKeyEntry,
+    fetchOpenRouterModels,
     getDefaultModel,
     getModelOptions,
     getProviderOptions,
+    getSelectedModelId,
     normalizeApiKeyEntry,
 } from './lib/aiCatalog';
 import {
@@ -78,6 +80,13 @@ function getNodeMeasure(node, key, fallback) {
 function cloneSerializable(value) {
     if (value == null) return value;
     return JSON.parse(JSON.stringify(value));
+}
+
+function cloneApiKeyEntries(entries) {
+    if (!Array.isArray(entries) || entries.length === 0) {
+        return [createEmptyApiKeyEntry('openai')];
+    }
+    return entries.map((item) => normalizeApiKeyEntry(item));
 }
 
 function getNodeProjectScope(node, fallback = PROJECT_SCOPE_LOCAL) {
@@ -545,15 +554,32 @@ function EditorContent() {
         }
         return [createEmptyApiKeyEntry('openai')];
     });
+    const [settingsDraftApiKeys, setSettingsDraftApiKeys] = useState(() => cloneApiKeyEntries(apiKeys));
+    const [settingsDraftLang, setSettingsDraftLang] = useState(lang);
+    const [openRouterModelOptions, setOpenRouterModelOptions] = useState(() => getModelOptions('openrouter'));
+    const [isLoadingOpenRouterModels, setIsLoadingOpenRouterModels] = useState(false);
 
-    useEffect(() => {
-        localStorage.setItem('blueprint_api_keys', JSON.stringify(apiKeys));
-    }, [apiKeys]);
+    const openSettings = useCallback(() => {
+        setSettingsDraftApiKeys(cloneApiKeyEntries(apiKeys));
+        setSettingsDraftLang(lang);
+        setShowSettings(true);
+    }, [apiKeys, lang]);
+
+    const closeSettings = useCallback(() => {
+        setSettingsDraftApiKeys(cloneApiKeyEntries(apiKeys));
+        setSettingsDraftLang(lang);
+        setShowSettings(false);
+    }, [apiKeys, lang]);
 
     const handleSaveSettings = useCallback(() => {
-        localStorage.setItem('blueprint_api_keys', JSON.stringify(apiKeys));
+        const normalizedKeys = cloneApiKeyEntries(settingsDraftApiKeys);
+        localStorage.setItem('blueprint_api_keys', JSON.stringify(normalizedKeys));
+        setApiKeys(normalizedKeys);
+        if (settingsDraftLang !== lang) {
+            setLang(settingsDraftLang);
+        }
         setShowSettings(false);
-    }, [apiKeys]);
+    }, [lang, setLang, settingsDraftApiKeys, settingsDraftLang]);
 
     useEffect(() => {
         const handleWorkspaceMetaUpdate = () => setWorkspaceMetaVersion((current) => current + 1);
@@ -582,6 +608,50 @@ function EditorContent() {
         setIsSidebarOpen(false);
         setShowSettings(false);
     }, [isGraphEditMode]);
+
+    useEffect(() => {
+        if (!showSettings || !settingsDraftApiKeys.some((item) => item.provider === 'openrouter')) return undefined;
+
+        let isMounted = true;
+        const controller = new AbortController();
+        setIsLoadingOpenRouterModels(true);
+
+        fetchOpenRouterModels({ signal: controller.signal })
+            .then((models) => {
+                if (!isMounted || !Array.isArray(models) || models.length === 0) return;
+                setOpenRouterModelOptions(models);
+            })
+            .catch(() => {
+                // Keep curated models if the live OpenRouter list fails.
+            })
+            .finally(() => {
+                if (isMounted) {
+                    setIsLoadingOpenRouterModels(false);
+                }
+            });
+
+        return () => {
+            isMounted = false;
+            controller.abort();
+        };
+    }, [settingsDraftApiKeys, showSettings]);
+
+    const getSettingsModelOptions = useCallback((provider) => {
+        if (provider === 'openrouter' && openRouterModelOptions.length > 0) {
+            return openRouterModelOptions;
+        }
+        return getModelOptions(provider);
+    }, [openRouterModelOptions]);
+
+    const updateSettingsApiKeyAt = useCallback((index, updater) => {
+        setSettingsDraftApiKeys((current) => current.map((item, itemIndex) => {
+            if (itemIndex !== index) return item;
+            const nextItem = typeof updater === 'function'
+                ? updater(item)
+                : { ...item, ...updater };
+            return normalizeApiKeyEntry(nextItem);
+        }));
+    }, []);
 
     const applyProjectGoalToNodes = useCallback((rawNodes, project) => {
         if (!project?.sharedGoal) return rawNodes;
@@ -1544,7 +1614,7 @@ function EditorContent() {
                     : 'none',
             }}
         >
-            <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} onOpenSettings={() => setShowSettings(true)} />
+            <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} onOpenSettings={openSettings} />
 
             {/* Left icon bar (always visible) */}
             <div style={{
@@ -1567,17 +1637,17 @@ function EditorContent() {
                     onClick={() => !isGraphEditMode && spaceId && navigate(getDictionaryPath(spaceId))}
                     disabled={isGraphEditMode || !spaceId}
                     className="btn-icon"
-                    style={{ width: '36px', height: '36px', opacity: isGraphEditMode || !spaceId ? 0.45 : 1, cursor: isGraphEditMode || !spaceId ? 'default' : 'pointer' }}
-                    title="辞書"
-                    aria-label="辞書"
+                    style={{ width: '36px', height: '36px', marginTop: 'auto', opacity: isGraphEditMode || !spaceId ? 0.45 : 1, cursor: isGraphEditMode || !spaceId ? 'default' : 'pointer' }}
+                    title="Dictionary"
+                    aria-label="Dictionary"
                 >
                     <BookOpen size={17} />
                 </button>
                 <button
-                    onClick={() => !isGraphEditMode && setShowSettings(true)}
+                    onClick={() => !isGraphEditMode && openSettings()}
                     disabled={isGraphEditMode}
                     className="btn-icon"
-                    style={{ width: '36px', height: '36px', marginTop: 'auto', opacity: isGraphEditMode ? 0.45 : 1, cursor: isGraphEditMode ? 'default' : 'pointer' }}
+                    style={{ width: '36px', height: '36px', opacity: isGraphEditMode ? 0.45 : 1, cursor: isGraphEditMode ? 'default' : 'pointer' }}
                     title={t('settings.title')}
                     aria-label={t('settings.title')}
                 >
@@ -1789,48 +1859,51 @@ function EditorContent() {
             {/* Settings Modal */}
             {showSettings && (
                 <div className="settings-modal-overlay">
-                    <div className="settings-modal glass-panel">
-                        <div className="settings-header">
+                    <div className="settings-modal glass-panel" style={{ width: 'min(860px, calc(100vw - 2rem))', maxHeight: 'calc(100dvh - 3rem)', borderRadius: '28px', overflow: 'hidden', background: 'linear-gradient(180deg, rgba(250,248,255,0.98) 0%, rgba(241,238,248,0.96) 100%)', border: '1px solid rgba(136, 150, 184, 0.18)', boxShadow: '0 28px 64px rgba(16, 24, 40, 0.22)' }}>
+                        <div className="settings-header" style={{ padding: '1.2rem 1.3rem 1rem', borderBottom: '1px solid rgba(116, 130, 166, 0.14)', background: 'linear-gradient(135deg, rgba(255,255,255,0.9) 0%, rgba(237,243,255,0.9) 100%)' }}>
                             <h3>{t('settings.title')}</h3>
-                            <button className="btn-icon" onClick={() => setShowSettings(false)}><X size={18} /></button>
+                            <button className="btn-icon" onClick={closeSettings}><X size={18} /></button>
                         </div>
-                        <div className="settings-body">
+                        <div className="settings-body" style={{ padding: '1.15rem 1.3rem', overflowY: 'auto' }}>
                             <div className="form-group" style={{ marginBottom: '1.5rem' }}>
                                 <label style={{ fontSize: '0.8rem', fontWeight: 500, marginBottom: '0.4rem' }}>{t('settings.langLabel')}</label>
-                                <select className="node-input" style={{ padding: '0.5rem', height: '38px' }} value={lang} onChange={(e) => setLang(e.target.value)}>
+                                <select className="node-input" style={{ padding: '0.5rem', height: '38px', background: '#ffffff' }} value={settingsDraftLang} onChange={(e) => setSettingsDraftLang(e.target.value)}>
                                     <option value="ja">{t('settings.langJa')}</option>
                                     <option value="en">{t('settings.langEn')}</option>
                                     <option value="zh">{t('settings.langZh')}</option>
                                 </select>
                             </div>
                             <div style={{ height: '1px', background: 'var(--panel-border)', marginBottom: '1.25rem' }} />
-                            <div className="glass-panel" style={{ padding: '0.65rem', marginBottom: '1.25rem', borderRadius: '8px', background: 'rgba(108, 140, 255, 0.06)', border: '1px solid rgba(108, 140, 255, 0.15)' }}>
-                                <p style={{ fontSize: '0.8rem', margin: 0, fontWeight: 400, lineHeight: 1.5 }}>🔒 <strong>{t('settings.securityLabel')}</strong> {t('settings.security')}</p>
+                            <div className="glass-panel" style={{ padding: '0.9rem 1rem', marginBottom: '1.1rem', borderRadius: '18px', background: 'linear-gradient(135deg, rgba(108, 140, 255, 0.12) 0%, rgba(96,165,250,0.08) 100%)', border: '1px solid rgba(108, 140, 255, 0.18)', boxShadow: '0 16px 32px rgba(56, 84, 154, 0.10)' }}>
+                                <p style={{ fontSize: '0.82rem', margin: 0, fontWeight: 400, lineHeight: 1.7, color: '#34425e' }}><strong>{t('settings.securityLabel')}</strong> API keys stay in localStorage only, and nothing changes until you press Save.</p>
                             </div>
-                            <p className="help-text" style={{ marginBottom: '1rem' }}>{t('settings.apiHelp')}</p>
-                            {apiKeys.map((item, index) => {
-                                const modelOptions = getModelOptions(item.provider);
+                            <p className="help-text" style={{ marginBottom: '1rem', lineHeight: 1.7 }}>Updated provider catalog: OpenAI, Gemini, Anthropic, OpenRouter, DeepSeek, Qwen, and GLM. OpenRouter loads a live model list, and every provider also supports a manual model ID.</p>
+                            {settingsDraftApiKeys.map((item, index) => {
+                                const modelOptions = getSettingsModelOptions(item.provider);
                                 const selectedPresetModel = modelOptions.some((modelOption) => modelOption.value === item.model)
                                     ? item.model
-                                    : '';
+                                    : getDefaultModel(item.provider);
 
                                 return (
-                                <div className="form-group glass-panel" key={index} style={{ marginBottom: '0.75rem', padding: '0.65rem', borderRadius: '8px' }}>
+                                <div className="form-group glass-panel" key={index} style={{ marginBottom: '0.9rem', padding: '1rem', borderRadius: '22px', background: 'linear-gradient(180deg, rgba(255,255,255,0.95) 0%, rgba(247,243,252,0.94) 100%)', border: '1px solid rgba(126, 136, 166, 0.12)', boxShadow: '0 16px 34px rgba(17, 24, 39, 0.08)' }}>
                                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
                                         <label style={{ marginBottom: 0, fontWeight: 500, fontSize: '0.82rem' }}>{t('settings.apiKey')} {index + 1} {index === 0 && t('settings.default')}</label>
-                                        {apiKeys.length > 1 && <button className="btn-text-danger" onClick={() => setApiKeys(apiKeys.filter((_, i) => i !== index))}>{t('settings.delete')}</button>}
+                                        {settingsDraftApiKeys.length > 1 && <button className="btn-text-danger" onClick={() => setSettingsDraftApiKeys((current) => current.filter((_, itemIndex) => itemIndex !== index))}>{t('settings.delete')}</button>}
                                     </div>
                                     <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.4rem' }}>
                                         <div style={{ flex: 1 }}>
                                             <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{t('settings.provider')}</label>
                                             <select
                                                 className="node-input"
-                                                style={{ padding: '0.4rem', height: '34px' }}
+                                                style={{ padding: '0.55rem 0.7rem', height: '40px', background: '#ffffff' }}
                                                 value={item.provider}
                                                 onChange={(e) => {
-                                                    const nk = [...apiKeys];
-                                                    nk[index] = { ...nk[index], provider: e.target.value, model: getDefaultModel(e.target.value) };
-                                                    setApiKeys(nk);
+                                                    const nextProvider = e.target.value;
+                                                    updateSettingsApiKeyAt(index, {
+                                                        provider: nextProvider,
+                                                        model: getDefaultModel(nextProvider),
+                                                        manualModel: '',
+                                                    });
                                                 }}
                                             >
                                                 {getProviderOptions().map((providerOption) => (
@@ -1842,32 +1915,45 @@ function EditorContent() {
                                         </div>
                                         <div style={{ flex: 1 }}>
                                             <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{t('settings.model')}</label>
-                                            <select className="node-input" style={{ padding: '0.4rem', height: '34px' }} value={selectedPresetModel} onChange={(e) => { const nk = [...apiKeys]; nk[index] = { ...nk[index], model: e.target.value }; setApiKeys(nk); }}>
-                                                <option value="">{t('settings.modelDefault')}</option>
+                                            <select className="node-input" style={{ padding: '0.55rem 0.7rem', height: '40px', background: '#ffffff' }} value={selectedPresetModel} onChange={(e) => updateSettingsApiKeyAt(index, { model: e.target.value, manualModel: '' })}>
                                                 {modelOptions.map((modelOption) => (
                                                     <option key={modelOption.value} value={modelOption.value}>
                                                         {modelOption.label}
                                                     </option>
                                                 ))}
                                             </select>
+                                            {item.provider === 'openrouter' && (
+                                                <div style={{ marginTop: '0.38rem', fontSize: '0.72rem', color: '#7a8194' }}>
+                                                    {isLoadingOpenRouterModels ? 'Loading OpenRouter live models...' : `${modelOptions.length} OpenRouter model IDs available.`}
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
-                                    <div>
-                                        <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{t('settings.secretKey')}</label>
-                                        <input type="password" placeholder={`${item.provider}${t('settings.secretPlaceholder')}`} value={item.key || ''} onChange={(e) => { const nk = [...apiKeys]; nk[index] = { ...nk[index], key: e.target.value }; setApiKeys(nk); }} />
+                                    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '0.75rem' }}>
+                                        <div>
+                                            <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Manual model ID</label>
+                                            <input type="text" className="node-input" placeholder="e.g. gpt-5.4 / openai/gpt-5.4 / qwen3-max" value={item.manualModel || ''} onChange={(e) => updateSettingsApiKeyAt(index, { manualModel: e.target.value })} />
+                                        </div>
+                                        <div>
+                                            <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{t('settings.secretKey')}</label>
+                                            <input type="password" className="node-input" placeholder={`${item.provider} API key`} value={item.key || ''} onChange={(e) => updateSettingsApiKeyAt(index, { key: e.target.value })} />
+                                        </div>
+                                    </div>
+                                    <div style={{ marginTop: '0.55rem', fontSize: '0.74rem', color: '#7a8194' }}>
+                                        Selected model: {getSelectedModelId(item)}
                                     </div>
                                 </div>
                                 );
                             })}
-                            <p className="help-text" style={{ marginTop: '-0.25rem', marginBottom: '0.9rem' }}>
-                                同じ OpenAI アカウントで ChatGPT と API を併用することはできますが、このアプリのプロバイダー接続は API 側を使います。モデルは選択式です。
+                            <p className="help-text" style={{ marginTop: '-0.1rem', marginBottom: '0.9rem', lineHeight: 1.7 }}>
+                                ChatGPT billing and API billing are separate. Use an API key here for provider access.
                             </p>
-                            {apiKeys.length < 5 && <button className="btn btn-secondary btn-sm" style={{ marginTop: '0.4rem', width: '100%' }} onClick={() => setApiKeys([...apiKeys, createEmptyApiKeyEntry('openai')])}>{t('settings.addKey')}</button>}
+                            {settingsDraftApiKeys.length < 5 && <button className="btn btn-secondary btn-sm" style={{ marginTop: '0.4rem', width: '100%', height: '44px', borderRadius: '14px' }} onClick={() => setSettingsDraftApiKeys((current) => [...current, createEmptyApiKeyEntry('openai')])}>{t('settings.addKey')}</button>}
                         </div>
-                        <div className="settings-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <button className="btn-text-danger" style={{ fontSize: '0.82rem' }} onClick={() => { setShowSettings(false); supabase.auth.signOut(); }}><LogOut size={14} style={{ display: 'inline', verticalAlign: 'text-bottom', marginRight: '4px' }} /> {t('settings.logout')}</button>
+                        <div className="settings-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap', paddingTop: '1rem', borderTop: '1px solid rgba(116, 130, 166, 0.14)' }}>
+                            <button className="btn-text-danger" style={{ fontSize: '0.82rem' }} onClick={() => { closeSettings(); supabase.auth.signOut(); }}><LogOut size={14} style={{ display: 'inline', verticalAlign: 'text-bottom', marginRight: '4px' }} /> {t('settings.logout')}</button>
                             <div style={{ display: 'flex', gap: '0.5rem' }}>
-                                <button className="btn btn-secondary" onClick={() => setShowSettings(false)}>{t('settings.cancel')}</button>
+                                <button className="btn btn-secondary" onClick={closeSettings}>{t('settings.cancel')}</button>
                                 <button className="btn btn-primary" onClick={handleSaveSettings}>{t('settings.save')}</button>
                             </div>
                         </div>

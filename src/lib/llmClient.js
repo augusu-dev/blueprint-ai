@@ -1,4 +1,4 @@
-import { getDefaultModel, getProviderDefinition } from './aiCatalog';
+import { getDefaultModel, getProviderDefinition, getSelectedModelId } from './aiCatalog';
 
 function normalizeHistory(history = []) {
     return history.map((message) => ({
@@ -32,7 +32,7 @@ function extractOpenAICompatibleText(data) {
 function getOpenAICompatibleEndpoint(provider) {
     if (provider === 'openrouter') return 'https://openrouter.ai/api/v1/chat/completions';
     if (provider === 'deepseek') return 'https://api.deepseek.com/v1/chat/completions';
-    if (provider === 'groq') return 'https://api.groq.com/openai/v1/chat/completions';
+    if (provider === 'qwen') return 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions';
     if (provider === 'glm') return 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
     return 'https://api.openai.com/v1/chat/completions';
 }
@@ -54,7 +54,7 @@ function getOpenAICompatibleHeaders(provider, key) {
 export function resolveModelSelection(apiKeyEntry) {
     const provider = getProviderDefinition(apiKeyEntry?.provider).id;
     const key = apiKeyEntry?.key?.trim() || '';
-    const model = apiKeyEntry?.model || getDefaultModel(provider);
+    const model = getSelectedModelId(apiKeyEntry) || getDefaultModel(provider);
     return { provider, key, model };
 }
 

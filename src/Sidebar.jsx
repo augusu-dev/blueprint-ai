@@ -773,7 +773,10 @@ export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
                     )}
                     {onOpenSettings && (
                         <button
-                            onClick={onOpenSettings}
+                            onClick={() => {
+                                onClose();
+                                onOpenSettings();
+                            }}
                             style={{
                                 width: '100%',
                                 background: 'rgba(255,255,255,0.03)',

@@ -243,36 +243,44 @@ function analyzeChatHistory(history) {
         node.children.sort((left, right) => left.order - right.order);
     });
 
-    const assignLabels = (node, numericStep) => {
-        node.numericStep = numericStep;
-        node.displayLabel = node.parentId && node.branchKind === 'branch'
-            ? `${numericStep}${node.branchLetter || ''}`
-            : String(numericStep);
+    const collectBranchFamily = (node) => {
+        const family = [node];
+        let current = node;
 
-        const sendChildren = node.children.filter((child) => child.branchKind !== 'branch');
-        const branchChildren = node.children.filter((child) => child.branchKind === 'branch');
-        const primarySendChild = sendChildren[0] || null;
-
-        if (primarySendChild) {
-            assignLabels(primarySendChild, numericStep + 1);
+        while (true) {
+            const nextBranchChild = current.children.find((child) => child.branchKind === 'branch') || null;
+            if (!nextBranchChild) break;
+            family.push(nextBranchChild);
+            current = nextBranchChild;
         }
 
-        branchChildren.forEach((child, index) => {
-            child.branchLetter = indexToBranchLetter(index);
-            assignLabels(child, numericStep);
+        return family;
+    };
+
+    const assignLabels = (node, numericStep) => {
+        const branchFamily = collectBranchFamily(node);
+        const hasVariants = branchFamily.length > 1;
+
+        branchFamily.forEach((familyNode, index) => {
+            familyNode.numericStep = numericStep;
+            familyNode.branchLetter = hasVariants ? indexToBranchLetter(index) : '';
+            familyNode.displayLabel = hasVariants
+                ? `${numericStep}${familyNode.branchLetter}`
+                : String(numericStep);
+            familyNode.branchFamilyIndex = index;
+            familyNode.branchFamilySize = branchFamily.length;
+            familyNode.isRightmostBranchVariant = index === branchFamily.length - 1;
         });
 
-        sendChildren.slice(1).forEach((child, index) => {
-            child.branchKind = 'branch';
-            child.branchLetter = indexToBranchLetter(branchChildren.length + index);
-            assignLabels(child, numericStep);
+        branchFamily.forEach((familyNode) => {
+            const sendChildren = familyNode.children.filter((child) => child.branchKind !== 'branch');
+            sendChildren.forEach((child) => assignLabels(child, numericStep + 1));
         });
     };
 
     const rootNodes = orderedNodes.filter((node) => !node.parentId || !nodeById.has(node.parentId));
     rootNodes.forEach((node, index) => {
         node.branchKind = node.branchKind || 'send';
-        node.branchLetter = '';
         assignLabels(node, index + 1);
     });
 
@@ -1336,7 +1344,7 @@ export default function ChatView({
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.45rem', paddingLeft: '0.1rem' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
                         <div style={{ width: '8px', height: '8px', borderRadius: '999px', background: 'rgba(116, 129, 255, 0.82)' }} />
-                        <span style={{ fontSize: '0.74rem', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#7a8194', fontWeight: 700 }}>
+                        <span style={{ fontSize: '0.74rem', letterSpacing: '0.04em', color: '#7a8194', fontWeight: 700 }}>
                             {treeNode.displayLabel || treeNode.numericStep}
                         </span>
                     </div>
@@ -1439,24 +1447,26 @@ export default function ChatView({
                                     {isGeneratingPrompt ? <RefreshCw size={11} /> : <Send size={11} />}
                                 </button>
                             )}
-                            <button
-                                type="button"
-                                onClick={() => handleSelectBranchTarget(treeNode.id)}
-                                style={{
-                                    ...branchTriggerButtonStyle,
-                                    border: branchTargetNodeId === treeNode.id
-                                        ? '1px solid rgba(92, 124, 250, 0.36)'
-                                        : branchTriggerButtonStyle.border,
-                                    background: branchTargetNodeId === treeNode.id
-                                        ? 'rgba(92, 124, 250, 0.14)'
-                                        : branchTriggerButtonStyle.background,
-                                    color: branchTargetNodeId === treeNode.id ? '#4f63d9' : branchTriggerButtonStyle.color,
-                                }}
-                                title="分岐を追加"
-                                aria-label="分岐を追加"
-                            >
-                                <GitBranch size={11} />
-                            </button>
+                            {treeNode.isRightmostBranchVariant && (
+                                <button
+                                    type="button"
+                                    onClick={() => handleSelectBranchTarget(treeNode.id)}
+                                    style={{
+                                        ...branchTriggerButtonStyle,
+                                        border: branchTargetNodeId === treeNode.id
+                                            ? '1px solid rgba(92, 124, 250, 0.36)'
+                                            : branchTriggerButtonStyle.border,
+                                        background: branchTargetNodeId === treeNode.id
+                                            ? 'rgba(92, 124, 250, 0.14)'
+                                            : branchTriggerButtonStyle.background,
+                                        color: branchTargetNodeId === treeNode.id ? '#4f63d9' : branchTriggerButtonStyle.color,
+                                    }}
+                                    title="分岐を追加"
+                                    aria-label="分岐を追加"
+                                >
+                                    <GitBranch size={11} />
+                                </button>
+                            )}
                         </div>
                     </div>
                 )}
@@ -1809,19 +1819,32 @@ export default function ChatView({
         );
     };
 
-    const renderChatNodeTree = (treeNode) => (
-        <div key={treeNode.id} style={{ display: 'flex', flexDirection: 'row', alignItems: 'flex-start', gap: '1rem', minWidth: 0, width: 'fit-content' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 0 }}>
-                {renderConversationColumn(treeNode)}
-            </div>
-            {treeNode.children.length > 0 && (
-                <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '1rem', paddingLeft: '1.1rem', minWidth: 0 }}>
-                    <div style={{ position: 'absolute', left: 0, top: '1.25rem', bottom: '1.25rem', width: '2px', borderRadius: '999px', background: 'linear-gradient(180deg, rgba(125,161,255,0.46) 0%, rgba(125,161,255,0.06) 100%)' }} />
-                    {treeNode.children.map((child) => renderChatNodeTree(child))}
+    const renderChatNodeTree = (treeNode) => {
+        const hasChildren = treeNode.children.length > 0;
+        const connectorStroke = 'rgba(125,161,255,0.56)';
+
+        return (
+            <div key={treeNode.id} style={{ display: 'flex', flexDirection: 'row', alignItems: 'flex-start', gap: '1.4rem', minWidth: 0, width: 'fit-content', position: 'relative' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 0, position: 'relative' }}>
+                    {renderConversationColumn(treeNode)}
                 </div>
-            )}
-        </div>
-    );
+                {hasChildren && (
+                    <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '1.4rem', paddingLeft: '2.15rem', minWidth: 0 }}>
+                        <div style={{ position: 'absolute', left: '0.1rem', top: '1.9rem', width: '2rem', height: '2px', borderRadius: '999px', background: connectorStroke }} />
+                        {treeNode.children.length > 1 && (
+                            <div style={{ position: 'absolute', left: '2.08rem', top: '1.9rem', bottom: '1.9rem', width: '2px', borderRadius: '999px', background: 'linear-gradient(180deg, rgba(125,161,255,0.56) 0%, rgba(125,161,255,0.18) 100%)' }} />
+                        )}
+                        {treeNode.children.map((child) => (
+                            <div key={child.id} style={{ position: 'relative', paddingLeft: '1.55rem' }}>
+                                <div style={{ position: 'absolute', left: 0, top: '1.9rem', width: '1.55rem', height: '2px', borderRadius: '999px', background: connectorStroke }} />
+                                {renderChatNodeTree(child)}
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+        );
+    };
 
     return (
         <div
