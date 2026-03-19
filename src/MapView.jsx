@@ -57,17 +57,17 @@ const TILE_LABELS = {
 };
 
 const TOP_DOWN_PALETTES = {
-    courtyard: { top: 'linear-gradient(180deg, #f1d5ab 0%, #e7bc86 100%)', edge: '#c7945d', chip: '#fff7dc' },
-    path: { top: 'linear-gradient(180deg, #f5ead2 0%, #e7d0aa 100%)', edge: '#c6a67a', chip: '#fff8ea' },
-    water: { top: 'linear-gradient(180deg, #71bff4 0%, #458ed7 100%)', edge: '#2d5fa3', chip: '#d8f3ff' },
-    tower: { top: 'linear-gradient(180deg, #efbe87 0%, #de985f 100%)', edge: '#b86f3f', chip: '#ffe07a' },
-    market: { top: 'linear-gradient(180deg, #f0c18e 0%, #dd9a67 100%)', edge: '#b77246', chip: '#ffcfbf' },
-    forge: { top: 'linear-gradient(180deg, #e6b28f 0%, #ce875f 100%)', edge: '#945c4a', chip: '#e2d5ff' },
-    fountain: { top: 'linear-gradient(180deg, #e8bf93 0%, #d29260 100%)', edge: '#a36742', chip: '#c7f1ff' },
-    meadow: { top: 'linear-gradient(180deg, #e6b57f 0%, #d99863 100%)', edge: '#b47348', chip: '#f9deb8' },
-    'grass-light': { top: 'linear-gradient(180deg, #efbd83 0%, #e1a267 100%)', edge: '#ba7649', chip: '#ffe7c3' },
-    'grass-dark': { top: 'linear-gradient(180deg, #cb7f4c 0%, #aa6038 100%)', edge: '#844529', chip: '#f1c197' },
-    grass: { top: 'linear-gradient(180deg, #e5ab73 0%, #d38e58 100%)', edge: '#ac683d', chip: '#f7d9af' },
+    courtyard: { top: 'linear-gradient(180deg, #91a28d 0%, #869983 100%)', edge: '#6f8170', chip: '#c9d6c2' },
+    path: { top: 'linear-gradient(180deg, #9eaf98 0%, #92a48d 100%)', edge: '#7b8d79', chip: '#d7e4cf' },
+    water: { top: 'linear-gradient(180deg, #8db0ad 0%, #7ea29e 100%)', edge: '#678885', chip: '#d2ebe7' },
+    tower: { top: 'linear-gradient(180deg, #98a88e 0%, #8d9f85 100%)', edge: '#73836d', chip: '#dce7d4' },
+    market: { top: 'linear-gradient(180deg, #93a489 0%, #87977d 100%)', edge: '#6d7d69', chip: '#d4dfcb' },
+    forge: { top: 'linear-gradient(180deg, #8d9d85 0%, #819178 100%)', edge: '#687764', chip: '#ccd8c3' },
+    fountain: { top: 'linear-gradient(180deg, #8fa8a0 0%, #81978f 100%)', edge: '#6b8079', chip: '#d6e6df' },
+    meadow: { top: 'linear-gradient(180deg, #98aa90 0%, #8d9e85 100%)', edge: '#71836f', chip: '#dce7d5' },
+    'grass-light': { top: 'linear-gradient(180deg, #96a88f 0%, #8a9b84 100%)', edge: '#70816e', chip: '#d8e4d2' },
+    'grass-dark': { top: 'linear-gradient(180deg, #889881 0%, #7c8c75 100%)', edge: '#62705e', chip: '#c5d1bf' },
+    grass: { top: 'linear-gradient(180deg, #93a58b 0%, #889981 100%)', edge: '#6d7e6b', chip: '#d5e0ce' },
 };
 
 const dockButtonStyle = {
@@ -494,18 +494,18 @@ export default function MapView({ spaceTitle, nodes, mapState, onMapStateChange,
                     position: 'relative',
                     height: '100%',
                     minHeight: '680px',
-                    borderRadius: '30px',
+                    borderRadius: '24px',
                     overflow: 'hidden',
-                    border: '1px solid rgba(126, 77, 39, 0.24)',
-                    background: 'linear-gradient(180deg, #d9a170 0%, #cc8556 100%)',
-                    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.16), 0 24px 48px rgba(48, 22, 8, 0.18)',
+                    border: '1px solid rgba(95, 112, 92, 0.24)',
+                    background: 'linear-gradient(180deg, #82957f 0%, #7a8e77 100%)',
+                    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.14), 0 24px 48px rgba(44, 58, 41, 0.16)',
                 }}
             >
                 <div
                     style={{
                         position: 'absolute',
                         inset: 0,
-                        background: 'radial-gradient(circle at top left, rgba(255,255,255,0.22), transparent 32%), linear-gradient(180deg, rgba(255,255,255,0.04), rgba(0,0,0,0.04))',
+                        background: 'radial-gradient(circle at top left, rgba(255,255,255,0.12), transparent 28%), linear-gradient(180deg, rgba(255,255,255,0.04), rgba(0,0,0,0.03))',
                         pointerEvents: 'none',
                     }}
                 />
@@ -513,7 +513,7 @@ export default function MapView({ spaceTitle, nodes, mapState, onMapStateChange,
                     style={{
                         position: 'absolute',
                         inset: 0,
-                        backgroundImage: 'linear-gradient(rgba(110, 66, 38, 0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(110, 66, 38, 0.1) 1px, transparent 1px)',
+                        backgroundImage: 'linear-gradient(rgba(255,255,255,0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.08) 1px, transparent 1px)',
                         backgroundSize: `${cellSize}px ${cellSize}px`,
                         pointerEvents: 'none',
                     }}
@@ -524,7 +524,7 @@ export default function MapView({ spaceTitle, nodes, mapState, onMapStateChange,
                         top: '1rem',
                         left: '1rem',
                         zIndex: 20,
-                        display: 'inline-flex',
+                        display: 'none',
                         alignItems: 'center',
                         gap: '0.8rem',
                         padding: '0.58rem 0.9rem',
@@ -553,7 +553,7 @@ export default function MapView({ spaceTitle, nodes, mapState, onMapStateChange,
                     </span>
                     <span style={{ opacity: 0.82 }}>完了: {completedQuestIds.length}</span>
                 </div>
-                <div style={{ position: 'absolute', top: '1rem', right: '1rem', zIndex: 20, display: 'flex', gap: '0.55rem' }}>
+                <div style={{ position: 'absolute', top: '1rem', right: '1rem', zIndex: 20, display: 'none', gap: '0.55rem' }}>
                     <IconDockButton icon={MessageSquare} title="チャットへ" onClick={() => onOpenMode('chat')} />
                     <IconDockButton icon={GitFork} title="グラフへ" onClick={() => onOpenMode('graph')} />
                     <IconDockButton icon={Compass} title="スタート地点へ" onClick={moveToBase} />
@@ -565,7 +565,7 @@ export default function MapView({ spaceTitle, nodes, mapState, onMapStateChange,
                         top: '4.6rem',
                         right: '1rem',
                         zIndex: 20,
-                        display: 'grid',
+                        display: 'none',
                         gap: '0.4rem',
                         minWidth: '240px',
                         padding: '0.72rem 0.85rem',
@@ -615,9 +615,9 @@ export default function MapView({ spaceTitle, nodes, mapState, onMapStateChange,
                                     width: `${cellSize}px`,
                                     height: `${cellSize}px`,
                                     border: 'none',
-                                    borderRadius: '6px',
+                                    borderRadius: '2px',
                                     background: palette.top,
-                                    boxShadow: `inset 0 1px 0 rgba(255,255,255,0.1), 0 0 0 1px ${palette.edge}`,
+                                    boxShadow: `inset 0 1px 0 rgba(255,255,255,0.04), 0 0 0 1px ${palette.edge}`,
                                     padding: 0,
                                     cursor: isBlockedTile(tile.x, tile.y) ? 'default' : 'pointer',
                                     zIndex: 1,
@@ -628,8 +628,8 @@ export default function MapView({ spaceTitle, nodes, mapState, onMapStateChange,
                                         style={{
                                             position: 'absolute',
                                             inset: '2px',
-                                            borderRadius: '5px',
-                                            border: '2px solid rgba(93, 150, 255, 0.9)',
+                                            borderRadius: '2px',
+                                            border: '2px solid rgba(217, 237, 209, 0.92)',
                                         }}
                                     />
                                 )}
@@ -640,11 +640,11 @@ export default function MapView({ spaceTitle, nodes, mapState, onMapStateChange,
                                             left: '50%',
                                             top: '50%',
                                             transform: 'translate(-50%, -50%)',
-                                            width: landmark ? '12px' : '10px',
-                                            height: landmark ? '12px' : '10px',
+                                            width: landmark ? '8px' : '6px',
+                                            height: landmark ? '8px' : '6px',
                                             borderRadius: '999px',
-                                            background: tile.kind === 'path' ? '#fff5df' : palette.chip,
-                                            boxShadow: landmark ? `0 0 0 6px ${landmark.accent}22` : 'none',
+                                            background: tile.kind === 'path' ? '#dce7d6' : palette.chip,
+                                            boxShadow: landmark ? `0 0 0 4px ${landmark.accent}1f` : 'none',
                                         }}
                                     />
                                 )}
@@ -797,7 +797,7 @@ export default function MapView({ spaceTitle, nodes, mapState, onMapStateChange,
                     {currentLandmark && <span style={{ opacity: 0.92 }}>{(LANDMARK_DISPLAY[currentLandmark.id] || {}).label}</span>}
                 </div>
 
-                <div style={{ position: 'absolute', right: '1rem', bottom: '1rem', zIndex: 20, display: 'grid', gap: '0.38rem' }}>
+                <div style={{ position: 'absolute', right: '1rem', bottom: '1rem', zIndex: 20, display: 'none', gap: '0.38rem' }}>
                     <div style={{ display: 'flex', justifyContent: 'center' }}>
                         <DPadButton
                             label="上へ移動"

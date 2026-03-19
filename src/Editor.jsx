@@ -1822,7 +1822,6 @@ function EditorContent() {
                         projectContextPrompt={projectContextPrompt}
                         spaceId={spaceId}
                         spaceTitle={spaceTitle}
-                        onRequestEditTitle={startEditingTitle}
                     />
                 ) : currentMode === 'map' ? (
                     <MapView

@@ -86,28 +86,19 @@ export function HutSprite({ size = 190 }) {
 export function LionScoutSprite({ size = 108 }) {
     return (
         <svg viewBox="0 0 150 180" width={size} height={size * 1.14} aria-hidden="true">
-            <ellipse cx="78" cy="164" rx="32" ry="10" fill="rgba(0,0,0,0.18)" />
-            <path d="M70 148c0 10-8 18-18 18-10 0-18-8-18-18s8-18 18-18c10 0 18 8 18 18z" fill="#1f2636" />
-            <path d="M120 148c0 10-8 18-18 18-10 0-18-8-18-18s8-18 18-18c10 0 18 8 18 18z" fill="#1f2636" />
-            <path d="M54 82c0-22 14-34 33-34s33 12 33 34v46H54z" fill="#1c2432" />
-            <rect x="60" y="90" width="18" height="14" rx="4" fill="#b24cff" />
-            <rect x="92" y="88" width="20" height="16" rx="4" fill="#45d6ff" />
-            <path d="M56 88l-10 38M118 88l10 38" stroke="#1c2432" strokeWidth="14" strokeLinecap="round" />
-            <path d="M70 126l-6 28M100 126l8 28" stroke="#1c2432" strokeWidth="16" strokeLinecap="round" />
-            <path d="M58 34c0-18 14-32 32-32 18 0 32 14 32 32 0 4-1 9-2 13H60c-1-4-2-9-2-13z" fill="#8d4928" />
-            <path d="M48 46c0-24 18-42 42-42s42 18 42 42c0 10-4 18-10 25H58c-6-7-10-15-10-25z" fill="#c46c2f" />
-            <path d="M66 38c0-11 10-20 22-20s22 9 22 20v16H66z" fill="#f4c36a" />
-            <path d="M68 44c0-11 9-20 20-20 11 0 20 9 20 20 0 16-8 28-20 28-12 0-20-12-20-28z" fill="#f6d28a" />
-            <path d="M75 44c2-5 7-7 12-7 7 0 12 4 14 11l-1 2-4-2c-6-3-13-3-18 1l-4 3z" fill="#7b3d24" />
-            <circle cx="81" cy="47" r="3.2" fill="#23160f" />
-            <circle cx="101" cy="47" r="3.2" fill="#23160f" />
-            <path d="M92 49l4 5-4 4-4-4z" fill="#5b2d23" />
-            <path d="M84 61c5 3 11 3 16 0" stroke="#5b2d23" strokeWidth="3" strokeLinecap="round" />
-            <path d="M123 103c9 5 13 16 9 24-4 9-14 11-22 9" stroke="#c78553" strokeWidth="5" strokeLinecap="round" fill="none" />
-            <circle cx="131" cy="132" r="7" fill="#8d5a3d" />
-            <path d="M47 118c6-2 10-8 11-14" stroke="#f6d28a" strokeWidth="8" strokeLinecap="round" />
-            <path d="M126 116c-6-2-10-8-11-14" stroke="#f6d28a" strokeWidth="8" strokeLinecap="round" />
-            <path d="M61 148h16M92 148h16" stroke="#75e4ff" strokeWidth="4" strokeLinecap="round" opacity="0.9" />
+            <ellipse cx="75" cy="156" rx="26" ry="8" fill="rgba(0,0,0,0.16)" />
+            <path d="M75 20l14 10-4 17H65l-4-17z" fill="#f0c983" />
+            <path d="M60 32l15-16 15 16-6 10H66z" fill="#c78b48" />
+            <path d="M58 55l17-12 17 12v34l-17 11-17-11z" fill="#2f4150" />
+            <path d="M63 63h24v20H63z" fill="#87b8c6" opacity="0.92" />
+            <path d="M57 92l18 11 18-11 7 22-25 14-25-14z" fill="#425968" />
+            <path d="M57 94l-12 28h14l10-19z" fill="#31414c" />
+            <path d="M93 94l12 28H91L81 103z" fill="#31414c" />
+            <path d="M67 127l-6 27h14l5-21z" fill="#24323a" />
+            <path d="M83 127l6 27H75l-5-21z" fill="#24323a" />
+            <circle cx="69" cy="63" r="2.5" fill="#233038" />
+            <circle cx="81" cy="63" r="2.5" fill="#233038" />
+            <path d="M69 72h12" stroke="#233038" strokeWidth="3" strokeLinecap="round" />
         </svg>
     );
 }

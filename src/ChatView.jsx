@@ -8,12 +8,8 @@ import {
     ChevronRight,
     ChevronUp,
     Copy,
-    Edit3,
     ExternalLink,
     GitBranch,
-    LocateFixed,
-    Minus,
-    Plus,
     RefreshCw,
     Send,
     Sparkles,
@@ -196,6 +192,25 @@ function buildInlineOverlayPlacement(container, range, estimatedHeight) {
     return { top: clampNumber(top, 8, maxTop), left, width, placement };
 }
 
+function getBranchFamilyNodes(node) {
+    if (!node) return [];
+    const family = [node];
+    let current = node;
+
+    while (true) {
+        const nextBranchChild = current.children.find((child) => child.branchKind === 'branch') || null;
+        if (!nextBranchChild) break;
+        family.push(nextBranchChild);
+        current = nextBranchChild;
+    }
+
+    return family;
+}
+
+function getSendChildren(node) {
+    return node?.children?.filter((child) => child.branchKind !== 'branch') || [];
+}
+
 function analyzeChatHistory(history) {
     const normalizedHistory = normalizeHistory(history);
     const nodeById = new Map();
@@ -249,22 +264,8 @@ function analyzeChatHistory(history) {
         node.children.sort((left, right) => left.order - right.order);
     });
 
-    const collectBranchFamily = (node) => {
-        const family = [node];
-        let current = node;
-
-        while (true) {
-            const nextBranchChild = current.children.find((child) => child.branchKind === 'branch') || null;
-            if (!nextBranchChild) break;
-            family.push(nextBranchChild);
-            current = nextBranchChild;
-        }
-
-        return family;
-    };
-
     const assignLabels = (node, numericStep) => {
-        const branchFamily = collectBranchFamily(node);
+        const branchFamily = getBranchFamilyNodes(node);
         const hasVariants = branchFamily.length > 1;
 
         branchFamily.forEach((familyNode, index) => {
@@ -279,7 +280,7 @@ function analyzeChatHistory(history) {
         });
 
         branchFamily.forEach((familyNode) => {
-            const sendChildren = familyNode.children.filter((child) => child.branchKind !== 'branch');
+            const sendChildren = getSendChildren(familyNode);
             sendChildren.forEach((child) => assignLabels(child, numericStep + 1));
         });
     };
@@ -397,7 +398,6 @@ export default function ChatView({
     projectContextPrompt,
     spaceId,
     spaceTitle,
-    onRequestEditTitle,
 }) {
     const { t } = useLanguage();
     const navigate = useNavigate();
@@ -530,7 +530,7 @@ export default function ChatView({
             centerChatNode(activePromptNodeId, 'smooth');
         });
         return () => window.cancelAnimationFrame(frame);
-    }, [activePromptNodeId, centerChatNode, chatZoom, isWorkflowMode]);
+    }, [activePromptNodeId, centerChatNode, isWorkflowMode]);
 
     const closeInlineOverlay = () => {
         setSelectionDraft(null);
@@ -847,17 +847,6 @@ export default function ChatView({
         }, 0);
     };
 
-    const adjustChatZoom = (delta) => {
-        setChatZoom((current) => Math.min(1.6, Math.max(0.72, Number((current + delta).toFixed(2)))));
-    };
-
-    const resetChatZoom = () => {
-        setChatZoom(1);
-        window.setTimeout(() => {
-            centerChatNode(activePromptNodeId, 'smooth');
-        }, 0);
-    };
-
     const handleCopy = async (content, idx) => {
         try {
             await navigator.clipboard.writeText(content);
@@ -1086,7 +1075,7 @@ export default function ChatView({
         if (isInteractiveDragTarget(event.target)) return;
 
         const rail = workflowRailRef.current;
-        if (!rail || rail.scrollWidth <= rail.clientWidth) return;
+        if (!rail || (rail.scrollWidth <= rail.clientWidth && rail.scrollHeight <= rail.clientHeight)) return;
 
         workflowDragStateRef.current = {
             active: true,
@@ -1960,31 +1949,63 @@ export default function ChatView({
     };
 
     const renderChatNodeTree = (treeNode) => {
-        const hasChildren = treeNode.children.length > 0;
+        const branchFamily = getBranchFamilyNodes(treeNode);
         const connectorStroke = 'rgba(125,161,255,0.56)';
 
         return (
-            <div key={treeNode.id} style={{ display: 'flex', flexDirection: 'row', alignItems: 'flex-start', gap: '1.4rem', minWidth: 0, width: 'fit-content', position: 'relative' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 0, position: 'relative' }}>
-                    {renderConversationColumn(treeNode)}
-                </div>
-                {hasChildren && (
-                    <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '1.4rem', paddingLeft: '2.15rem', minWidth: 0 }}>
-                        <div style={{ position: 'absolute', left: '0.1rem', top: '1.9rem', width: '2rem', height: '2px', borderRadius: '999px', background: connectorStroke }} />
-                        {treeNode.children.length > 1 && (
-                            <div style={{ position: 'absolute', left: '2.08rem', top: '1.9rem', bottom: '1.9rem', width: '2px', borderRadius: '999px', background: 'linear-gradient(180deg, rgba(125,161,255,0.56) 0%, rgba(125,161,255,0.18) 100%)' }} />
-                        )}
-                        {treeNode.children.map((child) => (
-                            <div key={child.id} style={{ position: 'relative', paddingLeft: '1.55rem' }}>
-                                <div style={{ position: 'absolute', left: 0, top: '1.9rem', width: '1.55rem', height: '2px', borderRadius: '999px', background: connectorStroke }} />
-                                {renderChatNodeTree(child)}
+            <div key={treeNode.id} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1.9rem', minWidth: 0, width: 'fit-content', position: 'relative' }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '2.25rem', minWidth: 0, width: 'fit-content', position: 'relative', paddingTop: branchFamily.length > 1 ? '1.2rem' : 0 }}>
+                    {branchFamily.map((familyNode, index) => {
+                        const sendChildren = getSendChildren(familyNode);
+
+                        return (
+                            <div key={familyNode.id} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1.45rem', minWidth: 0, position: 'relative' }}>
+                                {branchFamily.length > 1 && (
+                                    <>
+                                        <div style={{ position: 'absolute', top: '-1.2rem', left: '50%', width: '2px', height: '1.2rem', transform: 'translateX(-50%)', borderRadius: '999px', background: connectorStroke }} />
+                                        {index < branchFamily.length - 1 && (
+                                            <div style={{ position: 'absolute', top: '-1.2rem', left: '50%', width: 'calc(100% + 2.25rem)', height: '2px', borderRadius: '999px', background: connectorStroke }} />
+                                        )}
+                                    </>
+                                )}
+                                {renderConversationColumn(familyNode)}
+                                {sendChildren.length > 0 && (
+                                    <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1.9rem', paddingTop: '1.35rem', minWidth: 0 }}>
+                                        <div style={{ position: 'absolute', top: 0, left: '50%', width: '2px', height: '1.35rem', transform: 'translateX(-50%)', borderRadius: '999px', background: connectorStroke }} />
+                                        {sendChildren.map((child) => renderChatNodeTree(child))}
+                                    </div>
+                                )}
                             </div>
-                        ))}
-                    </div>
-                )}
+                        );
+                    })}
+                </div>
             </div>
         );
     };
+
+    const handleWorkflowWheel = useCallback((event) => {
+        if (!isWorkflowMode) return;
+        event.preventDefault();
+
+        const viewport = workflowRailRef.current;
+        if (!viewport) return;
+
+        const nextZoom = Math.min(1.6, Math.max(0.72, Number((chatZoom + (event.deltaY < 0 ? 0.08 : -0.08)).toFixed(2))));
+        if (nextZoom === chatZoom) return;
+
+        const rect = viewport.getBoundingClientRect();
+        const pointerX = event.clientX - rect.left;
+        const pointerY = event.clientY - rect.top;
+        const contentX = viewport.scrollLeft + pointerX;
+        const contentY = viewport.scrollTop + pointerY;
+        const ratio = nextZoom / chatZoom;
+
+        setChatZoom(nextZoom);
+        window.requestAnimationFrame(() => {
+            viewport.scrollLeft = Math.max(0, contentX * ratio - pointerX);
+            viewport.scrollTop = Math.max(0, contentY * ratio - pointerY);
+        });
+    }, [chatZoom, isWorkflowMode]);
 
     return (
         <div
@@ -2077,55 +2098,13 @@ export default function ChatView({
                 ) : (
                     <>
                         <div
-                            style={{
-                                position: 'absolute',
-                                top: '1.1rem',
-                                right: '1.85rem',
-                                zIndex: 4,
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '0.42rem',
-                                padding: '0.35rem',
-                                borderRadius: '999px',
-                                background: 'rgba(255,255,255,0.82)',
-                                border: '1px solid rgba(38, 43, 53, 0.08)',
-                                boxShadow: '0 14px 26px rgba(29, 33, 44, 0.08)',
-                            }}
-                        >
-                            <button type="button" style={iconActionStyle} onClick={() => adjustChatZoom(-0.12)} aria-label="Zoom out" title="Zoom out">
-                                <Minus size={13} />
-                            </button>
-                            <button
-                                type="button"
-                                onClick={resetChatZoom}
-                                style={{
-                                    border: 'none',
-                                    background: 'transparent',
-                                    color: '#667085',
-                                    fontSize: '0.74rem',
-                                    fontWeight: 700,
-                                    minWidth: '56px',
-                                    cursor: 'pointer',
-                                    fontFamily: 'inherit',
-                                }}
-                                title="Reset zoom"
-                            >
-                                {Math.round(chatZoom * 100)}%
-                            </button>
-                            <button type="button" style={iconActionStyle} onClick={() => adjustChatZoom(0.12)} aria-label="Zoom in" title="Zoom in">
-                                <Plus size={13} />
-                            </button>
-                            <button type="button" style={iconActionStyle} onClick={() => centerChatNode(activePromptNodeId, 'smooth')} aria-label="Center active node" title="Center active node">
-                                <LocateFixed size={13} />
-                            </button>
-                        </div>
-                        <div
                             ref={workflowRailRef}
                             onPointerDown={isWorkflowMode ? handleWorkflowPointerDown : undefined}
                             onPointerMove={isWorkflowMode ? handleWorkflowPointerMove : undefined}
                             onPointerUp={isWorkflowMode ? handleWorkflowPointerUp : undefined}
                             onPointerCancel={isWorkflowMode ? handleWorkflowPointerUp : undefined}
                             onPointerLeave={isWorkflowMode ? handleWorkflowPointerUp : undefined}
+                            onWheel={isWorkflowMode ? handleWorkflowWheel : undefined}
                             style={{
                                 flex: 1,
                                 minWidth: 0,
@@ -2155,7 +2134,7 @@ export default function ChatView({
                                         display: 'flex',
                                         flexDirection: 'column',
                                         alignItems: 'center',
-                                        gap: '1.5rem',
+                                        gap: '1.75rem',
                                         width: 'max-content',
                                         minWidth: 'max-content',
                                         transform: `scale(${chatZoom})`,
@@ -2164,12 +2143,8 @@ export default function ChatView({
                                 >
                                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.45rem', paddingTop: '0.1rem' }}>
                                         <div style={{ width: '2px', height: '18px', background: 'linear-gradient(180deg, rgba(125,161,255,0.62) 0%, rgba(125,161,255,0.08) 100%)' }} />
-                                        <button
-                                            type="button"
-                                            onClick={onRequestEditTitle}
+                                        <div
                                             style={{
-                                                border: 'none',
-                                                background: 'transparent',
                                                 display: 'flex',
                                                 alignItems: 'center',
                                                 gap: '0.38rem',
@@ -2179,14 +2154,11 @@ export default function ChatView({
                                                 letterSpacing: '0.03em',
                                                 textAlign: 'center',
                                                 whiteSpace: 'nowrap',
-                                                cursor: onRequestEditTitle ? 'pointer' : 'default',
                                                 fontFamily: 'inherit',
                                             }}
-                                            title="スペース名を編集"
                                         >
                                             {spaceTitle || t('editor.untitled')}
-                                            {onRequestEditTitle && <Edit3 size={13} color="#7a8194" />}
-                                        </button>
+                                        </div>
                                     </div>
                                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2rem', width: '100%' }}>
                                         {chatTree.rootNodes.map((treeNode) => renderChatNodeTree(treeNode))}
