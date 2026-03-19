@@ -1113,6 +1113,30 @@ export default function ChatView({
 
     useEffect(() => () => stopWorkflowDrag(), []);
 
+    const handleWorkflowWheel = useCallback((event) => {
+        if (!isWorkflowMode) return;
+        event.preventDefault();
+
+        const viewport = workflowRailRef.current;
+        if (!viewport) return;
+
+        const nextZoom = Math.min(1.6, Math.max(0.72, Number((chatZoom + (event.deltaY < 0 ? 0.08 : -0.08)).toFixed(2))));
+        if (nextZoom === chatZoom) return;
+
+        const rect = viewport.getBoundingClientRect();
+        const pointerX = event.clientX - rect.left;
+        const pointerY = event.clientY - rect.top;
+        const contentX = viewport.scrollLeft + pointerX;
+        const contentY = viewport.scrollTop + pointerY;
+        const ratio = nextZoom / chatZoom;
+
+        setChatZoom(nextZoom);
+        window.requestAnimationFrame(() => {
+            viewport.scrollLeft = Math.max(0, contentX * ratio - pointerX);
+            viewport.scrollTop = Math.max(0, contentY * ratio - pointerY);
+        });
+    }, [chatZoom, isWorkflowMode]);
+
     const planAccess = useMemo(() => (
         spaceId
             ? getProjectPlanAccess(spaceId)
@@ -1982,30 +2006,6 @@ export default function ChatView({
             </div>
         );
     };
-
-    const handleWorkflowWheel = useCallback((event) => {
-        if (!isWorkflowMode) return;
-        event.preventDefault();
-
-        const viewport = workflowRailRef.current;
-        if (!viewport) return;
-
-        const nextZoom = Math.min(1.6, Math.max(0.72, Number((chatZoom + (event.deltaY < 0 ? 0.08 : -0.08)).toFixed(2))));
-        if (nextZoom === chatZoom) return;
-
-        const rect = viewport.getBoundingClientRect();
-        const pointerX = event.clientX - rect.left;
-        const pointerY = event.clientY - rect.top;
-        const contentX = viewport.scrollLeft + pointerX;
-        const contentY = viewport.scrollTop + pointerY;
-        const ratio = nextZoom / chatZoom;
-
-        setChatZoom(nextZoom);
-        window.requestAnimationFrame(() => {
-            viewport.scrollLeft = Math.max(0, contentX * ratio - pointerX);
-            viewport.scrollTop = Math.max(0, contentY * ratio - pointerY);
-        });
-    }, [chatZoom, isWorkflowMode]);
 
     return (
         <div
