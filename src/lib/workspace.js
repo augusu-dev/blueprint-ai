@@ -90,10 +90,12 @@ function normalizeWorkspaceMeta(raw) {
     const projects = Array.isArray(raw?.projects) ? raw.projects.map(normalizeProject) : [];
     const spaces = Object.entries(raw?.spaces || {}).reduce((accumulator, [spaceId, value]) => {
         if (!spaceId) return accumulator;
+        const projectId = value?.projectId || null;
 
         accumulator[spaceId] = {
-            pinned: Boolean(value?.pinned),
-            projectId: value?.projectId || null,
+            // Spaces inside projects cannot be pinned into the top-level list.
+            pinned: Boolean(value?.pinned) && !projectId,
+            projectId,
             title: typeof value?.title === 'string' ? value.title : '',
         };
         return accumulator;
@@ -179,6 +181,8 @@ export function setDraftProjectId(projectId) {
 export function togglePinnedSpace(spaceId) {
     const meta = loadWorkspaceMeta();
     const nextSpace = meta.spaces[spaceId] || {};
+    if (nextSpace.projectId) return meta;
+
     return saveWorkspaceMeta({
         ...meta,
         spaces: {
@@ -218,6 +222,7 @@ export function assignSpaceToProject(spaceId, projectId, title = '') {
             ...meta.spaces,
             [spaceId]: {
                 ...(meta.spaces[spaceId] || {}),
+                pinned: projectId ? false : Boolean(meta.spaces[spaceId]?.pinned),
                 title,
                 projectId: projectId || null,
             },

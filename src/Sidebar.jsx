@@ -31,6 +31,7 @@ function SidebarSpaceRow({
     currentSpaceId,
     projectName,
     isPinned,
+    showPin = true,
     nested = false,
     draggable = false,
     isDragging = false,
@@ -98,27 +99,29 @@ function SidebarSpaceRow({
                     </div>
                 )}
             </div>
-            <button
-                type="button"
-                onClick={(event) => {
-                    event.stopPropagation();
-                    onPin(space.id);
-                }}
-                style={{
-                    background: 'transparent',
-                    border: 'none',
-                    color: isPinned ? '#8ea2ff' : 'var(--text-muted)',
-                    cursor: 'pointer',
-                    padding: '0.15rem',
-                    display: 'flex',
-                    alignItems: 'center',
-                    flexShrink: 0,
-                }}
-                title={isPinned ? 'Unpin' : 'Pin'}
-                aria-label={isPinned ? 'Unpin' : 'Pin'}
-            >
-                <Pin size={12} fill={isPinned ? 'currentColor' : 'none'} />
-            </button>
+            {showPin && (
+                <button
+                    type="button"
+                    onClick={(event) => {
+                        event.stopPropagation();
+                        onPin(space.id);
+                    }}
+                    style={{
+                        background: 'transparent',
+                        border: 'none',
+                        color: isPinned ? '#8ea2ff' : 'var(--text-muted)',
+                        cursor: 'pointer',
+                        padding: '0.15rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        flexShrink: 0,
+                    }}
+                    title={isPinned ? 'Unpin' : 'Pin'}
+                    aria-label={isPinned ? 'Unpin' : 'Pin'}
+                >
+                    <Pin size={12} fill={isPinned ? 'currentColor' : 'none'} />
+                </button>
+            )}
             <button
                 type="button"
                 onClick={(event) => {
@@ -294,7 +297,10 @@ export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
     ), [searchQuery, spaces]);
 
     const pinnedSpaces = useMemo(() => (
-        searchedSpaces.filter((space) => workspaceMeta.spaces[space.id]?.pinned)
+        searchedSpaces.filter((space) => {
+            const meta = workspaceMeta.spaces[space.id];
+            return meta?.pinned && !meta?.projectId;
+        })
     ), [searchedSpaces, workspaceMeta.spaces]);
 
     const unpinnedSpaces = useMemo(() => (
@@ -574,6 +580,7 @@ export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
                                                     currentSpaceId={currentSpaceId}
                                                     projectName=""
                                                     isPinned={Boolean(workspaceMeta.spaces[space.id]?.pinned)}
+                                                    showPin={false}
                                                     nested
                                                     onOpen={(spaceId) => {
                                                         navigate(getSpacePath(spaceId, currentMode));
