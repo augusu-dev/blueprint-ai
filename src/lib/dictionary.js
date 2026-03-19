@@ -245,7 +245,11 @@ export function upsertDictionaryEntry(spaceId, nextEntry) {
     const targetSpaceId = normalized.spaceId;
     const now = new Date().toISOString();
     const entries = loadDictionaryEntries(targetSpaceId);
-    const existingIndex = entries.findIndex((entry) => entry.id === normalized.id || entry.term === normalized.term);
+    const shouldMatchByTerm = nextEntry?.matchByTerm !== false;
+    const existingIndex = entries.findIndex((entry) => (
+        entry.id === normalized.id
+        || (shouldMatchByTerm && entry.term === normalized.term)
+    ));
 
     if (existingIndex >= 0) {
         const existing = entries[existingIndex];

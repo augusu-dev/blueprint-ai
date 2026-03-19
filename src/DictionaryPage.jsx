@@ -67,6 +67,11 @@ function getEntrySpaceTitle(entry) {
 function buildJumpPath(entry) {
     const sourceRef = entry?.sourceRef;
     if (!sourceRef || typeof sourceRef !== 'object') return null;
+    const hasChatAnchor = Boolean(
+        sourceRef.chatNodeId
+        || Number.isInteger(sourceRef.messageIndex),
+    );
+    if (!hasChatAnchor) return null;
 
     const targetSpaceId = sourceRef.spaceId || null;
     if (!targetSpaceId) return null;
@@ -259,8 +264,20 @@ export default function DictionaryPage() {
     const handleGenerateExplanation = async (entry, { forceNewVariant = false } = {}) => {
         if (!entry || isGenerating[entry.id]) return;
 
-        const apiKeyEntry = selectedApiEntry;
-        const { key } = resolveModelSelection(apiKeyEntry);
+        const apiCandidates = [
+            selectedApiEntry,
+            ...apiKeys.filter((candidate, index) => index !== selectedApiIndex),
+        ].filter((candidate, index, array) => {
+            const { key: candidateKey } = resolveModelSelection(candidate);
+            if (!candidateKey) return false;
+            return array.findIndex((item) => (
+                item?.provider === candidate?.provider
+                && item?.key === candidate?.key
+                && item?.model === candidate?.model
+                && item?.manualModel === candidate?.manualModel
+            )) === index;
+        });
+        const { key } = resolveModelSelection(apiCandidates[0]);
         if (!key) {
             setStatusMessage('API キーを設定してください。');
             return;
@@ -287,16 +304,28 @@ export default function DictionaryPage() {
             ];
 
             let rawText = '';
+            let lastError = null;
             for (let attempt = 0; attempt < prompts.length; attempt += 1) {
-                rawText = (await requestChatText({
-                    apiKeyEntry,
-                    history: createSingleTurnHistory(prompts[attempt]),
-                    maxTokens: attempt === 0 ? 320 : 220,
-                })).trim();
-                if (rawText && !/^Error:/i.test(rawText) && rawText.length > 4) break;
+                for (const candidate of apiCandidates) {
+                    try {
+                        rawText = (await requestChatText({
+                            apiKeyEntry: candidate,
+                            history: createSingleTurnHistory(prompts[attempt]),
+                            maxTokens: attempt === 0 ? 320 : 220,
+                        })).trim();
+                        if (rawText && !/^Error:/i.test(rawText) && !/^No response\.?$/i.test(rawText) && rawText.length > 4) {
+                            break;
+                        }
+                    } catch (error) {
+                        lastError = error;
+                        rawText = '';
+                    }
+                }
+                if (rawText && !/^Error:/i.test(rawText) && !/^No response\.?$/i.test(rawText) && rawText.length > 4) break;
             }
 
-            if (!rawText || /^Error:/i.test(rawText)) {
+            if (!rawText || /^Error:/i.test(rawText) || /^No response\.?$/i.test(rawText)) {
+                if (lastError) throw lastError;
                 throw new Error(rawText || 'No response');
             }
 
@@ -308,7 +337,7 @@ export default function DictionaryPage() {
                 forceAddVariant: forceNewVariant || getDictionaryEntryVariants(entry).length > 0,
                 collapsed: false,
                 sourceKinds: ['explanation'],
-                sourceRef: entry.sourceRef || { spaceId: entry.spaceId, term: entry.term },
+                sourceRef: entry.sourceRef ?? null,
             });
             refreshEntries();
         } catch (error) {
@@ -348,12 +377,14 @@ export default function DictionaryPage() {
         if (!term) return;
 
         upsertDictionaryEntry(currentSpaceId || 'manual', {
+            id: crypto.randomUUID(),
             spaceId: currentSpaceId || 'manual',
             term,
             explanation: '',
             collapsed: true,
             sourceKinds: ['dictionary'],
             sourceRef: null,
+            matchByTerm: false,
         });
         refreshEntries();
         setSearchQuery('');
