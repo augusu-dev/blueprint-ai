@@ -5,6 +5,7 @@ import {
     FolderClosed,
     FolderOpen,
     FolderPlus,
+    BookOpen,
     MessageSquare,
     Pin,
     Plus,
@@ -15,7 +16,7 @@ import {
 } from 'lucide-react';
 import { supabase } from './lib/supabase';
 import { useLanguage } from './i18n';
-import { DEFAULT_SPACE_MODE, getSpacePath, isSpaceMode, resolveSpaceRouteParams } from './lib/routes';
+import { DEFAULT_SPACE_MODE, getDictionaryPath, getSpacePath, isSpaceMode, resolveSpaceRouteParams } from './lib/routes';
 import { resolveSpaceTitle } from './lib/space';
 import {
     assignSpaceToProject,
@@ -742,6 +743,34 @@ export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
                 </div>
 
                 <div style={{ padding: '0.55rem 0.7rem', borderTop: '1px solid var(--panel-border)', minWidth: '260px', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                    {onOpenSettings && (
+                        <button
+                            onClick={() => {
+                                if (!currentSpaceId) return;
+                                navigate(getDictionaryPath(currentSpaceId));
+                                onClose();
+                            }}
+                            disabled={!currentSpaceId}
+                            style={{
+                                width: '100%',
+                                background: 'rgba(255,255,255,0.03)',
+                                border: '1px solid var(--panel-border)',
+                                padding: '0.45rem',
+                                borderRadius: '8px',
+                                fontSize: '0.75rem',
+                                color: 'var(--text-muted)',
+                                cursor: currentSpaceId ? 'pointer' : 'default',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: '0.3rem',
+                                fontFamily: 'inherit',
+                                opacity: currentSpaceId ? 1 : 0.45,
+                            }}
+                        >
+                            <BookOpen size={11} /> 辞書
+                        </button>
+                    )}
                     {onOpenSettings && (
                         <button
                             onClick={onOpenSettings}

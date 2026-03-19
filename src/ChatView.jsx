@@ -164,6 +164,31 @@ function indexToBranchLetter(index) {
     return label;
 }
 
+function clampNumber(value, min, max) {
+    return Math.min(Math.max(value, min), max);
+}
+
+function buildInlineOverlayPlacement(container, range, estimatedHeight) {
+    const root = container?.parentElement;
+    if (!root || typeof range?.getBoundingClientRect !== 'function') return null;
+
+    const rootRect = root.getBoundingClientRect();
+    const selectionRect = range.getBoundingClientRect();
+    const availableWidth = Math.max(120, rootRect.width - 16);
+    const desiredWidth = Math.max(260, selectionRect.width + 92);
+    const width = Math.min(Math.max(180, Math.min(360, desiredWidth)), availableWidth);
+    const gap = 10;
+    const belowSpace = window.innerHeight - selectionRect.bottom - 16;
+    const aboveSpace = selectionRect.top - 16;
+    const placement = belowSpace >= estimatedHeight || belowSpace >= aboveSpace ? 'bottom' : 'top';
+    const top = placement === 'bottom'
+        ? selectionRect.bottom - rootRect.top + gap
+        : selectionRect.top - rootRect.top - estimatedHeight - gap;
+    const left = clampNumber(selectionRect.left - rootRect.left, 8, Math.max(8, rootRect.width - width - 8));
+
+    return { top, left, width, placement };
+}
+
 function analyzeChatHistory(history) {
     const normalizedHistory = normalizeHistory(history);
     const nodeById = new Map();
@@ -579,7 +604,18 @@ export default function ChatView({
         }
 
         setActiveExplanation(null);
-        setSelectionDraft({ messageIndex, start, end, text: selectedText });
+        setSelectionDraft({
+            messageIndex,
+            start,
+            end,
+            text: selectedText,
+            overlay: buildInlineOverlayPlacement(container, range, 132) || {
+                top: 12,
+                left: 12,
+                width: 280,
+                placement: 'bottom',
+            },
+        });
     };
 
     const handleCreateExplanation = async () => {
@@ -617,6 +653,7 @@ export default function ChatView({
                 end: selectionDraft.end,
                 text: selectionDraft.text,
                 summary: explanationText,
+                overlay: selectionDraft.overlay || null,
             };
 
             const nextHistory = [...chatHistory];
@@ -1283,6 +1320,26 @@ export default function ChatView({
             width: '100%',
         };
         const actionCardWidth = 'min(400px, calc(100% - 2.5rem))';
+        const selectionOverlayPlacement = selectionDraft?.overlay || {
+            top: 12,
+            left: 12,
+            width: 280,
+        };
+        const explanationOverlayPlacement = currentExplanation?.overlay || {
+            top: 12,
+            left: 12,
+            width: 320,
+        };
+        const selectionOverlayButtonStyle = {
+            ...cardActionStyle,
+            width: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '0.28rem',
+            padding: '0.35rem 0.55rem',
+            fontSize: '0.72rem',
+        };
 
         return (
             <div key={treeNode.id} style={columnShellStyle}>
@@ -1506,8 +1563,8 @@ export default function ChatView({
                                         ...assistantBubbleStyle,
                                         ...bubbleWidthStyle,
                                         minWidth: 0,
-                                        opacity: isSelectionOverlayVisible || isExplanationOverlayVisible ? 0.22 : 1,
-                                        filter: isSelectionOverlayVisible || isExplanationOverlayVisible ? 'blur(0.25px)' : 'none',
+                                        opacity: isSelectionOverlayVisible || isExplanationOverlayVisible ? 0.68 : 1,
+                                        filter: 'none',
                                         userSelect: isSelectionOverlayVisible || isExplanationOverlayVisible ? 'none' : 'text',
                                     }}
                                 >
@@ -1538,38 +1595,41 @@ export default function ChatView({
                                         ref={inlineOverlayRef}
                                         style={{
                                             position: 'absolute',
-                                            inset: '0.35rem',
-                                            zIndex: 4,
-                                            padding: '0.95rem 1.05rem',
-                                            borderRadius: '18px',
-                                            background: 'linear-gradient(180deg, rgba(235,242,255,0.96) 0%, rgba(219,231,255,0.93) 100%)',
-                                            border: '1px solid rgba(125,161,255,0.42)',
+                                            top: `${selectionOverlayPlacement.top}px`,
+                                            left: `${selectionOverlayPlacement.left}px`,
+                                            width: `${selectionOverlayPlacement.width}px`,
+                                            maxWidth: 'calc(100% - 16px)',
+                                            zIndex: 6,
+                                            padding: '0.72rem 0.78rem',
+                                            borderRadius: '16px',
+                                            background: 'linear-gradient(180deg, rgba(235,242,255,0.98) 0%, rgba(222,233,255,0.95) 100%)',
+                                            border: '1px solid rgba(125,161,255,0.48)',
                                             boxShadow: '0 16px 34px rgba(17,31,66,0.18)',
                                             display: 'flex',
                                             flexDirection: 'column',
-                                            justifyContent: 'space-between',
-                                            gap: '0.7rem',
+                                            gap: '0.55rem',
                                             minWidth: 0,
+                                            pointerEvents: 'auto',
                                         }}
                                     >
-                                        <div style={{ fontSize: '0.88rem', color: '#22314d', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                                        <div style={{ fontSize: '0.84rem', color: '#22314d', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                                             <Sparkles size={14} color="#63a9ff" />
                                             選択範囲の説明を作成
                                         </div>
-                                        <div style={{ fontSize: '0.82rem', color: '#5b79d9', lineHeight: 1.7, whiteSpace: 'pre-wrap', maxHeight: '7rem', overflow: 'auto' }}>
+                                        <div style={{ fontSize: '0.8rem', color: '#5b79d9', lineHeight: 1.6, whiteSpace: 'pre-wrap', maxHeight: '4.6rem', overflow: 'auto' }}>
                                             {selectionDraft.text}
                                         </div>
-                                        <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
-                                            <button style={cardActionStyle} onClick={handleCopySelection}>
+                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '0.38rem' }}>
+                                            <button style={selectionOverlayButtonStyle} onClick={handleCopySelection}>
                                                 <Copy size={12} /> コピー
                                             </button>
-                                            <button style={cardActionStyle} onClick={handleSaveSelectionToDictionary}>
+                                            <button style={selectionOverlayButtonStyle} onClick={handleSaveSelectionToDictionary}>
                                                 <BookOpen size={12} /> 辞書
                                             </button>
-                                            <button style={cardActionStyle} onClick={handleCreateExplanation} disabled={isExplaining}>
+                                            <button style={selectionOverlayButtonStyle} onClick={handleCreateExplanation} disabled={isExplaining}>
                                                 <Sparkles size={12} /> {isExplaining ? '生成中...' : '説明'}
                                             </button>
-                                            <button style={cardActionStyle} onClick={closeInlineOverlay}>
+                                            <button style={selectionOverlayButtonStyle} onClick={closeInlineOverlay}>
                                                 <X size={12} /> 閉じる
                                             </button>
                                         </div>
@@ -1581,21 +1641,25 @@ export default function ChatView({
                                         ref={inlineOverlayRef}
                                         style={{
                                             position: 'absolute',
-                                            inset: '0.35rem',
-                                            zIndex: 4,
-                                            padding: '1rem 1.05rem',
+                                            top: `${explanationOverlayPlacement.top}px`,
+                                            left: `${explanationOverlayPlacement.left}px`,
+                                            width: `${explanationOverlayPlacement.width}px`,
+                                            maxWidth: 'calc(100% - 16px)',
+                                            zIndex: 6,
+                                            padding: '0.88rem 0.95rem',
                                             borderRadius: '18px',
-                                            background: 'linear-gradient(180deg, rgba(235,242,255,0.96) 0%, rgba(219,231,255,0.93) 100%)',
+                                            background: 'linear-gradient(180deg, rgba(235,242,255,0.98) 0%, rgba(219,231,255,0.95) 100%)',
                                             border: '1px solid rgba(125,161,255,0.42)',
                                             boxShadow: '0 18px 36px rgba(17,31,66,0.18)',
                                             display: 'flex',
                                             flexDirection: 'column',
-                                            gap: '0.75rem',
+                                            gap: '0.62rem',
                                             minWidth: 0,
+                                            pointerEvents: 'auto',
                                         }}
                                     >
                                         <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.7rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                                            <div style={{ fontSize: '0.88rem', color: '#22314d', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                                            <div style={{ fontSize: '0.84rem', color: '#22314d', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                                                 <Sparkles size={14} color="#63a9ff" />
                                                 説明
                                             </div>
@@ -1613,10 +1677,10 @@ export default function ChatView({
                                                 </div>
                                             )}
                                         </div>
-                                        <div style={{ fontSize: '0.82rem', color: '#5b79d9', lineHeight: 1.7, whiteSpace: 'pre-wrap', maxHeight: '6.5rem', overflow: 'auto' }}>
+                                        <div style={{ fontSize: '0.8rem', color: '#5b79d9', lineHeight: 1.6, whiteSpace: 'pre-wrap', maxHeight: '4.8rem', overflow: 'auto' }}>
                                             {currentExplanation.text}
                                         </div>
-                                        <div style={{ fontSize: '0.86rem', color: '#22314d', lineHeight: 1.9, whiteSpace: 'pre-wrap', maxHeight: '7rem', overflow: 'auto' }}>
+                                        <div style={{ fontSize: '0.84rem', color: '#22314d', lineHeight: 1.85, whiteSpace: 'pre-wrap', maxHeight: '6rem', overflow: 'auto' }}>
                                             {currentExplanation.summary}
                                         </div>
                                         <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>

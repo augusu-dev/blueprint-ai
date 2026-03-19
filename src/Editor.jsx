@@ -1563,8 +1563,8 @@ function EditorContent() {
                     disabled={isGraphEditMode || !spaceId}
                     className="btn-icon"
                     style={{ width: '36px', height: '36px', opacity: isGraphEditMode || !spaceId ? 0.45 : 1, cursor: isGraphEditMode || !spaceId ? 'default' : 'pointer' }}
-                    title="Dictionary"
-                    aria-label="Dictionary"
+                    title="辞書"
+                    aria-label="辞書"
                 >
                     <BookOpen size={17} />
                 </button>
