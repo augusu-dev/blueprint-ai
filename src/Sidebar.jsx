@@ -748,7 +748,8 @@ export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
                         <button
                             onClick={() => {
                                 if (!dictionarySpaceId) return;
-                                navigate(getDictionaryPath(dictionarySpaceId));
+                                localStorage.setItem('blueprint_dictionary_context_space', dictionarySpaceId);
+                                navigate(getDictionaryPath(), { state: { spaceId: dictionarySpaceId } });
                                 onClose();
                             }}
                             disabled={!dictionarySpaceId}

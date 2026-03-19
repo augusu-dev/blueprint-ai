@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
     BookOpen,
     ChevronDown,
@@ -8,9 +8,9 @@ import {
     RefreshCw,
     Search,
     Sparkles,
+    Settings,
     Trash2,
 } from 'lucide-react';
-import { useLanguage } from './i18n';
 import { getSpacePath } from './lib/routes';
 import { resolveSpaceTitle } from './lib/space';
 import {
@@ -59,17 +59,22 @@ function clampIndex(value, length) {
 }
 
 function getEntrySpaceTitle(entry) {
-    return resolveSpaceTitle(entry?.spaceId, loadSpaceTitle(entry?.spaceId, 'space'), 'space');
+    const sourceSpaceId = entry?.sourceRef?.spaceId || '';
+    if (!sourceSpaceId) return '';
+    return resolveSpaceTitle(sourceSpaceId, loadSpaceTitle(sourceSpaceId, 'space'), 'space');
 }
 
 function buildJumpPath(entry) {
-    const targetSpaceId = entry?.sourceRef?.spaceId || entry?.spaceId;
+    const sourceRef = entry?.sourceRef;
+    if (!sourceRef || typeof sourceRef !== 'object') return null;
+
+    const targetSpaceId = sourceRef.spaceId || null;
     if (!targetSpaceId) return null;
 
     const params = new URLSearchParams();
-    if (entry?.sourceRef?.chatNodeId) params.set('focusNode', entry.sourceRef.chatNodeId);
-    if (Number.isInteger(entry?.sourceRef?.messageIndex)) params.set('focusMessage', String(entry.sourceRef.messageIndex));
-    if (entry?.sourceRef?.term || entry?.term) params.set('focusTerm', entry.sourceRef?.term || entry.term);
+    if (sourceRef.chatNodeId) params.set('focusNode', sourceRef.chatNodeId);
+    if (Number.isInteger(sourceRef.messageIndex)) params.set('focusMessage', String(sourceRef.messageIndex));
+    if (sourceRef.term || entry?.term) params.set('focusTerm', sourceRef.term || entry.term);
 
     const basePath = getSpacePath(targetSpaceId, 'chat');
     const query = params.toString();
@@ -117,9 +122,11 @@ const compactActionStyle = {
 };
 
 export default function DictionaryPage() {
-    const { t } = useLanguage();
+    const location = useLocation();
     const navigate = useNavigate();
-    const { id: currentSpaceId } = useParams();
+    const currentSpaceId = typeof location.state?.spaceId === 'string' && location.state.spaceId
+        ? location.state.spaceId
+        : (localStorage.getItem('blueprint_dictionary_context_space') || '');
     const [entries, setEntries] = useState([]);
     const [searchQuery, setSearchQuery] = useState('');
     const [sortMode, setSortMode] = useState('newest');
@@ -136,18 +143,21 @@ export default function DictionaryPage() {
     const [apiKeys, setApiKeys] = useState(() => loadApiKeys());
     const [isGenerating, setIsGenerating] = useState({});
     const [statusMessage, setStatusMessage] = useState('');
-    const [spaceTitle, setSpaceTitle] = useState(() => loadSpaceTitle(currentSpaceId, t('editor.untitled')));
+
+    useEffect(() => {
+        if (currentSpaceId) {
+            localStorage.setItem('blueprint_dictionary_context_space', currentSpaceId);
+        }
+    }, [currentSpaceId]);
 
     useEffect(() => {
         setEntries(loadAllDictionaryEntries());
         setApiKeys(loadApiKeys());
-        setSpaceTitle(loadSpaceTitle(currentSpaceId, t('editor.untitled')));
-    }, [currentSpaceId, t]);
+    }, [currentSpaceId]);
 
     useEffect(() => {
         const handleDictionaryUpdated = () => {
             setEntries(loadAllDictionaryEntries());
-            setSpaceTitle(loadSpaceTitle(currentSpaceId, t('editor.untitled')));
         };
         const handleStorage = (event) => {
             if (!event || event.key === 'blueprint_api_keys') {
@@ -157,10 +167,7 @@ export default function DictionaryPage() {
                 setEntries(loadAllDictionaryEntries());
             }
         };
-        const handleSpaceTitleUpdated = () => {
-            setEntries(loadAllDictionaryEntries());
-            setSpaceTitle(loadSpaceTitle(currentSpaceId, t('editor.untitled')));
-        };
+        const handleSpaceTitleUpdated = () => setEntries(loadAllDictionaryEntries());
 
         window.addEventListener('dictionaryUpdated', handleDictionaryUpdated);
         window.addEventListener('storage', handleStorage);
@@ -170,7 +177,7 @@ export default function DictionaryPage() {
             window.removeEventListener('storage', handleStorage);
             window.removeEventListener('spaceTitleUpdated', handleSpaceTitleUpdated);
         };
-    }, [currentSpaceId, t]);
+    }, []);
 
     useEffect(() => {
         const nextIndex = Math.min(selectedApiIndex, Math.max(0, apiKeys.length - 1));
@@ -198,27 +205,17 @@ export default function DictionaryPage() {
         const baseEntries = entries.filter((entry) => {
             if (!query) return true;
             const variants = getDictionaryEntryVariants(entry);
+            const spaceTitle = buildJumpPath(entry) ? getEntrySpaceTitle(entry) : '';
             return entry.term.includes(query)
                 || variants.some((variant) => variant.text.includes(query))
-                || getEntrySpaceTitle(entry).includes(query);
+                || spaceTitle.includes(query);
         });
         return sortEntries(baseEntries, sortMode, collator);
     }, [collator, entries, searchQuery, sortMode]);
 
     const selectedCount = selectedIds.length;
-    const allVisibleSelected = filteredEntries.length > 0 && filteredEntries.every((entry) => selectedIds.includes(entry.id));
-
     const refreshEntries = () => {
         setEntries(loadAllDictionaryEntries());
-    };
-
-    const handleToggleSelectAll = () => {
-        if (allVisibleSelected) {
-            setSelectedIds((current) => current.filter((id) => !filteredEntries.some((entry) => entry.id === id)));
-            return;
-        }
-        const visibleIds = filteredEntries.map((entry) => entry.id);
-        setSelectedIds((current) => [...new Set([...current, ...visibleIds])]);
     };
 
     const handleToggleSelected = (entryId) => {
@@ -273,23 +270,31 @@ export default function DictionaryPage() {
         setStatusMessage('');
         setIsGenerating((current) => ({ ...current, [entry.id]: true }));
         try {
-            const prompt = [
-                '次の単語や短い表現を、日本語で短く説明してください。',
-                '- 2〜4文でまとめる',
-                '- 曖昧な一般論ではなく、意味が伝わる説明にする',
-                '- 似た表現との違いがあれば一言だけ添える',
-                '',
-                `単語: ${entry.term}`,
-                existingExplanation && forceNewVariant
-                    ? `前回の説明: ${existingExplanation}\n前回と少し角度を変えて、より分かりやすく説明してください。`
-                    : '',
-            ].filter(Boolean).join('\n');
+            const prompts = [
+                [
+                    '次の単語や短い表現を、日本語で短く説明してください。',
+                    '- 2〜4文でまとめる',
+                    '- 曖昧な一般論ではなく、意味が伝わる説明にする',
+                    '- 似た表現との違いがあれば一言だけ添える',
+                    '',
+                    `単語: ${entry.term}`,
+                    existingExplanation && forceNewVariant
+                        ? `前回の説明: ${existingExplanation}\n前回と少し角度を変えて、より分かりやすく説明してください。`
+                        : '',
+                ].filter(Boolean).join('\n'),
+                `「${entry.term}」を日本語で2〜3文で説明してください。返答は説明文だけにしてください。`,
+                `単語: ${entry.term}\n日本語で簡潔に意味を説明してください。`,
+            ];
 
-            const rawText = (await requestChatText({
-                apiKeyEntry,
-                history: createSingleTurnHistory(prompt),
-                maxTokens: 320,
-            })).trim();
+            let rawText = '';
+            for (let attempt = 0; attempt < prompts.length; attempt += 1) {
+                rawText = (await requestChatText({
+                    apiKeyEntry,
+                    history: createSingleTurnHistory(prompts[attempt]),
+                    maxTokens: attempt === 0 ? 320 : 220,
+                })).trim();
+                if (rawText && !/^Error:/i.test(rawText) && rawText.length > 4) break;
+            }
 
             if (!rawText || /^Error:/i.test(rawText)) {
                 throw new Error(rawText || 'No response');
@@ -340,26 +345,27 @@ export default function DictionaryPage() {
 
     const handleAddFromSearch = () => {
         const term = searchQuery.trim();
-        if (!term || !currentSpaceId) return;
+        if (!term) return;
 
-        upsertDictionaryEntry(currentSpaceId, {
-            spaceId: currentSpaceId,
+        upsertDictionaryEntry(currentSpaceId || 'manual', {
+            spaceId: currentSpaceId || 'manual',
             term,
             explanation: '',
             collapsed: true,
             sourceKinds: ['dictionary'],
-            sourceRef: { spaceId: currentSpaceId, term },
+            sourceRef: null,
         });
         refreshEntries();
         setSearchQuery('');
         setStatusMessage('単語を辞書に追加しました。');
     };
 
-    const goBackToSpace = () => {
+    const openSettingsFromDictionary = () => {
         if (!currentSpaceId) {
             navigate('/');
             return;
         }
+        sessionStorage.setItem('blueprint_open_settings', '1');
         navigate(getSpacePath(currentSpaceId, 'chat'));
     };
 
@@ -388,25 +394,42 @@ export default function DictionaryPage() {
                     flexShrink: 0,
                 }}
             >
-                <button
-                    type="button"
-                    className="btn-icon"
-                    onClick={goBackToSpace}
-                    style={{ width: '36px', height: '36px' }}
-                    title="Space"
-                    aria-label="Space"
+                <div
+                    style={{
+                        marginTop: 'auto',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        gap: '0.55rem',
+                    }}
                 >
-                    <ChevronLeft size={18} />
-                </button>
-                <button
-                    type="button"
-                    className="btn-icon"
-                    style={{ width: '36px', height: '36px', marginTop: 'auto', opacity: 0.95 }}
-                    title="辞書"
-                    aria-label="辞書"
-                >
-                    <BookOpen size={17} />
-                </button>
+                    <button
+                        type="button"
+                        className="btn-icon"
+                        onClick={() => navigate('/d')}
+                        style={{
+                            width: '36px',
+                            height: '36px',
+                            opacity: 1,
+                            background: 'rgba(255,255,255,0.08)',
+                            borderColor: 'rgba(255,255,255,0.14)',
+                        }}
+                        title="辞書"
+                        aria-label="辞書"
+                    >
+                        <BookOpen size={17} />
+                    </button>
+                    <button
+                        type="button"
+                        className="btn-icon"
+                        onClick={openSettingsFromDictionary}
+                        style={{ width: '36px', height: '36px', opacity: 1 }}
+                        title="設定"
+                        aria-label="設定"
+                    >
+                        <Settings size={17} />
+                    </button>
+                </div>
             </div>
 
             <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -447,18 +470,6 @@ export default function DictionaryPage() {
                     </div>
 
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                        <button
-                            type="button"
-                            onClick={goBackToSpace}
-                            style={{
-                                ...compactActionStyle,
-                                background: 'rgba(108,140,255,0.08)',
-                                border: '1px solid rgba(108,140,255,0.16)',
-                                color: '#536fd8',
-                            }}
-                        >
-                            {spaceTitle} に戻る
-                        </button>
                         <label style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
                             API
                             <select
@@ -516,30 +527,32 @@ export default function DictionaryPage() {
                         <button
                             type="button"
                             onClick={handleAddFromSearch}
-                            disabled={!searchQuery.trim() || !currentSpaceId}
+                            disabled={!searchQuery.trim()}
                             style={{
                                 ...compactActionStyle,
-                                background: searchQuery.trim() && currentSpaceId ? 'rgba(108,140,255,0.12)' : 'rgba(108,140,255,0.04)',
-                                color: searchQuery.trim() && currentSpaceId ? '#5a74d7' : 'var(--text-muted)',
+                                background: searchQuery.trim() ? 'rgba(108,140,255,0.12)' : 'rgba(108,140,255,0.04)',
+                                color: searchQuery.trim() ? '#5a74d7' : 'var(--text-muted)',
                                 border: '1px solid rgba(108,140,255,0.16)',
-                                cursor: searchQuery.trim() && currentSpaceId ? 'pointer' : 'default',
+                                cursor: searchQuery.trim() ? 'pointer' : 'default',
                             }}
                         >
-                            追加
+                            新規追加
                         </button>
                     </div>
 
                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.42rem', flexWrap: 'wrap' }}>
                             {[
-                                ['newest', '新しい順'],
-                                ['oldest', '古い順'],
-                                ['alpha', 'アルファベット / ひらがな順'],
-                            ].map(([id, label]) => (
+                                ['newest', '↓新', '新しい順'],
+                                ['oldest', '↑旧', '古い順'],
+                                ['alpha', 'A/あ', 'アルファベット / ひらがな順'],
+                            ].map(([id, label, title]) => (
                                 <button
                                     key={id}
                                     type="button"
                                     onClick={() => setSortMode(id)}
+                                    title={title}
+                                    aria-label={title}
                                     style={{
                                         ...compactActionStyle,
                                         background: sortMode === id ? 'rgba(108,140,255,0.12)' : 'rgba(255,255,255,0.76)',
@@ -555,10 +568,6 @@ export default function DictionaryPage() {
                         </div>
 
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', flexWrap: 'wrap' }}>
-                            <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                                <input type="checkbox" checked={allVisibleSelected} onChange={handleToggleSelectAll} />
-                                すべて選択
-                            </label>
                             <button
                                 type="button"
                                 onClick={handleDeleteSelected}
@@ -610,7 +619,7 @@ export default function DictionaryPage() {
                             </div>
                         </div>
                     ) : (
-                        <div style={{ borderTop: '1px solid rgba(8, 10, 14, 0.92)' }}>
+                        <div style={{ borderTop: '1px solid rgba(18, 22, 28, 0.14)' }}>
                             {filteredEntries.map((entry) => {
                                 const variants = getDictionaryEntryVariants(entry);
                                 const activeVariantIndex = clampIndex(entry.activeVariantIndex, variants.length);
@@ -625,7 +634,7 @@ export default function DictionaryPage() {
                                     <div
                                         key={entry.id}
                                         style={{
-                                            borderBottom: '1px solid rgba(8, 10, 14, 0.92)',
+                                            borderBottom: '1px solid rgba(18, 22, 28, 0.14)',
                                             padding: '0.7rem 0 0.55rem',
                                         }}
                                     >
@@ -675,24 +684,25 @@ export default function DictionaryPage() {
                                                 </button>
 
                                                 <div style={{ marginTop: '0.16rem', display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => handleJumpToSource(entry)}
-                                                        disabled={!jumpPath}
-                                                        style={{
-                                                            border: 'none',
-                                                            background: 'transparent',
-                                                            padding: 0,
-                                                            margin: 0,
-                                                            cursor: jumpPath ? 'pointer' : 'default',
-                                                            color: jumpPath ? '#5f6778' : '#a1a7b5',
-                                                            fontFamily: 'inherit',
-                                                            fontSize: '0.72rem',
-                                                            textDecoration: jumpPath ? 'underline' : 'none',
-                                                        }}
-                                                    >
-                                                        {getEntrySpaceTitle(entry)}
-                                                    </button>
+                                                    {jumpPath && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleJumpToSource(entry)}
+                                                            style={{
+                                                                border: 'none',
+                                                                background: 'transparent',
+                                                                padding: 0,
+                                                                margin: 0,
+                                                                cursor: 'pointer',
+                                                                color: '#5f6778',
+                                                                fontFamily: 'inherit',
+                                                                fontSize: '0.72rem',
+                                                                textDecoration: 'underline',
+                                                            }}
+                                                        >
+                                                            {getEntrySpaceTitle(entry)}
+                                                        </button>
+                                                    )}
                                                     {isGeneratingEntry && (
                                                         <span style={{ fontSize: '0.72rem', color: '#6a7796' }}>説明を生成中...</span>
                                                     )}
@@ -743,7 +753,6 @@ export default function DictionaryPage() {
                                                                 }}
                                                             >
                                                                 <RefreshCw size={12} />
-                                                                もう一度
                                                             </button>
 
                                                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
@@ -792,16 +801,20 @@ export default function DictionaryPage() {
                                                         ...iconButtonStyle,
                                                         background: collapsed ? 'rgba(255,255,255,0.98)' : 'rgba(108,140,255,0.1)',
                                                     }}
-                                                    aria-label={collapsed ? '開く' : '閉じる'}
-                                                    title={collapsed ? '開く' : '閉じる'}
+                                                    aria-label={explanation ? (collapsed ? '開く' : '閉じる') : '説明を作成'}
+                                                    title={explanation ? (collapsed ? '開く' : '閉じる') : '説明を作成'}
                                                 >
-                                                    <ChevronDown
-                                                        size={13}
-                                                        style={{
-                                                            transform: collapsed ? 'rotate(0deg)' : 'rotate(180deg)',
-                                                            transition: 'transform 180ms ease',
-                                                        }}
-                                                    />
+                                                    {explanation ? (
+                                                        <ChevronDown
+                                                            size={13}
+                                                            style={{
+                                                                transform: collapsed ? 'rotate(0deg)' : 'rotate(180deg)',
+                                                                transition: 'transform 180ms ease',
+                                                            }}
+                                                        />
+                                                    ) : (
+                                                        <Sparkles size={13} />
+                                                    )}
                                                 </button>
                                                 <button
                                                     type="button"

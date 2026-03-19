@@ -571,6 +571,12 @@ function EditorContent() {
         setShowSettings(false);
     }, [apiKeys, lang]);
 
+    useEffect(() => {
+        if (sessionStorage.getItem('blueprint_open_settings') !== '1') return;
+        sessionStorage.removeItem('blueprint_open_settings');
+        openSettings();
+    }, [openSettings]);
+
     const handleSaveSettings = useCallback(() => {
         const normalizedKeys = cloneApiKeyEntries(settingsDraftApiKeys);
         localStorage.setItem('blueprint_api_keys', JSON.stringify(normalizedKeys));
@@ -1639,7 +1645,11 @@ function EditorContent() {
                     <Menu size={18} />
                 </button>
                 <button
-                    onClick={() => !isGraphEditMode && spaceId && navigate(getDictionaryPath(spaceId))}
+                    onClick={() => {
+                        if (isGraphEditMode || !spaceId) return;
+                        localStorage.setItem('blueprint_dictionary_context_space', spaceId);
+                        navigate(getDictionaryPath(), { state: { spaceId } });
+                    }}
                     disabled={isGraphEditMode || !spaceId}
                     className="btn-icon"
                     style={{

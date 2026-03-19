@@ -14,6 +14,10 @@ function SpaceModeRedirect() {
   return <Navigate to={getSpacePath(id)} replace />;
 }
 
+function DictionaryRedirect() {
+  return <Navigate to="/d" replace />;
+}
+
 function SpaceRouteResolver() {
   const params = useParams();
   const location = useLocation();
@@ -101,8 +105,12 @@ function AppContent() {
             element={session ? <SpaceRouteResolver /> : <Navigate to="/auth" replace />}
           />
           <Route
-            path="/d/:id"
+            path="/d"
             element={session ? <ErrorBoundary><DictionaryPage /></ErrorBoundary> : <Navigate to="/auth" replace />}
+          />
+          <Route
+            path="/d/:id"
+            element={session ? <DictionaryRedirect /> : <Navigate to="/auth" replace />}
           />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

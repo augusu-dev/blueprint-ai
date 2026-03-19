@@ -10,6 +10,7 @@ import {
     Copy,
     ExternalLink,
     GitBranch,
+    Plus,
     RefreshCw,
     Send,
     Sparkles,
@@ -889,8 +890,44 @@ export default function ChatView({
                 selectionDraft.text,
             ),
         });
+        localStorage.setItem('blueprint_dictionary_context_space', spaceId);
         closeInlineOverlay();
-        navigate(getDictionaryPath(spaceId));
+        navigate(getDictionaryPath(), { state: { spaceId } });
+    };
+
+    const handleCreateChildNode = (parentNodeId) => {
+        if (!node || !parentNodeId) return;
+
+        const parentNode = chatTree.nodeById.get(parentNodeId) || null;
+        const existingDraftChild = parentNode?.children?.find((child) => (
+            child.branchKind !== 'branch'
+            && child.pendingUserEntry?.message?.isDraft
+        )) || null;
+
+        if (existingDraftChild) {
+            setBranchTargetNodeId(null);
+            setFocusedChatNodeId(existingDraftChild.id);
+            window.requestAnimationFrame(() => inputRef.current?.focus?.());
+            return;
+        }
+
+        const nextNodeId = crypto.randomUUID();
+        const nextHistory = normalizeHistory([
+            ...chatHistory,
+            {
+                role: 'user',
+                content: '',
+                isDraft: true,
+                chatNodeId: nextNodeId,
+                chatParentId: parentNodeId,
+                chatBranchKind: 'send',
+            },
+        ]);
+
+        setBranchTargetNodeId(null);
+        setFocusedChatNodeId(nextNodeId);
+        persistChatHistory(nextHistory);
+        window.requestAnimationFrame(() => inputRef.current?.focus?.());
     };
 
     const handleQueuePrompt = () => {
@@ -898,6 +935,28 @@ export default function ChatView({
         if (!messageText || !node) return;
         const selectedBranchNode = branchTargetNodeId ? chatTree.nodeById.get(branchTargetNodeId) || null : null;
         const activeNode = activePromptNodeId ? chatTree.nodeById.get(activePromptNodeId) || null : null;
+        const draftMessageIndex = activeNode?.pendingUserEntry?.message?.isDraft ? activeNode.pendingUserIndex : null;
+
+        if (Number.isInteger(draftMessageIndex) && activeNode) {
+            const nextHistory = normalizeHistory(
+                chatHistory.map((message, index) => (
+                    index === draftMessageIndex
+                        ? {
+                            ...message,
+                            content: messageText,
+                            isDraft: false,
+                        }
+                        : message
+                )),
+            );
+
+            setInput('');
+            setBranchTargetNodeId(null);
+            setFocusedChatNodeId(activeNode.id);
+            persistChatHistory(nextHistory);
+            return;
+        }
+
         const nextNodeId = selectedBranchNode
             ? crypto.randomUUID()
             : activeNode?.id || crypto.randomUUID();
@@ -1530,7 +1589,7 @@ export default function ChatView({
         const activeResponseVariantIndex = replyMessage?.activeVariantIndex || 0;
         const hasPreviousResponseVariant = responseVariantCount > 1 && activeResponseVariantIndex > 0;
         const hasNextResponseVariant = responseVariantCount > 1 && activeResponseVariantIndex < responseVariantCount - 1;
-        const canGeneratePrompt = Boolean(treeNode.pendingUserEntry);
+        const canGeneratePrompt = Boolean(treeNode.pendingUserEntry && treeNode.pendingUserEntry.message?.content?.trim());
         const isGeneratingPrompt = Boolean(treeNode.pendingUserEntry && generatingPromptIndex === treeNode.pendingUserIndex);
         const replyExplanations = replyMessage ? getInlineExplanations(replyMessage) : [];
         const activeExplanationIndex = replyExplanations.findIndex((item) => item.id === activeExplanation?.explanationId);
@@ -1633,10 +1692,6 @@ export default function ChatView({
                     {historyEntries.length > 0 && (
                         <div
                             style={{
-                                padding: '0.8rem 0.95rem',
-                                borderRadius: '20px',
-                                border: '1px solid rgba(126, 136, 166, 0.12)',
-                                background: 'rgba(255,255,255,0.62)',
                                 display: 'flex',
                                 flexDirection: 'column',
                                 gap: '0.75rem',
@@ -1722,7 +1777,7 @@ export default function ChatView({
                                     minWidth: 0,
                                 }}
                             >
-                                {userMessage.content}
+                                {userMessage.content || '新しいチャット'}
                             </div>
                         </div>
 
@@ -2169,9 +2224,43 @@ export default function ChatView({
                                     </>
                                 )}
                                 {renderConversationColumn(familyNode)}
+                                <div
+                                    style={{
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        alignItems: 'center',
+                                        gap: '0.45rem',
+                                        minWidth: 0,
+                                    }}
+                                >
+                                    <div
+                                        style={{
+                                            width: '2px',
+                                            height: '0.82rem',
+                                            borderRadius: '999px',
+                                            background: connectorStroke,
+                                        }}
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => handleCreateChildNode(familyNode.id)}
+                                        style={{
+                                            ...iconActionStyle,
+                                            width: '26px',
+                                            height: '26px',
+                                            background: 'rgba(255,255,255,0.98)',
+                                            border: '1px solid rgba(126, 136, 166, 0.18)',
+                                            boxShadow: '0 10px 20px rgba(24, 27, 35, 0.08)',
+                                        }}
+                                        title="下にチャットノードを追加"
+                                        aria-label="下にチャットノードを追加"
+                                    >
+                                        <Plus size={12} />
+                                    </button>
+                                </div>
                                 {sendChildren.length > 0 && (
-                                    <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1.9rem', paddingTop: '1.35rem', minWidth: 0 }}>
-                                        <div style={{ position: 'absolute', top: 0, left: '50%', width: '2px', height: '1.35rem', transform: 'translateX(-50%)', borderRadius: '999px', background: connectorStroke }} />
+                                    <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1.9rem', paddingTop: '1.1rem', minWidth: 0 }}>
+                                        <div style={{ position: 'absolute', top: 0, left: '50%', width: '2px', height: '1.1rem', transform: 'translateX(-50%)', borderRadius: '999px', background: connectorStroke }} />
                                         {sendChildren.map((child) => renderChatNodeTree(child))}
                                     </div>
                                 )}
