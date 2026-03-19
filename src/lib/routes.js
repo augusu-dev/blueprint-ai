@@ -29,6 +29,10 @@ export function getSpacePath(spaceId, mode = DEFAULT_SPACE_MODE) {
     return `/${SPACE_ROUTE_PREFIX}/${getSpaceModeSlug(safeMode)}/${spaceId}`;
 }
 
+export function getDictionaryPath(spaceId) {
+    return `/d/${spaceId}`;
+}
+
 export function resolveSpaceRouteParams(params = {}) {
     const directMode = params.mode;
     const directId = params.id;

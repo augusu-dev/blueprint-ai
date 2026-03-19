@@ -11,7 +11,7 @@ import {
     useReactFlow,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Settings, X, LogOut, Menu, Edit3, MessageSquare, GitFork, Map as MapIcon } from 'lucide-react';
+import { Settings, X, LogOut, Menu, Edit3, MessageSquare, GitFork, Map as MapIcon, BookOpen } from 'lucide-react';
 import { supabase } from './lib/supabase';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useLanguage } from './i18n';
@@ -24,7 +24,7 @@ import LoopNode from './nodes/LoopNode';
 import BranchNode from './nodes/BranchNode';
 import GoalNode from './nodes/GoalNode';
 import DeleteEdge from './nodes/DeleteEdge';
-import { DEFAULT_SPACE_MODE, getSpacePath, isSpaceMode, resolveSpaceRouteParams } from './lib/routes';
+import { DEFAULT_SPACE_MODE, getDictionaryPath, getSpacePath, isSpaceMode, resolveSpaceRouteParams } from './lib/routes';
 import {
     createDefaultMapState,
     createInitialEdges,
@@ -1557,6 +1557,16 @@ function EditorContent() {
                     title={t('sidebar.title')}
                 >
                     <Menu size={18} />
+                </button>
+                <button
+                    onClick={() => !isGraphEditMode && spaceId && navigate(getDictionaryPath(spaceId))}
+                    disabled={isGraphEditMode || !spaceId}
+                    className="btn-icon"
+                    style={{ width: '36px', height: '36px', opacity: isGraphEditMode || !spaceId ? 0.45 : 1, cursor: isGraphEditMode || !spaceId ? 'default' : 'pointer' }}
+                    title="Dictionary"
+                    aria-label="Dictionary"
+                >
+                    <BookOpen size={17} />
                 </button>
                 <button
                     onClick={() => !isGraphEditMode && setShowSettings(true)}

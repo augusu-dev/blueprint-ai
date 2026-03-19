@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
     Bot,
+    BookOpen,
     Check,
     ChevronDown,
     ChevronLeft,
@@ -14,10 +15,13 @@ import {
     Sparkles,
     Target,
     Trash2,
+    X,
     User,
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useLanguage } from './i18n';
 import GoalWizard from './GoalWizard';
+import { getDictionaryPath } from './lib/routes';
 import {
     createProjectImprovementVersion,
     getProjectPlanAccess,
@@ -25,6 +29,7 @@ import {
     saveProjectImprovementVersion,
     saveProjectPlanSection,
 } from './lib/workspace';
+import { upsertDictionaryEntry } from './lib/dictionary';
 import { createSingleTurnHistory, requestChatText, resolveModelSelection } from './lib/llmClient';
 
 const PLAN_SECTION_PROMPTS = {
@@ -186,6 +191,7 @@ export default function ChatView({
     spaceId,
 }) {
     const { t } = useLanguage();
+    const navigate = useNavigate();
     const [input, setInput] = useState('');
     const [chatHistory, setChatHistory] = useState([]);
     const [isLoading, setIsLoading] = useState(false);
@@ -208,6 +214,7 @@ export default function ChatView({
         startX: 0,
         scrollLeft: 0,
     });
+    const inlineOverlayRef = useRef(null);
     const [isWorkflowDragging, setIsWorkflowDragging] = useState(false);
 
     useEffect(() => {
@@ -235,6 +242,33 @@ export default function ChatView({
             onUpdateNodeData(node.id, 'chatHistory', normalized);
         }
     };
+
+    const closeInlineOverlay = () => {
+        setSelectionDraft(null);
+        setActiveExplanation(null);
+    };
+
+    useEffect(() => {
+        if (!selectionDraft && !activeExplanation) return undefined;
+
+        const handlePointerDown = (event) => {
+            if (inlineOverlayRef.current?.contains(event.target)) return;
+            closeInlineOverlay();
+        };
+
+        const handleKeyDown = (event) => {
+            if (event.key === 'Escape') {
+                closeInlineOverlay();
+            }
+        };
+
+        document.addEventListener('pointerdown', handlePointerDown);
+        document.addEventListener('keydown', handleKeyDown);
+        return () => {
+            document.removeEventListener('pointerdown', handlePointerDown);
+            document.removeEventListener('keydown', handleKeyDown);
+        };
+    }, [activeExplanation, selectionDraft]);
 
     const getControlInstructions = () => `
 
@@ -418,6 +452,27 @@ export default function ChatView({
         } finally {
             setIsExplaining(false);
         }
+    };
+
+    const handleCopySelection = async () => {
+        if (!selectionDraft?.text) return;
+        try {
+            await navigator.clipboard.writeText(selectionDraft.text);
+        } catch (error) {
+            console.error('Copy failed:', error);
+        }
+    };
+
+    const handleSaveSelectionToDictionary = () => {
+        if (!selectionDraft?.text || !spaceId) return;
+
+        upsertDictionaryEntry(spaceId, {
+            term: selectionDraft.text,
+            explanation: '',
+            collapsed: true,
+        });
+        closeInlineOverlay();
+        navigate(getDictionaryPath(spaceId));
     };
 
     const handleQueuePrompt = () => {
@@ -1032,6 +1087,8 @@ export default function ChatView({
         const actionStatus = replyVariant?.actionStatus || null;
         const responseVariantCount = replyMessage?.responseVariants?.length || 0;
         const activeResponseVariantIndex = replyMessage?.activeVariantIndex || 0;
+        const hasPreviousResponseVariant = responseVariantCount > 1 && activeResponseVariantIndex > 0;
+        const hasNextResponseVariant = responseVariantCount > 1 && activeResponseVariantIndex < responseVariantCount - 1;
         const canGeneratePrompt = userMessage && column.replyIndex === null;
         const isGeneratingPrompt = userMessage && generatingPromptIndex === column.userIndex;
         const replyExplanations = replyMessage ? getInlineExplanations(replyMessage) : [];
@@ -1039,6 +1096,8 @@ export default function ChatView({
         const currentExplanation = activeExplanation?.messageIndex === column.replyIndex && activeExplanationIndex >= 0
             ? replyExplanations[activeExplanationIndex]
             : null;
+        const isSelectionOverlayVisible = selectionDraft?.messageIndex === column.replyIndex;
+        const isExplanationOverlayVisible = Boolean(currentExplanation);
         const columnOffset = isWorkflowMode ? getWorkflowColumnOffset(columnIndex) : 0;
         const columnWidth = isWorkflowMode ? 'clamp(280px, 44vw, 430px)' : '100%';
         const columnShellStyle = isWorkflowMode
@@ -1216,51 +1275,49 @@ export default function ChatView({
                                 </div>
                             </div>
                             <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
-                                {responseVariantCount > 1 && (
-                                    <>
-                                        <button
-                                            type="button"
-                                            onClick={() => handleSwitchResponseVariant(column.replyIndex, -1)}
-                                            disabled={activeResponseVariantIndex <= 0}
-                                            aria-label="Previous reply"
-                                            style={{
-                                                ...iconActionStyle,
-                                                position: 'absolute',
-                                                left: '-0.15rem',
-                                                top: '50%',
-                                                transform: 'translateY(-50%)',
-                                                zIndex: 2,
-                                                width: '30px',
-                                                height: '30px',
-                                                borderRadius: '50%',
-                                                background: 'rgba(255,255,255,0.96)',
-                                                boxShadow: '0 10px 24px rgba(17, 31, 66, 0.10)',
-                                            }}
-                                        >
-                                            <ChevronLeft size={14} />
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => handleSwitchResponseVariant(column.replyIndex, 1)}
-                                            disabled={activeResponseVariantIndex >= responseVariantCount - 1}
-                                            aria-label="Next reply"
-                                            style={{
-                                                ...iconActionStyle,
-                                                position: 'absolute',
-                                                right: '-0.15rem',
-                                                top: '50%',
-                                                transform: 'translateY(-50%)',
-                                                zIndex: 2,
-                                                width: '30px',
-                                                height: '30px',
-                                                borderRadius: '50%',
-                                                background: 'rgba(255,255,255,0.96)',
-                                                boxShadow: '0 10px 24px rgba(17, 31, 66, 0.10)',
-                                            }}
-                                        >
-                                            <ChevronRight size={14} />
-                                        </button>
-                                    </>
+                                {hasPreviousResponseVariant && (
+                                    <button
+                                        type="button"
+                                        onClick={() => handleSwitchResponseVariant(column.replyIndex, -1)}
+                                        aria-label="Previous reply"
+                                        style={{
+                                            ...iconActionStyle,
+                                            position: 'absolute',
+                                            left: '-0.65rem',
+                                            top: '50%',
+                                            transform: 'translateY(-50%)',
+                                            zIndex: 2,
+                                            width: '30px',
+                                            height: '30px',
+                                            borderRadius: '50%',
+                                            background: 'rgba(255,255,255,0.96)',
+                                            boxShadow: '0 10px 24px rgba(17, 31, 66, 0.10)',
+                                        }}
+                                    >
+                                        <ChevronLeft size={14} />
+                                    </button>
+                                )}
+                                {hasNextResponseVariant && (
+                                    <button
+                                        type="button"
+                                        onClick={() => handleSwitchResponseVariant(column.replyIndex, 1)}
+                                        aria-label="Next reply"
+                                        style={{
+                                            ...iconActionStyle,
+                                            position: 'absolute',
+                                            right: '-0.65rem',
+                                            top: '50%',
+                                            transform: 'translateY(-50%)',
+                                            zIndex: 2,
+                                            width: '30px',
+                                            height: '30px',
+                                            borderRadius: '50%',
+                                            background: 'rgba(255,255,255,0.96)',
+                                            boxShadow: '0 10px 24px rgba(17, 31, 66, 0.10)',
+                                        }}
+                                    >
+                                        <ChevronRight size={14} />
+                                    </button>
                                 )}
                                 <div
                                     ref={(element) => {
@@ -1273,8 +1330,9 @@ export default function ChatView({
                                         ...assistantBubbleStyle,
                                         ...bubbleWidthStyle,
                                         minWidth: 0,
-                                        paddingLeft: responseVariantCount > 1 ? '2.1rem' : assistantBubbleStyle.paddingLeft,
-                                        paddingRight: responseVariantCount > 1 ? '2.1rem' : assistantBubbleStyle.paddingRight,
+                                        opacity: isSelectionOverlayVisible || isExplanationOverlayVisible ? 0.22 : 1,
+                                        filter: isSelectionOverlayVisible || isExplanationOverlayVisible ? 'blur(0.25px)' : 'none',
+                                        userSelect: isSelectionOverlayVisible || isExplanationOverlayVisible ? 'none' : 'text',
                                     }}
                                 >
                                     {responseVariantCount > 1 && (
@@ -1297,97 +1355,106 @@ export default function ChatView({
                             </div>
                         </div>
 
-                        {selectionDraft?.messageIndex === column.replyIndex && (
-                            <div
-                                style={{
-                                    marginLeft: '2.7rem',
-                                    marginTop: '0.5rem',
-                                    padding: '0.95rem 1.05rem',
-                                    borderRadius: '18px',
-                                    background: 'linear-gradient(180deg, rgba(235,242,255,0.96) 0%, rgba(219,231,255,0.93) 100%)',
-                                    border: '1px solid rgba(125,161,255,0.35)',
-                                    boxShadow: '0 16px 34px rgba(17,31,66,0.18)',
-                                    width: floatingCardWidth,
-                                    maxWidth: isWorkflowMode ? 'none' : '560px',
-                                    minWidth: 0,
-                                    display: 'flex',
-                                    flexDirection: 'column',
-                                    gap: '0.75rem',
-                                }}
-                            >
-                                <div style={{ fontSize: '0.88rem', color: '#22314d', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
-                                    <Sparkles size={14} color="#63a9ff" />
-                                    選択範囲の説明を作成
-                                </div>
-                                <div style={{ fontSize: '0.82rem', color: '#63a9ff', lineHeight: 1.7 }}>
-                                    ?{selectionDraft.text}?
-                                </div>
-                                <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
-                                    <button style={cardActionStyle} onClick={handleCreateExplanation} disabled={isExplaining}>
-                                        <Sparkles size={12} /> {isExplaining ? '生成中...' : '説明を作成'}
-                                    </button>
-                                    <button style={cardActionStyle} onClick={() => setSelectionDraft(null)}>
-                                        閉じる
-                                    </button>
-                                </div>
-                            </div>
-                        )}
-
-                        {currentExplanation && (
-                            <div
-                                style={{
-                                    marginLeft: '2.7rem',
-                                    marginTop: '0.5rem',
-                                    padding: '1rem 1.1rem',
-                                    background: 'linear-gradient(180deg, rgba(235,242,255,0.96) 0%, rgba(219,231,255,0.93) 100%)',
-                                    border: '1px solid rgba(125,161,255,0.35)',
-                                    borderRadius: '18px',
-                                    boxShadow: '0 18px 36px rgba(17,31,66,0.18)',
-                                    display: 'inline-flex',
-                                    flexDirection: 'column',
-                                    gap: '0.8rem',
-                                    width: floatingCardWidth,
-                                    maxWidth: isWorkflowMode ? 'none' : '560px',
-                                    minWidth: 0,
-                                    animation: 'fadeIn 0.2s ease',
-                                }}
-                            >
-                                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.7rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                                    <div style={{ fontSize: '0.88rem', color: '#22314d', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
-                                        <Sparkles size={14} color="#63a9ff" />
-                                        説明
-                                    </div>
-                                    {replyExplanations.length > 1 && (
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                                            <button style={iconActionStyle} disabled={activeExplanationIndex <= 0} onClick={() => shiftExplanation(column.replyIndex, -1)} aria-label="前の説明">
-                                                <ChevronLeft size={12} />
+                        {(isSelectionOverlayVisible || isExplanationOverlayVisible) && (
+                            <>
+                                {isSelectionOverlayVisible && selectionDraft && (
+                                    <div
+                                        ref={inlineOverlayRef}
+                                        style={{
+                                            position: 'absolute',
+                                            inset: '0.35rem',
+                                            zIndex: 4,
+                                            padding: '0.95rem 1.05rem',
+                                            borderRadius: '18px',
+                                            background: 'linear-gradient(180deg, rgba(235,242,255,0.96) 0%, rgba(219,231,255,0.93) 100%)',
+                                            border: '1px solid rgba(125,161,255,0.42)',
+                                            boxShadow: '0 16px 34px rgba(17,31,66,0.18)',
+                                            display: 'flex',
+                                            flexDirection: 'column',
+                                            justifyContent: 'space-between',
+                                            gap: '0.7rem',
+                                            minWidth: 0,
+                                        }}
+                                    >
+                                        <div style={{ fontSize: '0.88rem', color: '#22314d', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                                            <Sparkles size={14} color="#63a9ff" />
+                                            選択範囲の説明を作成
+                                        </div>
+                                        <div style={{ fontSize: '0.82rem', color: '#5b79d9', lineHeight: 1.7, whiteSpace: 'pre-wrap', maxHeight: '7rem', overflow: 'auto' }}>
+                                            {selectionDraft.text}
+                                        </div>
+                                        <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
+                                            <button style={cardActionStyle} onClick={handleCopySelection}>
+                                                <Copy size={12} /> コピー
                                             </button>
-                                            <span style={{ fontSize: '0.72rem', color: '#63779a', minWidth: '36px', textAlign: 'center' }}>
-                                                {activeExplanationIndex + 1}/{replyExplanations.length}
-                                            </span>
-                                            <button style={iconActionStyle} disabled={activeExplanationIndex >= replyExplanations.length - 1} onClick={() => shiftExplanation(column.replyIndex, 1)} aria-label="次の説明">
-                                                <ChevronRight size={12} />
+                                            <button style={cardActionStyle} onClick={handleSaveSelectionToDictionary}>
+                                                <BookOpen size={12} /> 辞書
+                                            </button>
+                                            <button style={cardActionStyle} onClick={handleCreateExplanation} disabled={isExplaining}>
+                                                <Sparkles size={12} /> {isExplaining ? '生成中...' : '説明'}
+                                            </button>
+                                            <button style={cardActionStyle} onClick={closeInlineOverlay}>
+                                                <X size={12} /> 閉じる
                                             </button>
                                         </div>
-                                    )}
-                                </div>
-                                <div style={{ fontSize: '0.82rem', color: '#63a9ff', lineHeight: 1.7 }}>
-                                    ?{currentExplanation.text}?
-                                </div>
-                                <div style={{ fontSize: '0.86rem', color: '#22314d', lineHeight: 1.9 }}>
-                                    {currentExplanation.summary}
-                                </div>
-                                <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
-                                    <button style={cardActionStyle} onClick={() => openExplanation(column.replyIndex, currentExplanation.id)}>
-                                        もう一度見る
-                                    </button>
-                                    <button style={cardActionStyle} onClick={() => setActiveExplanation(null)}>
-                                        閉じる
-                                    </button>
-                                </div>
-                            </div>
-                        )}
+                                    </div>
+                                )}
 
+                                {isExplanationOverlayVisible && currentExplanation && (
+                                    <div
+                                        ref={inlineOverlayRef}
+                                        style={{
+                                            position: 'absolute',
+                                            inset: '0.35rem',
+                                            zIndex: 4,
+                                            padding: '1rem 1.05rem',
+                                            borderRadius: '18px',
+                                            background: 'linear-gradient(180deg, rgba(235,242,255,0.96) 0%, rgba(219,231,255,0.93) 100%)',
+                                            border: '1px solid rgba(125,161,255,0.42)',
+                                            boxShadow: '0 18px 36px rgba(17,31,66,0.18)',
+                                            display: 'flex',
+                                            flexDirection: 'column',
+                                            gap: '0.75rem',
+                                            minWidth: 0,
+                                        }}
+                                    >
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.7rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                                            <div style={{ fontSize: '0.88rem', color: '#22314d', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                                                <Sparkles size={14} color="#63a9ff" />
+                                                説明
+                                            </div>
+                                            {replyExplanations.length > 1 && (
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                                                    <button style={iconActionStyle} disabled={activeExplanationIndex <= 0} onClick={() => shiftExplanation(column.replyIndex, -1)} aria-label="前の説明">
+                                                        <ChevronLeft size={12} />
+                                                    </button>
+                                                    <span style={{ fontSize: '0.72rem', color: '#63779a', minWidth: '36px', textAlign: 'center' }}>
+                                                        {activeExplanationIndex + 1}/{replyExplanations.length}
+                                                    </span>
+                                                    <button style={iconActionStyle} disabled={activeExplanationIndex >= replyExplanations.length - 1} onClick={() => shiftExplanation(column.replyIndex, 1)} aria-label="次の説明">
+                                                        <ChevronRight size={12} />
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </div>
+                                        <div style={{ fontSize: '0.82rem', color: '#5b79d9', lineHeight: 1.7, whiteSpace: 'pre-wrap', maxHeight: '6.5rem', overflow: 'auto' }}>
+                                            {currentExplanation.text}
+                                        </div>
+                                        <div style={{ fontSize: '0.86rem', color: '#22314d', lineHeight: 1.9, whiteSpace: 'pre-wrap', maxHeight: '7rem', overflow: 'auto' }}>
+                                            {currentExplanation.summary}
+                                        </div>
+                                        <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
+                                            <button style={cardActionStyle} onClick={() => openExplanation(column.replyIndex, currentExplanation.id)}>
+                                                もう一度見る
+                                            </button>
+                                            <button style={cardActionStyle} onClick={closeInlineOverlay}>
+                                                <X size={12} /> 閉じる
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+                            </>
+                        )}
                         {pendingAction && (
                             <div
                                 style={{

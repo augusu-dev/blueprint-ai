@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation, useParams } from '
 import { supabase } from './lib/supabase'
 import { LanguageProvider, useLanguage } from './i18n';
 import AuthScreen from './AuthScreen';
+import DictionaryPage from './DictionaryPage';
 import Editor from './Editor';
 import ErrorBoundary from './ErrorBoundary';
 import { getSpacePath, resolveSpaceRouteParams } from './lib/routes';
@@ -98,6 +99,10 @@ function AppContent() {
           <Route
             path="/space/:first/:second"
             element={session ? <SpaceRouteResolver /> : <Navigate to="/auth" replace />}
+          />
+          <Route
+            path="/d/:id"
+            element={session ? <ErrorBoundary><DictionaryPage /></ErrorBoundary> : <Navigate to="/auth" replace />}
           />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
