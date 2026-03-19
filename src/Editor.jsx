@@ -1642,7 +1642,16 @@ function EditorContent() {
                     onClick={() => !isGraphEditMode && spaceId && navigate(getDictionaryPath(spaceId))}
                     disabled={isGraphEditMode || !spaceId}
                     className="btn-icon"
-                    style={{ width: '36px', height: '36px', marginTop: 'auto', opacity: isGraphEditMode || !spaceId ? 0.45 : 1, cursor: isGraphEditMode || !spaceId ? 'default' : 'pointer' }}
+                    style={{
+                        width: '36px',
+                        height: '36px',
+                        marginTop: 'auto',
+                        opacity: isGraphEditMode || !spaceId ? 0.55 : 1,
+                        cursor: isGraphEditMode || !spaceId ? 'default' : 'pointer',
+                        background: isGraphEditMode || !spaceId ? 'rgba(255,255,255,0.24)' : 'rgba(255,255,255,0.92)',
+                        color: '#3f4a63',
+                        boxShadow: isGraphEditMode || !spaceId ? 'none' : '0 10px 20px rgba(23, 29, 44, 0.12)',
+                    }}
                     title="Dictionary"
                     aria-label="Dictionary"
                 >

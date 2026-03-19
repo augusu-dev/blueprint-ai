@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     AlarmClock,
     ChevronDown,
@@ -13,7 +13,7 @@ import {
     MessageSquare,
     Sparkles,
 } from 'lucide-react';
-import { HutSprite, LandmarkSprite, LionScoutSprite } from './MapSprites';
+import { LionScoutSprite } from './MapSprites';
 import { deriveStudySettings } from './lib/studySettings';
 import {
     CAMERA_FOLLOW,
@@ -22,7 +22,6 @@ import {
     HUT_CENTER,
     KEYBOARD_SPEED,
     LANDMARKS,
-    TREE_CLUSTERS,
     clampTileIndex,
     collectRevealedTiles,
     deriveQuests,
@@ -43,17 +42,17 @@ const LANDMARK_DISPLAY = {
 };
 
 const TILE_LABELS = {
-    courtyard: '拠点',
+    courtyard: '中庭',
     path: '道',
     water: '水辺',
     tower: 'ゴール塔',
     market: 'ダイアログ広場',
     forge: 'グラフ工房',
     fountain: '探索の泉',
-    'grass-light': '明るい砂地',
-    'grass-dark': '岩場',
-    meadow: '砂丘',
-    grass: '砂地',
+    'grass-light': '明るい草地',
+    'grass-dark': '濃い草地',
+    meadow: '草原',
+    grass: '草地',
 };
 
 const TOP_DOWN_PALETTES = {
@@ -379,37 +378,6 @@ export default function MapView({ spaceTitle, nodes, mapState, onMapStateChange,
         return tiles;
     }, [camera.x, camera.y, cellSize, fieldSize.height, fieldSize.width, visibleRadiusX, visibleRadiusY, worldToPlane]);
 
-    const landmarkScreens = useMemo(() => (
-        LANDMARKS.map((landmark) => ({
-            ...landmark,
-            quest: quests.find((quest) => quest.id === landmark.id),
-            display: LANDMARK_DISPLAY[landmark.id] || { label: landmark.badge, icon: Flag },
-            screen: worldToPlane(landmark.x + 0.5, landmark.y + 0.5),
-        })).filter((landmark) => (
-            landmark.screen.left > -140
-            && landmark.screen.left < fieldSize.width + 140
-            && landmark.screen.top > -140
-            && landmark.screen.top < fieldSize.height + 160
-        ))
-    ), [fieldSize.height, fieldSize.width, quests, worldToPlane]);
-
-    const treeScreens = useMemo(() => (
-        TREE_CLUSTERS.map((tree, index) => ({
-            ...tree,
-            key: `tree-${index}`,
-            screen: worldToPlane(tree.x + 0.5, tree.y + 0.5),
-        })).filter((tree) => (
-            tree.screen.left > -100
-            && tree.screen.left < fieldSize.width + 100
-            && tree.screen.top > -100
-            && tree.screen.top < fieldSize.height + 120
-        ))
-    ), [fieldSize.height, fieldSize.width, worldToPlane]);
-
-    const hutScreen = useMemo(
-        () => worldToPlane(HUT_CENTER.x, HUT_CENTER.y),
-        [worldToPlane],
-    );
     const playerScreen = useMemo(
         () => worldToPlane(player.x, player.y),
         [player.x, player.y, worldToPlane],
@@ -518,84 +486,6 @@ export default function MapView({ spaceTitle, nodes, mapState, onMapStateChange,
                         pointerEvents: 'none',
                     }}
                 />
-                <div
-                    style={{
-                        position: 'absolute',
-                        top: '1rem',
-                        left: '1rem',
-                        zIndex: 20,
-                        display: 'none',
-                        alignItems: 'center',
-                        gap: '0.8rem',
-                        padding: '0.58rem 0.9rem',
-                        borderRadius: '14px',
-                        background: 'rgba(44, 28, 18, 0.78)',
-                        color: '#fff8ef',
-                        boxShadow: '0 10px 24px rgba(59, 28, 10, 0.16)',
-                        fontSize: '0.8rem',
-                        backdropFilter: 'blur(10px)',
-                        WebkitBackdropFilter: 'blur(10px)',
-                    }}
-                >
-                    <span style={{ fontWeight: 600 }}>操作: 移動</span>
-                    <span style={{ opacity: 0.82 }}>ワールド: 100 x 100</span>
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
-                        <Sparkles size={13} color="#7fd5ff" />
-                        {rewards.xp}
-                    </span>
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
-                        <Coins size={13} color="#ffd469" />
-                        {rewards.coins}
-                    </span>
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
-                        <KeyRound size={13} color="#bcff97" />
-                        {rewards.keys}
-                    </span>
-                    <span style={{ opacity: 0.82 }}>完了: {completedQuestIds.length}</span>
-                </div>
-                <div style={{ position: 'absolute', top: '1rem', right: '1rem', zIndex: 20, display: 'none', gap: '0.55rem' }}>
-                    <IconDockButton icon={MessageSquare} title="チャットへ" onClick={() => onOpenMode('chat')} />
-                    <IconDockButton icon={GitFork} title="グラフへ" onClick={() => onOpenMode('graph')} />
-                    <IconDockButton icon={Compass} title="スタート地点へ" onClick={moveToBase} />
-                </div>
-
-                <div
-                    style={{
-                        position: 'absolute',
-                        top: '4.6rem',
-                        right: '1rem',
-                        zIndex: 20,
-                        display: 'none',
-                        gap: '0.4rem',
-                        minWidth: '240px',
-                        padding: '0.72rem 0.85rem',
-                        borderRadius: '16px',
-                        background: 'rgba(44, 28, 18, 0.82)',
-                        color: '#fff8ef',
-                        boxShadow: '0 10px 24px rgba(59, 28, 10, 0.16)',
-                        backdropFilter: 'blur(10px)',
-                        WebkitBackdropFilter: 'blur(10px)',
-                    }}
-                >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', fontSize: '0.8rem', fontWeight: 700 }}>
-                        <AlarmClock size={15} color="#ffd469" />
-                        <span>期限・タイムライン</span>
-                    </div>
-                    <div style={{ fontSize: '0.77rem', lineHeight: 1.5, opacity: 0.92 }}>
-                        {studySettings.deadlineLabel
-                            ? `期限: ${studySettings.deadlineLabel}`
-                            : `タイムライン: ${studySettings.timelineLabel || '未設定'}`}
-                    </div>
-                    {studySettings.learningStyleLabel && (
-                        <div style={{ fontSize: '0.74rem', lineHeight: 1.45, opacity: 0.82 }}>
-                            学習スタイル: {studySettings.learningStyleLabel}
-                        </div>
-                    )}
-                    <div style={{ fontSize: '0.74rem', lineHeight: 1.45, opacity: 0.82 }}>
-                        微調整: {studySettings.reviewCadenceLabel}で進捗チェック
-                    </div>
-                </div>
-
                 <div style={{ position: 'absolute', inset: 0 }}>
                     {visibleTiles.map((tile) => {
                         const palette = getTilePalette(tile.kind);
@@ -606,7 +496,11 @@ export default function MapView({ spaceTitle, nodes, mapState, onMapStateChange,
                             <button
                                 type="button"
                                 key={tile.id}
-                                onClick={() => handleTileClick(tile.x, tile.y)}
+                                onClick={() => (landmark ? handleLandmarkAction({
+                                    ...landmark,
+                                    quest: quests.find((quest) => quest.id === landmark.id),
+                                    display: LANDMARK_DISPLAY[landmark.id] || { label: landmark.badge, icon: Flag },
+                                }) : handleTileClick(tile.x, tile.y))}
                                 aria-label={`${tile.x},${tile.y}`}
                                 style={{
                                     position: 'absolute',
@@ -640,11 +534,11 @@ export default function MapView({ spaceTitle, nodes, mapState, onMapStateChange,
                                             left: '50%',
                                             top: '50%',
                                             transform: 'translate(-50%, -50%)',
-                                            width: landmark ? '8px' : '6px',
-                                            height: landmark ? '8px' : '6px',
+                                            width: landmark ? '12px' : '6px',
+                                            height: landmark ? '12px' : '6px',
                                             borderRadius: '999px',
                                             background: tile.kind === 'path' ? '#dce7d6' : palette.chip,
-                                            boxShadow: landmark ? `0 0 0 4px ${landmark.accent}1f` : 'none',
+                                            boxShadow: landmark ? `0 0 0 4px ${landmark.accent}33` : 'none',
                                         }}
                                     />
                                 )}
@@ -652,94 +546,6 @@ export default function MapView({ spaceTitle, nodes, mapState, onMapStateChange,
                         );
                     })}
 
-                    {treeScreens.map((tree) => (
-                        <div
-                            key={tree.key}
-                            style={{
-                                position: 'absolute',
-                                left: tree.screen.left,
-                                top: tree.screen.top - cellSize * 0.78,
-                                transform: 'translate(-50%, -50%)',
-                                zIndex: 8,
-                                pointerEvents: 'none',
-                            }}
-                        >
-                            <LandmarkSprite type="tree" size={72 + tree.radius * 8} />
-                        </div>
-                    ))}
-
-                    <div style={{ position: 'absolute', left: hutScreen.left, top: hutScreen.top - cellSize * 1.5, transform: 'translate(-50%, -50%)', zIndex: 12, pointerEvents: 'none' }}>
-                        <HutSprite size={132 * zoom} />
-                    </div>
-                    <div
-                        style={{
-                            position: 'absolute',
-                            left: hutScreen.left,
-                            top: hutScreen.top - cellSize * 2.1,
-                            transform: 'translate(-50%, -50%)',
-                            zIndex: 13,
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '0.3rem',
-                            padding: '0.38rem 0.72rem',
-                            borderRadius: '999px',
-                            background: 'rgba(32, 36, 40, 0.86)',
-                            color: '#ffffff',
-                            fontSize: '0.76rem',
-                            fontWeight: 700,
-                            boxShadow: '0 10px 20px rgba(8, 14, 11, 0.16)',
-                        }}
-                    >
-                        <Sparkles size={12} color="#63d7ff" />
-                        START
-                    </div>
-
-                    {landmarkScreens.map((landmark) => {
-                        const Icon = landmark.display.icon;
-                        const isCompleted = completedQuestIds.includes(landmark.id);
-                        const isClaimable = landmark.quest?.resolved && !isCompleted;
-
-                        return (
-                            <div
-                                key={landmark.id}
-                                style={{
-                                    position: 'absolute',
-                                    left: landmark.screen.left,
-                                    top: landmark.screen.top - cellSize * 0.9,
-                                    transform: 'translate(-50%, -50%)',
-                                    zIndex: 10,
-                                    textAlign: 'center',
-                                }}
-                            >
-                                <div style={{ pointerEvents: 'none' }}>
-                                    <LandmarkSprite type={landmark.type} size={68 * zoom} />
-                                </div>
-                                <button
-                                    type="button"
-                                    onClick={() => handleLandmarkAction(landmark)}
-                                    title={isCompleted ? `${landmark.display.label} 完了` : landmark.display.label}
-                                    style={{
-                                        marginTop: '-0.2rem',
-                                        display: 'inline-flex',
-                                        alignItems: 'center',
-                                        gap: '0.32rem',
-                                        padding: '0.34rem 0.68rem',
-                                        borderRadius: '999px',
-                                        border: 'none',
-                                        background: 'rgba(30, 34, 38, 0.82)',
-                                        color: isCompleted ? '#bdf6c1' : '#ffffff',
-                                        fontSize: '0.72rem',
-                                        fontWeight: 700,
-                                        boxShadow: '0 8px 18px rgba(10, 18, 14, 0.16)',
-                                        cursor: 'pointer',
-                                    }}
-                                >
-                                    <Icon size={12} color={isClaimable ? '#ffd469' : landmark.accent} />
-                                    {landmark.display.label}
-                                </button>
-                            </div>
-                        );
-                    })}
 
                     {destinationScreen && (
                         <div
@@ -791,57 +597,12 @@ export default function MapView({ spaceTitle, nodes, mapState, onMapStateChange,
                         WebkitBackdropFilter: 'blur(10px)',
                     }}
                 >
-                    <span>{spaceTitle || '無題のスペース'}</span>
+                    <span>{spaceTitle || 'スペース'}</span>
                     <span style={{ opacity: 0.8 }}>{currentTileLabel}</span>
                     <span style={{ opacity: 0.8 }}>{currentTileX + 1}, {currentTileY + 1}</span>
                     {currentLandmark && <span style={{ opacity: 0.92 }}>{(LANDMARK_DISPLAY[currentLandmark.id] || {}).label}</span>}
                 </div>
 
-                <div style={{ position: 'absolute', right: '1rem', bottom: '1rem', zIndex: 20, display: 'none', gap: '0.38rem' }}>
-                    <div style={{ display: 'flex', justifyContent: 'center' }}>
-                        <DPadButton
-                            label="上へ移動"
-                            icon={<ChevronUp size={16} />}
-                            onMouseDown={() => holdDirection('ArrowUp', true)}
-                            onMouseUp={() => holdDirection('ArrowUp', false)}
-                            onMouseLeave={() => holdDirection('ArrowUp', false)}
-                            onTouchStart={() => holdDirection('ArrowUp', true)}
-                            onTouchEnd={() => holdDirection('ArrowUp', false)}
-                        />
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.38rem' }}>
-                        <DPadButton
-                            label="左へ移動"
-                            icon={<ChevronLeft size={16} />}
-                            onMouseDown={() => holdDirection('ArrowLeft', true)}
-                            onMouseUp={() => holdDirection('ArrowLeft', false)}
-                            onMouseLeave={() => holdDirection('ArrowLeft', false)}
-                            onTouchStart={() => holdDirection('ArrowLeft', true)}
-                            onTouchEnd={() => holdDirection('ArrowLeft', false)}
-                        />
-                        <DPadButton label="スタート地点へ" icon={<Compass size={16} />} onClick={moveToBase} />
-                        <DPadButton
-                            label="右へ移動"
-                            icon={<ChevronRight size={16} />}
-                            onMouseDown={() => holdDirection('ArrowRight', true)}
-                            onMouseUp={() => holdDirection('ArrowRight', false)}
-                            onMouseLeave={() => holdDirection('ArrowRight', false)}
-                            onTouchStart={() => holdDirection('ArrowRight', true)}
-                            onTouchEnd={() => holdDirection('ArrowRight', false)}
-                        />
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'center' }}>
-                        <DPadButton
-                            label="下へ移動"
-                            icon={<ChevronDown size={16} />}
-                            onMouseDown={() => holdDirection('ArrowDown', true)}
-                            onMouseUp={() => holdDirection('ArrowDown', false)}
-                            onMouseLeave={() => holdDirection('ArrowDown', false)}
-                            onTouchStart={() => holdDirection('ArrowDown', true)}
-                            onTouchEnd={() => holdDirection('ArrowDown', false)}
-                        />
-                    </div>
-                </div>
             </div>
         </div>
     );

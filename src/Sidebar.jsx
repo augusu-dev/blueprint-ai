@@ -188,6 +188,7 @@ export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
     const [draggedSpaceId, setDraggedSpaceId] = useState(null);
     const [dragOverProjectId, setDragOverProjectId] = useState(null);
     const currentMode = isSpaceMode(mode) ? mode : DEFAULT_SPACE_MODE;
+    const dictionarySpaceId = currentSpaceId || spaces[0]?.id || null;
 
     const workspaceMeta = useMemo(() => {
         void workspaceMetaVersion;
@@ -746,26 +747,26 @@ export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
                     {onOpenSettings && (
                         <button
                             onClick={() => {
-                                if (!currentSpaceId) return;
-                                navigate(getDictionaryPath(currentSpaceId));
+                                if (!dictionarySpaceId) return;
+                                navigate(getDictionaryPath(dictionarySpaceId));
                                 onClose();
                             }}
-                            disabled={!currentSpaceId}
+                            disabled={!dictionarySpaceId}
                             style={{
                                 width: '100%',
-                                background: 'rgba(255,255,255,0.03)',
+                                background: 'rgba(255,255,255,0.06)',
                                 border: '1px solid var(--panel-border)',
                                 padding: '0.45rem',
                                 borderRadius: '8px',
                                 fontSize: '0.75rem',
-                                color: 'var(--text-muted)',
-                                cursor: currentSpaceId ? 'pointer' : 'default',
+                                color: 'var(--text-main)',
+                                cursor: dictionarySpaceId ? 'pointer' : 'default',
                                 display: 'flex',
                                 alignItems: 'center',
                                 justifyContent: 'center',
                                 gap: '0.3rem',
                                 fontFamily: 'inherit',
-                                opacity: currentSpaceId ? 1 : 0.45,
+                                opacity: dictionarySpaceId ? 1 : 0.55,
                             }}
                         >
                             <BookOpen size={11} /> 辞書

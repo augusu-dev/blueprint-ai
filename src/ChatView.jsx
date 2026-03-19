@@ -127,19 +127,26 @@ function normalizeAiMessage(message) {
 
 function normalizeHistory(history) {
     let previousUserNodeId = null;
+    let previousUserParentId = null;
 
     return (history || []).map((message) => {
         const baseMessage = ensureMessageId(message);
         if (baseMessage?.role === 'user') {
+            const normalizedNodeId = typeof baseMessage.chatNodeId === 'string' && baseMessage.chatNodeId
+                ? baseMessage.chatNodeId
+                : baseMessage.id;
+            const explicitParentId = typeof baseMessage.chatParentId === 'string' ? baseMessage.chatParentId : null;
+            const inheritedParentId = previousUserNodeId
+                ? (normalizedNodeId === previousUserNodeId ? previousUserParentId : previousUserNodeId)
+                : null;
             const normalizedUser = {
                 ...baseMessage,
-                chatNodeId: typeof baseMessage.chatNodeId === 'string' && baseMessage.chatNodeId
-                    ? baseMessage.chatNodeId
-                    : baseMessage.id,
-                chatParentId: typeof baseMessage.chatParentId === 'string' ? baseMessage.chatParentId : previousUserNodeId,
+                chatNodeId: normalizedNodeId,
+                chatParentId: explicitParentId || inheritedParentId,
                 chatBranchKind: baseMessage.chatBranchKind === 'branch' ? 'branch' : 'send',
             };
             previousUserNodeId = normalizedUser.chatNodeId;
+            previousUserParentId = normalizedUser.chatParentId || null;
             return normalizedUser;
         }
 
@@ -215,40 +222,81 @@ function analyzeChatHistory(history) {
     const normalizedHistory = normalizeHistory(history);
     const nodeById = new Map();
     const orderedNodes = [];
-    let lastUserNode = null;
+    let lastUserNodeId = null;
 
     normalizedHistory.forEach((message, index) => {
         if (message.role === 'user') {
             const nodeId = message.chatNodeId || message.id;
-            const parentId = typeof message.chatParentId === 'string' ? message.chatParentId : lastUserNode?.id || null;
+            const parentId = typeof message.chatParentId === 'string' ? message.chatParentId : lastUserNodeId || null;
             const branchKind = message.chatBranchKind === 'branch' ? 'branch' : 'send';
-            const node = {
-                id: nodeId,
-                parentId,
-                branchKind,
-                order: orderedNodes.length,
-                userIndex: index,
-                replyIndex: null,
-                userMessage: message,
-                replyMessage: null,
-                children: [],
-                numericStep: 0,
-                displayLabel: '',
-                branchLetter: '',
-            };
+            let node = nodeById.get(nodeId);
 
-            nodeById.set(nodeId, node);
-            orderedNodes.push(node);
-            lastUserNode = node;
+            if (!node) {
+                node = {
+                    id: nodeId,
+                    parentId,
+                    branchKind,
+                    order: orderedNodes.length,
+                    entries: [],
+                    children: [],
+                    userIndex: null,
+                    userMessage: null,
+                    replyIndex: null,
+                    replyMessage: null,
+                    numericStep: 0,
+                    displayLabel: '',
+                    branchLetter: '',
+                    pendingUserIndex: null,
+                    pendingUserEntry: null,
+                    lastReplyIndex: null,
+                    lastReplyEntry: null,
+                    isRightmostBranchVariant: false,
+                };
+                nodeById.set(nodeId, node);
+                orderedNodes.push(node);
+            } else {
+                node.parentId = node.parentId || parentId;
+                node.branchKind = node.branchKind || branchKind;
+            }
+
+            node.entries.push({
+                key: `${nodeId}-user-${index}`,
+                messageIndex: index,
+                role: 'user',
+                message,
+            });
+            node.userIndex = index;
+            node.userMessage = message;
+            node.replyIndex = null;
+            node.replyMessage = null;
+            node.pendingUserIndex = index;
+            node.pendingUserEntry = {
+                key: `${nodeId}-user-${index}`,
+                messageIndex: index,
+                role: 'user',
+                message,
+            };
+            lastUserNodeId = nodeId;
             return;
         }
 
         if (message.role === 'ai') {
-            const attachId = message.chatNodeId || lastUserNode?.id || null;
+            const attachId = message.chatNodeId || lastUserNodeId || null;
             const targetNode = attachId ? nodeById.get(attachId) : null;
-            if (targetNode && !targetNode.replyMessage) {
+            if (targetNode) {
+                const entry = {
+                    key: `${attachId}-ai-${index}`,
+                    messageIndex: index,
+                    role: 'ai',
+                    message,
+                };
+                targetNode.entries.push(entry);
                 targetNode.replyIndex = index;
                 targetNode.replyMessage = message;
+                targetNode.pendingUserIndex = null;
+                targetNode.pendingUserEntry = null;
+                targetNode.lastReplyIndex = index;
+                targetNode.lastReplyEntry = entry;
             }
         }
     });
@@ -312,10 +360,9 @@ function buildHistoryPath(history, targetNodeId) {
 
     const pathHistory = [];
     chain.forEach((node) => {
-        pathHistory.push(node.userMessage);
-        if (node.replyMessage) {
-            pathHistory.push(node.replyMessage);
-        }
+        node.entries.forEach((entry) => {
+            pathHistory.push(entry.message);
+        });
     });
 
     return pathHistory;
@@ -780,9 +827,14 @@ export default function ChatView({
         const messageText = input.trim();
         if (!messageText || !node) return;
         const selectedBranchNode = branchTargetNodeId ? chatTree.nodeById.get(branchTargetNodeId) || null : null;
-        const parentNodeId = selectedBranchNode?.id || focusedChatNodeId || lastOrderedNode?.id || null;
-        const branchKind = selectedBranchNode ? 'branch' : 'send';
-        const nextNodeId = crypto.randomUUID();
+        const activeNode = activePromptNodeId ? chatTree.nodeById.get(activePromptNodeId) || null : null;
+        const nextNodeId = selectedBranchNode
+            ? crypto.randomUUID()
+            : activeNode?.id || crypto.randomUUID();
+        const parentNodeId = selectedBranchNode
+            ? selectedBranchNode.id
+            : activeNode?.parentId || null;
+        const branchKind = selectedBranchNode ? 'branch' : (activeNode?.branchKind || 'send');
         const nextHistory = normalizeHistory([
             ...chatHistory,
             {
@@ -879,16 +931,16 @@ export default function ChatView({
 
         const treeNode = chatTree.nodeById.get(nodeId);
         if (!treeNode) return;
-
-        const userMessage = treeNode.userMessage;
-        const existingReplyIndex = chatHistory.findIndex((message) => message.role === 'ai' && (message.chatNodeId === nodeId));
-        const shouldAppendVariant = Boolean(options.appendVariant && existingReplyIndex >= 0);
+        const pendingUserEntry = treeNode.pendingUserEntry;
+        const retryReplyIndex = Number.isInteger(options.replyIndex) ? options.replyIndex : null;
+        const shouldAppendVariant = Boolean(options.appendVariant && retryReplyIndex !== null);
+        if (!shouldAppendVariant && !pendingUserEntry) return;
         const wasFirstGeneratedReply = !chatHistory.some((message) => message.role === 'ai');
         const historyForReply = buildHistoryPath(chatHistory, nodeId);
 
         setSelectionDraft(null);
         setActiveExplanation(null);
-        setGeneratingPromptIndex(treeNode.userIndex);
+        setGeneratingPromptIndex(pendingUserEntry?.messageIndex ?? null);
         setIsLoading(true);
 
         try {
@@ -896,18 +948,10 @@ export default function ChatView({
             const parsedReply = parseAiReply(reply, t('chat.actionCompleted') || 'Action completed.');
             const nextHistory = [...chatHistory];
 
-            if (existingReplyIndex >= 0) {
-                nextHistory[existingReplyIndex] = shouldAppendVariant
-                    ? appendResponseVariant(nextHistory[existingReplyIndex], createResponseVariant(parsedReply))
-                    : syncAiMessage(
-                        { ...normalizeAiMessage(nextHistory[existingReplyIndex]), collapsed: false },
-                        [createResponseVariant(parsedReply)],
-                        0,
-                    );
+            if (shouldAppendVariant && retryReplyIndex !== null) {
+                nextHistory[retryReplyIndex] = appendResponseVariant(nextHistory[retryReplyIndex], createResponseVariant(parsedReply));
             } else {
-                nextHistory.splice(
-                    treeNode.userIndex + 1,
-                    0,
+                nextHistory.push(
                     syncAiMessage(
                         { role: 'ai', collapsed: false, chatNodeId: nodeId, chatParentId: treeNode.parentId || null },
                         [createResponseVariant(parsedReply)],
@@ -918,8 +962,8 @@ export default function ChatView({
 
             persistChatHistory(nextHistory);
 
-            if (wasFirstGeneratedReply && spaceId) {
-                await generateSpaceTitle(userMessage.content);
+            if (wasFirstGeneratedReply && spaceId && pendingUserEntry?.message?.content) {
+                await generateSpaceTitle(pendingUserEntry.message.content);
             }
         } finally {
             setGeneratingPromptIndex(null);
@@ -935,7 +979,7 @@ export default function ChatView({
         const targetNodeId = targetMessage.chatNodeId || null;
         if (!targetNodeId) return;
 
-        await handleGeneratePrompt(targetNodeId, { appendVariant: true });
+        await handleGeneratePrompt(targetNodeId, { appendVariant: true, replyIndex: idx });
     };
 
     const handleSwitchResponseVariant = (idx, direction) => {
@@ -1115,6 +1159,8 @@ export default function ChatView({
 
     const handleWorkflowWheel = useCallback((event) => {
         if (!isWorkflowMode) return;
+        const isPrimaryButtonHeld = workflowDragStateRef.current.active || (event.buttons & 1) === 1;
+        if (!isPrimaryButtonHeld) return;
         event.preventDefault();
 
         const viewport = workflowRailRef.current;
@@ -1403,6 +1449,8 @@ export default function ChatView({
     const renderConversationColumn = (treeNode) => {
         const userMessage = treeNode.userIndex !== null ? chatHistory[treeNode.userIndex] : null;
         const replyMessage = treeNode.replyIndex !== null ? normalizeAiMessage(chatHistory[treeNode.replyIndex]) : null;
+        const messageEntries = Array.isArray(treeNode.entries) ? treeNode.entries : [];
+        const historyEntries = messageEntries.filter((entry) => entry.messageIndex !== treeNode.userIndex && entry.messageIndex !== treeNode.replyIndex);
         const replyCollapsed = replyMessage ? isReplyCollapsed(replyMessage) : false;
         const replyVariant = replyMessage ? getActiveResponseVariant(replyMessage) : null;
         const displayedReplyContent = replyVariant?.content || replyMessage?.content || '';
@@ -1412,8 +1460,8 @@ export default function ChatView({
         const activeResponseVariantIndex = replyMessage?.activeVariantIndex || 0;
         const hasPreviousResponseVariant = responseVariantCount > 1 && activeResponseVariantIndex > 0;
         const hasNextResponseVariant = responseVariantCount > 1 && activeResponseVariantIndex < responseVariantCount - 1;
-        const canGeneratePrompt = userMessage && treeNode.replyIndex === null;
-        const isGeneratingPrompt = userMessage && generatingPromptIndex === treeNode.userIndex;
+        const canGeneratePrompt = Boolean(treeNode.pendingUserEntry);
+        const isGeneratingPrompt = Boolean(treeNode.pendingUserEntry && generatingPromptIndex === treeNode.pendingUserIndex);
         const replyExplanations = replyMessage ? getInlineExplanations(replyMessage) : [];
         const activeExplanationIndex = replyExplanations.findIndex((item) => item.id === activeExplanation?.explanationId);
         const currentExplanation = activeExplanation?.messageIndex === treeNode.replyIndex && activeExplanationIndex >= 0
@@ -1423,11 +1471,12 @@ export default function ChatView({
         const isExplanationOverlayVisible = Boolean(currentExplanation);
         const isBranchTarget = branchTargetNodeId === treeNode.id;
         const isFocusedNode = focusedChatNodeId === treeNode.id;
-        const columnWidth = 'clamp(280px, 44vw, 430px)';
+        const columnWidth = 'clamp(320px, 34vw, 420px)';
         const columnShellStyle = {
             flex: `0 0 ${columnWidth}`,
             width: columnWidth,
             minWidth: columnWidth,
+            maxWidth: columnWidth,
             padding: '1rem 0.95rem 1.05rem',
             borderRadius: '30px',
             background: 'linear-gradient(180deg, rgba(255,255,255,0.86) 0%, rgba(247,243,250,0.96) 100%)',
@@ -1445,7 +1494,8 @@ export default function ChatView({
             flexDirection: 'column',
             gap: '1rem',
             position: 'relative',
-            minHeight: '220px',
+            minHeight: '620px',
+            maxHeight: 'min(76vh, 760px)',
             cursor: 'pointer',
             transition: 'transform 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease',
             transform: isFocusedNode ? 'translateY(-2px)' : 'translateY(0)',
@@ -1508,6 +1558,46 @@ export default function ChatView({
                     </div>
                 </div>
 
+                <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem', paddingRight: '0.25rem' }}>
+                    {historyEntries.length > 0 && (
+                        <div
+                            style={{
+                                padding: '0.8rem 0.95rem',
+                                borderRadius: '20px',
+                                border: '1px solid rgba(126, 136, 166, 0.12)',
+                                background: 'rgba(255,255,255,0.62)',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '0.75rem',
+                            }}
+                        >
+                            {historyEntries.map((entry) => (
+                                <div
+                                    key={entry.key}
+                                    style={{
+                                        alignSelf: entry.role === 'user' ? 'flex-end' : 'flex-start',
+                                        maxWidth: '100%',
+                                        padding: entry.role === 'user' ? '0.62rem 0.9rem' : '0.7rem 0.95rem',
+                                        borderRadius: '18px',
+                                        background: entry.role === 'user' ? 'rgba(232, 222, 248, 0.88)' : 'rgba(255,255,255,0.94)',
+                                        color: entry.role === 'user' ? '#5a4478' : '#273042',
+                                        border: entry.role === 'user'
+                                            ? '1px solid rgba(190, 174, 224, 0.45)'
+                                            : '1px solid rgba(34, 37, 47, 0.06)',
+                                        fontSize: '0.84rem',
+                                        lineHeight: 1.7,
+                                        whiteSpace: 'pre-wrap',
+                                        wordBreak: 'break-word',
+                                    }}
+                                >
+                                    {entry.role === 'ai'
+                                        ? (getActiveResponseVariant(normalizeAiMessage(entry.message))?.content || entry.message?.content || '')
+                                        : entry.message?.content}
+                                </div>
+                            ))}
+                        </div>
+                    )}
+
                 {userMessage && (
                     <div
                         className="chat-msg-wrapper"
@@ -1559,8 +1649,6 @@ export default function ChatView({
                                     ...userBubbleStyle,
                                     ...bubbleWidthStyle,
                                     minWidth: 0,
-                                    maxHeight: 'calc(1.72em * 30 + 2rem)',
-                                    overflowY: 'auto',
                                 }}
                             >
                                 {userMessage.content}
@@ -1718,8 +1806,6 @@ export default function ChatView({
                                         ...assistantBubbleStyle,
                                         ...bubbleWidthStyle,
                                         minWidth: 0,
-                                        maxHeight: 'calc(1.78em * 30 + 2rem)',
-                                        overflowY: 'auto',
                                         opacity: isSelectionOverlayVisible || isExplanationOverlayVisible ? 0.68 : 1,
                                         filter: 'none',
                                         userSelect: isSelectionOverlayVisible || isExplanationOverlayVisible ? 'none' : 'text',
@@ -1968,6 +2054,7 @@ export default function ChatView({
                         </div>
                     </div>
                 )}
+                </div>
             </div>
         );
     };
