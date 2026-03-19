@@ -181,6 +181,8 @@ export async function requestChatText({
     systemPrompt = '',
     maxTokens = 2048,
     enableGeminiSearch = false,
+    attempts = 3,
+    timeoutMs = 30000,
 }) {
     const { provider, key, model } = resolveModelSelection(apiKeyEntry);
 
@@ -207,6 +209,7 @@ export async function requestChatText({
                         generationConfig: maxTokens ? { maxOutputTokens: maxTokens } : undefined,
                     }),
                 },
+                timeoutMs,
             );
 
             if (!response.ok) {
@@ -216,7 +219,7 @@ export async function requestChatText({
             }
 
             return extractGeminiText(data) || 'No response.';
-        });
+        }, { attempts });
     }
 
     if (provider === 'anthropic') {
@@ -235,7 +238,7 @@ export async function requestChatText({
                     system: systemPrompt || undefined,
                     messages: normalizedHistory,
                 }),
-            });
+            }, timeoutMs);
 
             if (!response.ok) {
                 const error = new Error(data?.error?.message || 'Anthropic Error');
@@ -244,7 +247,7 @@ export async function requestChatText({
             }
 
             return extractAnthropicText(data) || 'No response.';
-        });
+        }, { attempts });
     }
 
     return requestWithRetry(async () => {
@@ -259,7 +262,7 @@ export async function requestChatText({
                 ],
                 max_tokens: maxTokens,
             }),
-        });
+        }, timeoutMs);
 
         if (!response.ok) {
             const error = new Error(data?.error?.message || 'LLM Error');
@@ -268,7 +271,7 @@ export async function requestChatText({
         }
 
         return extractOpenAICompatibleText(data) || 'No response.';
-    });
+    }, { attempts });
 }
 
 export function createSingleTurnHistory(prompt) {

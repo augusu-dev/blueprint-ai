@@ -277,7 +277,9 @@ export default function DictionaryPage() {
                 && item?.manualModel === candidate?.manualModel
             )) === index;
         });
-        const { key } = resolveModelSelection(apiCandidates[0]);
+        const primaryCandidate = apiCandidates[0] || null;
+        const fallbackCandidate = apiCandidates[1] || null;
+        const { key } = resolveModelSelection(primaryCandidate);
         if (!key) {
             setStatusMessage('API キーを設定してください。');
             return;
@@ -305,13 +307,20 @@ export default function DictionaryPage() {
 
             let rawText = '';
             let lastError = null;
-            for (let attempt = 0; attempt < prompts.length; attempt += 1) {
-                for (const candidate of apiCandidates) {
+            const candidatePool = primaryCandidate
+                ? [primaryCandidate, ...(fallbackCandidate ? [fallbackCandidate] : [])]
+                : [];
+            const promptLimit = Math.min(prompts.length, 2);
+            for (let attempt = 0; attempt < promptLimit; attempt += 1) {
+                const activeCandidates = attempt === 0 ? candidatePool.slice(0, 1) : candidatePool;
+                for (const candidate of activeCandidates) {
                     try {
                         rawText = (await requestChatText({
                             apiKeyEntry: candidate,
                             history: createSingleTurnHistory(prompts[attempt]),
-                            maxTokens: attempt === 0 ? 320 : 220,
+                            maxTokens: attempt === 0 ? 220 : 160,
+                            attempts: 1,
+                            timeoutMs: attempt === 0 ? 12000 : 9000,
                         })).trim();
                         if (rawText && !/^Error:/i.test(rawText) && !/^No response\.?$/i.test(rawText) && rawText.length > 4) {
                             break;
