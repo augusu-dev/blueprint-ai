@@ -8,8 +8,12 @@ import {
     ChevronRight,
     ChevronUp,
     Copy,
+    Edit3,
     ExternalLink,
     GitBranch,
+    LocateFixed,
+    Minus,
+    Plus,
     RefreshCw,
     Send,
     Sparkles,
@@ -31,6 +35,8 @@ import {
 } from './lib/workspace';
 import { upsertDictionaryEntry } from './lib/dictionary';
 import { createSingleTurnHistory, requestChatText, resolveModelSelection } from './lib/llmClient';
+
+const { useCallback } = React;
 
 const PLAN_SECTION_PROMPTS = {
     plan: `あなたはプロジェクトの計画設計アシスタントです。ここでは目標ではなく、具体的な進め方だけを整理してください。
@@ -391,6 +397,7 @@ export default function ChatView({
     projectContextPrompt,
     spaceId,
     spaceTitle,
+    onRequestEditTitle,
 }) {
     const { t } = useLanguage();
     const navigate = useNavigate();
@@ -408,18 +415,26 @@ export default function ChatView({
     const [activePlanSection, setActivePlanSection] = useState('goal');
     const [selectedImprovementVersionId, setSelectedImprovementVersionId] = useState(null);
     const [branchTargetNodeId, setBranchTargetNodeId] = useState(null);
-    const messagesEndRef = useRef(null);
+    const [focusedChatNodeId, setFocusedChatNodeId] = useState(null);
+    const [chatZoom, setChatZoom] = useState(1);
     const inputRef = useRef(null);
     const messageContentRefs = useRef({});
     const workflowRailRef = useRef(null);
+    const workflowSceneRef = useRef(null);
+    const chatNodeRefs = useRef({});
     const workflowDragStateRef = useRef({
         active: false,
         pointerId: null,
         startX: 0,
+        startY: 0,
         scrollLeft: 0,
+        scrollTop: 0,
+        moved: false,
     });
+    const lastWorkflowDragAtRef = useRef(0);
     const inlineOverlayRef = useRef(null);
     const [isWorkflowDragging, setIsWorkflowDragging] = useState(false);
+    const [workflowSceneSize, setWorkflowSceneSize] = useState({ width: 0, height: 0 });
 
     useEffect(() => {
         if (!node) return;
@@ -427,11 +442,8 @@ export default function ChatView({
         setGeneratingPromptIndex(null);
         setSelectionDraft(null);
         setActiveExplanation(null);
+        setFocusedChatNodeId(null);
     }, [node]);
-
-    useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [chatHistory, isLoading]);
 
     useEffect(() => {
         const handleWorkspaceMetaUpdate = () => setWorkspaceMetaVersion((current) => current + 1);
@@ -448,15 +460,76 @@ export default function ChatView({
     };
 
     const chatTree = useMemo(() => analyzeChatHistory(chatHistory), [chatHistory]);
+    const lastOrderedNode = chatTree.orderedNodes[chatTree.orderedNodes.length - 1] || null;
+    const activePromptNodeId = branchTargetNodeId || focusedChatNodeId || lastOrderedNode?.id || null;
     const branchTargetLabel = branchTargetNodeId
         ? chatTree.nodeById.get(branchTargetNodeId)?.displayLabel || ''
         : '';
+    const activePromptLabel = activePromptNodeId
+        ? chatTree.nodeById.get(activePromptNodeId)?.displayLabel || ''
+        : '';
+
+    useEffect(() => {
+        if (chatTree.orderedNodes.length === 0) {
+            setFocusedChatNodeId(null);
+            return;
+        }
+        setFocusedChatNodeId((current) => (
+            current && chatTree.nodeById.has(current)
+                ? current
+                : lastOrderedNode?.id || null
+        ));
+    }, [chatTree.nodeById, chatTree.orderedNodes.length, lastOrderedNode?.id]);
 
     useEffect(() => {
         if (branchTargetNodeId && !chatTree.nodeById.has(branchTargetNodeId)) {
             setBranchTargetNodeId(null);
         }
     }, [branchTargetNodeId, chatTree]);
+
+    useEffect(() => {
+        const element = workflowSceneRef.current;
+        if (!element) return undefined;
+
+        const updateSize = () => {
+            setWorkflowSceneSize({
+                width: element.offsetWidth,
+                height: element.offsetHeight,
+            });
+        };
+
+        updateSize();
+
+        const observer = new ResizeObserver(() => updateSize());
+        observer.observe(element);
+        return () => observer.disconnect();
+    }, [chatHistory, chatZoom]);
+
+    const centerChatNode = useCallback((nodeId, behavior = 'smooth') => {
+        if (!nodeId) return;
+        const viewport = workflowRailRef.current;
+        const target = chatNodeRefs.current[nodeId];
+        if (!viewport || !target) return;
+
+        const viewportRect = viewport.getBoundingClientRect();
+        const targetRect = target.getBoundingClientRect();
+        const deltaX = (targetRect.left + targetRect.width / 2) - (viewportRect.left + viewport.clientWidth / 2);
+        const deltaY = (targetRect.top + targetRect.height / 2) - (viewportRect.top + viewport.clientHeight / 2);
+
+        viewport.scrollTo({
+            left: Math.max(0, viewport.scrollLeft + deltaX),
+            top: Math.max(0, viewport.scrollTop + deltaY),
+            behavior,
+        });
+    }, []);
+
+    useEffect(() => {
+        if (!isWorkflowMode || !activePromptNodeId) return undefined;
+        const frame = window.requestAnimationFrame(() => {
+            centerChatNode(activePromptNodeId, 'smooth');
+        });
+        return () => window.cancelAnimationFrame(frame);
+    }, [activePromptNodeId, centerChatNode, chatZoom, isWorkflowMode]);
 
     const closeInlineOverlay = () => {
         setSelectionDraft(null);
@@ -706,15 +779,15 @@ export default function ChatView({
         const messageText = input.trim();
         if (!messageText || !node) return;
         const selectedBranchNode = branchTargetNodeId ? chatTree.nodeById.get(branchTargetNodeId) || null : null;
-        const lastUserNode = [...chatTree.orderedNodes].slice(-1)[0] || null;
-        const parentNodeId = selectedBranchNode?.id || lastUserNode?.id || null;
+        const parentNodeId = selectedBranchNode?.id || focusedChatNodeId || lastOrderedNode?.id || null;
         const branchKind = selectedBranchNode ? 'branch' : 'send';
+        const nextNodeId = crypto.randomUUID();
         const nextHistory = normalizeHistory([
             ...chatHistory,
             {
                 role: 'user',
                 content: messageText,
-                chatNodeId: crypto.randomUUID(),
+                chatNodeId: nextNodeId,
                 chatParentId: parentNodeId,
                 chatBranchKind: branchKind,
             },
@@ -722,6 +795,7 @@ export default function ChatView({
 
         setInput('');
         setBranchTargetNodeId(null);
+        setFocusedChatNodeId(nextNodeId);
         persistChatHistory(nextHistory);
     };
 
@@ -750,9 +824,36 @@ export default function ChatView({
 
     const handleSelectBranchTarget = (nodeId) => {
         if (!nodeId) return;
+        setFocusedChatNodeId(nodeId);
         setBranchTargetNodeId((current) => (current === nodeId ? null : nodeId));
+        centerChatNode(nodeId, 'smooth');
         window.setTimeout(() => {
             inputRef.current?.focus?.();
+        }, 0);
+    };
+
+    const handleFocusChatNode = (event, nodeId) => {
+        if (!nodeId) return;
+        if (Date.now() - lastWorkflowDragAtRef.current < 180) return;
+        if (isInteractiveDragTarget(event.target)) return;
+        if (window.getSelection && String(window.getSelection()).trim()) return;
+
+        setFocusedChatNodeId(nodeId);
+        setBranchTargetNodeId(null);
+        centerChatNode(nodeId, 'smooth');
+        window.setTimeout(() => {
+            inputRef.current?.focus?.();
+        }, 0);
+    };
+
+    const adjustChatZoom = (delta) => {
+        setChatZoom((current) => Math.min(1.6, Math.max(0.72, Number((current + delta).toFixed(2)))));
+    };
+
+    const resetChatZoom = () => {
+        setChatZoom(1);
+        window.setTimeout(() => {
+            centerChatNode(activePromptNodeId, 'smooth');
         }, 0);
     };
 
@@ -973,7 +1074,10 @@ export default function ChatView({
             active: false,
             pointerId: null,
             startX: 0,
+            startY: 0,
             scrollLeft: 0,
+            scrollTop: 0,
+            moved: false,
         };
         setIsWorkflowDragging(false);
     };
@@ -989,7 +1093,10 @@ export default function ChatView({
             active: true,
             pointerId: event.pointerId,
             startX: event.clientX,
+            startY: event.clientY,
             scrollLeft: rail.scrollLeft,
+            scrollTop: rail.scrollTop,
+            moved: false,
         };
         rail.setPointerCapture?.(event.pointerId);
         setIsWorkflowDragging(true);
@@ -1001,10 +1108,18 @@ export default function ChatView({
         if (!rail || !dragState.active) return;
 
         const deltaX = event.clientX - dragState.startX;
+        const deltaY = event.clientY - dragState.startY;
+        if (Math.abs(deltaX) > 4 || Math.abs(deltaY) > 4) {
+            dragState.moved = true;
+        }
         rail.scrollLeft = dragState.scrollLeft - deltaX;
+        rail.scrollTop = dragState.scrollTop - deltaY;
     };
 
     const handleWorkflowPointerUp = (event) => {
+        if (workflowDragStateRef.current.moved) {
+            lastWorkflowDragAtRef.current = Date.now();
+        }
         stopWorkflowDrag(event.pointerId);
     };
 
@@ -1295,6 +1410,7 @@ export default function ChatView({
         const isSelectionOverlayVisible = selectionDraft?.messageIndex === treeNode.replyIndex;
         const isExplanationOverlayVisible = Boolean(currentExplanation);
         const isBranchTarget = branchTargetNodeId === treeNode.id;
+        const isFocusedNode = focusedChatNodeId === treeNode.id;
         const columnWidth = 'clamp(280px, 44vw, 430px)';
         const columnShellStyle = {
             flex: `0 0 ${columnWidth}`,
@@ -1303,15 +1419,24 @@ export default function ChatView({
             padding: '1rem 0.95rem 1.05rem',
             borderRadius: '30px',
             background: 'linear-gradient(180deg, rgba(255,255,255,0.86) 0%, rgba(247,243,250,0.96) 100%)',
-            border: isBranchTarget ? '2px solid rgba(92, 124, 250, 0.58)' : '1px solid rgba(126, 136, 166, 0.12)',
+            border: isBranchTarget
+                ? '2px solid rgba(92, 124, 250, 0.58)'
+                : isFocusedNode
+                    ? '2px solid rgba(143, 127, 232, 0.52)'
+                    : '1px solid rgba(126, 136, 166, 0.12)',
             boxShadow: isBranchTarget
                 ? '0 20px 42px rgba(92, 124, 250, 0.16)'
-                : '0 18px 38px rgba(24, 27, 35, 0.08)',
+                : isFocusedNode
+                    ? '0 22px 42px rgba(143, 127, 232, 0.18)'
+                    : '0 18px 38px rgba(24, 27, 35, 0.08)',
             display: 'flex',
             flexDirection: 'column',
             gap: '1rem',
             position: 'relative',
             minHeight: '220px',
+            cursor: 'pointer',
+            transition: 'transform 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease',
+            transform: isFocusedNode ? 'translateY(-2px)' : 'translateY(0)',
         };
         const bubbleWidthStyle = {
             maxWidth: '100%',
@@ -1340,7 +1465,16 @@ export default function ChatView({
         };
 
         return (
-            <div key={treeNode.id} data-chat-column-shell="true" style={columnShellStyle}>
+            <div
+                key={treeNode.id}
+                ref={(element) => {
+                    if (element) chatNodeRefs.current[treeNode.id] = element;
+                    else delete chatNodeRefs.current[treeNode.id];
+                }}
+                data-chat-column-shell="true"
+                style={columnShellStyle}
+                onClick={(event) => handleFocusChatNode(event, treeNode.id)}
+            >
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.45rem', paddingLeft: '0.1rem' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
                         <div style={{ width: '8px', height: '8px', borderRadius: '999px', background: 'rgba(116, 129, 255, 0.82)' }} />
@@ -1348,11 +1482,18 @@ export default function ChatView({
                             {treeNode.displayLabel || treeNode.numericStep}
                         </span>
                     </div>
-                    {isBranchTarget && (
-                        <span style={{ fontSize: '0.68rem', fontWeight: 700, color: '#4f63d9', background: 'rgba(92,124,250,0.1)', border: '1px solid rgba(92,124,250,0.18)', borderRadius: '999px', padding: '0.16rem 0.48rem' }}>
-                            分岐先
-                        </span>
-                    )}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.32rem' }}>
+                        {isFocusedNode && !isBranchTarget && (
+                            <span style={{ fontSize: '0.68rem', fontWeight: 700, color: '#755fd6', background: 'rgba(143,127,232,0.12)', border: '1px solid rgba(143,127,232,0.18)', borderRadius: '999px', padding: '0.16rem 0.48rem' }}>
+                                送信先
+                            </span>
+                        )}
+                        {isBranchTarget && (
+                            <span style={{ fontSize: '0.68rem', fontWeight: 700, color: '#4f63d9', background: 'rgba(92,124,250,0.1)', border: '1px solid rgba(92,124,250,0.18)', borderRadius: '999px', padding: '0.16rem 0.48rem' }}>
+                                分岐先
+                            </span>
+                        )}
+                    </div>
                 </div>
 
                 {userMessage && (
@@ -1913,16 +2054,13 @@ export default function ChatView({
             <div
                 style={{
                     flex: 1,
-                    overflowY: 'auto',
-                    overflowX: 'hidden',
+                    overflow: 'hidden',
                     padding: '1.25rem 1.6rem 0.8rem',
                     display: 'flex',
                     flexDirection: 'column',
-                    gap: '1.5rem',
-                    maxWidth: 'min(1240px, calc(100vw - 2rem))',
-                    width: '100%',
-                    margin: '0 auto',
                     minWidth: 0,
+                    minHeight: 0,
+                    position: 'relative',
                 }}
             >
                 {chatHistory.length === 0 ? (
@@ -1938,53 +2076,129 @@ export default function ChatView({
                         <p style={{ fontSize: '0.96rem', fontWeight: 400 }}>{t('chat.empty')}</p>
                     </div>
                 ) : (
-                    <div
-                        ref={workflowRailRef}
-                        onPointerDown={isWorkflowMode ? handleWorkflowPointerDown : undefined}
-                        onPointerMove={isWorkflowMode ? handleWorkflowPointerMove : undefined}
-                        onPointerUp={isWorkflowMode ? handleWorkflowPointerUp : undefined}
-                        onPointerCancel={isWorkflowMode ? handleWorkflowPointerUp : undefined}
-                        onPointerLeave={isWorkflowMode ? handleWorkflowPointerUp : undefined}
-                        style={{
-                            display: 'flex',
-                            alignItems: 'flex-start',
-                            gap: '1rem',
-                            minWidth: 0,
-                            width: '100%',
-                            overflowX: isWorkflowMode ? 'auto' : 'visible',
-                            overflowY: 'visible',
-                            paddingBottom: '1rem',
-                            cursor: isWorkflowMode ? (isWorkflowDragging ? 'grabbing' : 'grab') : 'default',
-                            userSelect: isWorkflowMode && isWorkflowDragging ? 'none' : 'auto',
-                            touchAction: isWorkflowMode ? 'pan-x pan-y' : 'auto',
-                            scrollbarWidth: isWorkflowMode ? 'thin' : 'none',
-                        }}
-                    >
+                    <>
                         <div
                             style={{
+                                position: 'absolute',
+                                top: '1.1rem',
+                                right: '1.85rem',
+                                zIndex: 4,
                                 display: 'flex',
-                                flexDirection: 'column',
                                 alignItems: 'center',
-                                gap: '1.5rem',
-                                minWidth: 'max-content',
-                                width: 'max-content',
-                                margin: '0 auto',
+                                gap: '0.42rem',
+                                padding: '0.35rem',
+                                borderRadius: '999px',
+                                background: 'rgba(255,255,255,0.82)',
+                                border: '1px solid rgba(38, 43, 53, 0.08)',
+                                boxShadow: '0 14px 26px rgba(29, 33, 44, 0.08)',
                             }}
                         >
-                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.45rem', paddingTop: '0.1rem' }}>
-                                <div style={{ width: '2px', height: '18px', background: 'linear-gradient(180deg, rgba(125,161,255,0.62) 0%, rgba(125,161,255,0.08) 100%)' }} />
-                                <div style={{ fontSize: '1.05rem', fontWeight: 700, color: '#2a3242', letterSpacing: '0.03em', textAlign: 'center', whiteSpace: 'nowrap' }}>
-                                    {spaceTitle || t('editor.untitled')}
+                            <button type="button" style={iconActionStyle} onClick={() => adjustChatZoom(-0.12)} aria-label="Zoom out" title="Zoom out">
+                                <Minus size={13} />
+                            </button>
+                            <button
+                                type="button"
+                                onClick={resetChatZoom}
+                                style={{
+                                    border: 'none',
+                                    background: 'transparent',
+                                    color: '#667085',
+                                    fontSize: '0.74rem',
+                                    fontWeight: 700,
+                                    minWidth: '56px',
+                                    cursor: 'pointer',
+                                    fontFamily: 'inherit',
+                                }}
+                                title="Reset zoom"
+                            >
+                                {Math.round(chatZoom * 100)}%
+                            </button>
+                            <button type="button" style={iconActionStyle} onClick={() => adjustChatZoom(0.12)} aria-label="Zoom in" title="Zoom in">
+                                <Plus size={13} />
+                            </button>
+                            <button type="button" style={iconActionStyle} onClick={() => centerChatNode(activePromptNodeId, 'smooth')} aria-label="Center active node" title="Center active node">
+                                <LocateFixed size={13} />
+                            </button>
+                        </div>
+                        <div
+                            ref={workflowRailRef}
+                            onPointerDown={isWorkflowMode ? handleWorkflowPointerDown : undefined}
+                            onPointerMove={isWorkflowMode ? handleWorkflowPointerMove : undefined}
+                            onPointerUp={isWorkflowMode ? handleWorkflowPointerUp : undefined}
+                            onPointerCancel={isWorkflowMode ? handleWorkflowPointerUp : undefined}
+                            onPointerLeave={isWorkflowMode ? handleWorkflowPointerUp : undefined}
+                            style={{
+                                flex: 1,
+                                minWidth: 0,
+                                minHeight: 0,
+                                width: '100%',
+                                overflow: isWorkflowMode ? 'auto' : 'hidden',
+                                paddingBottom: '1rem',
+                                cursor: isWorkflowMode ? (isWorkflowDragging ? 'grabbing' : 'grab') : 'default',
+                                userSelect: isWorkflowMode && isWorkflowDragging ? 'none' : 'auto',
+                                touchAction: isWorkflowMode ? 'none' : 'auto',
+                                scrollbarWidth: isWorkflowMode ? 'thin' : 'none',
+                            }}
+                        >
+                            <div
+                                style={{
+                                    width: `${Math.max(workflowSceneSize.width * chatZoom + 96, 0)}px`,
+                                    height: `${Math.max(workflowSceneSize.height * chatZoom + 72, 0)}px`,
+                                    minWidth: '100%',
+                                    minHeight: '100%',
+                                    padding: '0.35rem 0.75rem 1rem',
+                                    boxSizing: 'border-box',
+                                }}
+                            >
+                                <div
+                                    ref={workflowSceneRef}
+                                    style={{
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        alignItems: 'center',
+                                        gap: '1.5rem',
+                                        width: 'max-content',
+                                        minWidth: 'max-content',
+                                        transform: `scale(${chatZoom})`,
+                                        transformOrigin: 'top left',
+                                    }}
+                                >
+                                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.45rem', paddingTop: '0.1rem' }}>
+                                        <div style={{ width: '2px', height: '18px', background: 'linear-gradient(180deg, rgba(125,161,255,0.62) 0%, rgba(125,161,255,0.08) 100%)' }} />
+                                        <button
+                                            type="button"
+                                            onClick={onRequestEditTitle}
+                                            style={{
+                                                border: 'none',
+                                                background: 'transparent',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                gap: '0.38rem',
+                                                color: '#2a3242',
+                                                fontSize: '1.05rem',
+                                                fontWeight: 700,
+                                                letterSpacing: '0.03em',
+                                                textAlign: 'center',
+                                                whiteSpace: 'nowrap',
+                                                cursor: onRequestEditTitle ? 'pointer' : 'default',
+                                                fontFamily: 'inherit',
+                                            }}
+                                            title="スペース名を編集"
+                                        >
+                                            {spaceTitle || t('editor.untitled')}
+                                            {onRequestEditTitle && <Edit3 size={13} color="#7a8194" />}
+                                        </button>
+                                    </div>
+                                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2rem', width: '100%' }}>
+                                        {chatTree.rootNodes.map((treeNode) => renderChatNodeTree(treeNode))}
+                                    </div>
                                 </div>
                             </div>
-                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2rem', width: '100%' }}>
-                                {chatTree.rootNodes.map((treeNode) => renderChatNodeTree(treeNode))}
-                            </div>
                         </div>
-                    </div>
+                    </>
                 )}
                 {isLoading && (
-                    <div style={{ display: 'flex', gap: '0.65rem', animation: 'pulse 1.5s infinite', marginLeft: '0.2rem' }}>
+                    <div style={{ position: 'absolute', left: '1.85rem', bottom: '1rem', display: 'flex', gap: '0.65rem', animation: 'pulse 1.5s infinite', marginLeft: '0.2rem', zIndex: 3 }}>
                         <div style={{ width: '30px', height: '30px', borderRadius: '50%', background: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, boxShadow: '0 10px 20px rgba(29, 33, 44, 0.08)' }}>
                             <Bot size={14} color="#6f7688" />
                         </div>
@@ -1993,8 +2207,6 @@ export default function ChatView({
                         </div>
                     </div>
                 )}
-
-                <div ref={messagesEndRef} />
             </div>
 
             <div style={{ padding: '1rem 1.5rem 1.3rem' }}>
@@ -2014,18 +2226,36 @@ export default function ChatView({
                         minWidth: 0,
                     }}
                 >
-                    {branchTargetLabel && (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', alignSelf: 'center', marginRight: '0.75rem', padding: '0.3rem 0.6rem', borderRadius: '999px', background: 'rgba(92,124,250,0.1)', border: '1px solid rgba(92,124,250,0.18)', color: '#4f63d9', fontSize: '0.74rem', fontWeight: 700, whiteSpace: 'nowrap' }}>
-                            分岐先 {branchTargetLabel}
-                            <button
-                                type="button"
-                                onClick={() => setBranchTargetNodeId(null)}
-                                style={{ ...iconActionStyle, width: '20px', height: '20px', background: 'transparent', boxShadow: 'none', border: 'none', color: '#4f63d9' }}
-                                aria-label="分岐先を解除"
-                                title="分岐先を解除"
-                            >
-                                <X size={11} />
-                            </button>
+                    {activePromptLabel && (
+                        <div
+                            style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.35rem',
+                                alignSelf: 'center',
+                                marginRight: '0.75rem',
+                                padding: '0.3rem 0.6rem',
+                                borderRadius: '999px',
+                                background: branchTargetLabel ? 'rgba(92,124,250,0.1)' : 'rgba(143,127,232,0.1)',
+                                border: branchTargetLabel ? '1px solid rgba(92,124,250,0.18)' : '1px solid rgba(143,127,232,0.18)',
+                                color: branchTargetLabel ? '#4f63d9' : '#755fd6',
+                                fontSize: '0.74rem',
+                                fontWeight: 700,
+                                whiteSpace: 'nowrap',
+                            }}
+                        >
+                            {branchTargetLabel ? `分岐先 ${branchTargetLabel}` : `送信先 ${activePromptLabel}`}
+                            {branchTargetLabel && (
+                                <button
+                                    type="button"
+                                    onClick={() => setBranchTargetNodeId(null)}
+                                    style={{ ...iconActionStyle, width: '20px', height: '20px', background: 'transparent', boxShadow: 'none', border: 'none', color: '#4f63d9' }}
+                                    aria-label="分岐先を解除"
+                                    title="分岐先を解除"
+                                >
+                                    <X size={11} />
+                                </button>
+                            )}
                         </div>
                     )}
                     <textarea
@@ -2038,7 +2268,7 @@ export default function ChatView({
                                 handleQueuePrompt();
                             }
                         }}
-                        placeholder={branchTargetLabel ? `分岐先 ${branchTargetLabel} への質問を入力` : t('chat.placeholder')}
+                        placeholder={branchTargetLabel ? `分岐先 ${branchTargetLabel} への質問を入力` : activePromptLabel ? `送信先 ${activePromptLabel} への質問を入力` : t('chat.placeholder')}
                         style={{
                             flex: 1,
                             background: 'transparent',

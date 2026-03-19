@@ -1135,6 +1135,11 @@ function EditorContent() {
         }
     };
 
+    const startEditingTitle = useCallback(() => {
+        setTempTitle(spaceTitle);
+        setIsEditingTitle(true);
+    }, [spaceTitle]);
+
     // Auto-save
     const saveTimerRef = useRef(null);
     useEffect(() => {
@@ -1672,7 +1677,7 @@ function EditorContent() {
                                 margin: 0, fontSize: '1.05rem', fontWeight: 500, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.3rem',
                                 background: 'linear-gradient(90deg, var(--text-main), var(--text-muted))', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent'
                             }}
-                                onClick={() => { setTempTitle(spaceTitle); setIsEditingTitle(true); }} title={t('editor.editTitle')}>
+                                onClick={startEditingTitle} title={t('editor.editTitle')}>
                                 {spaceTitle} <Edit3 size={12} color="var(--text-muted)" />
                             </h2>
                         )}
@@ -1817,6 +1822,7 @@ function EditorContent() {
                         projectContextPrompt={projectContextPrompt}
                         spaceId={spaceId}
                         spaceTitle={spaceTitle}
+                        onRequestEditTitle={startEditingTitle}
                     />
                 ) : currentMode === 'map' ? (
                     <MapView
