@@ -2,15 +2,19 @@ const PROVIDER_DEFINITIONS = {
     openai: {
         id: 'openai',
         label: 'OpenAI API',
-        defaultModel: 'gpt-5.2',
+        defaultModel: 'gpt-5.4',
         models: [
+            { value: 'gpt-5.4', label: 'GPT-5.4' },
+            { value: 'gpt-5.4-pro', label: 'GPT-5.4 pro' },
             { value: 'gpt-5.2', label: 'GPT-5.2' },
             { value: 'gpt-5.1', label: 'GPT-5.1' },
+            { value: 'gpt-5.1-chat-latest', label: 'GPT-5.1 Chat' },
             { value: 'gpt-5', label: 'GPT-5' },
             { value: 'gpt-5-mini', label: 'GPT-5 mini' },
             { value: 'gpt-5-nano', label: 'GPT-5 nano' },
             { value: 'gpt-4.1', label: 'GPT-4.1' },
             { value: 'gpt-4.1-mini', label: 'GPT-4.1 mini' },
+            { value: 'gpt-4.1-nano', label: 'GPT-4.1 nano' },
             { value: 'gpt-4o', label: 'GPT-4o' },
             { value: 'gpt-4o-mini', label: 'GPT-4o mini' },
         ],
@@ -108,18 +112,21 @@ export function getDefaultModel(provider = 'openai') {
 
 export function normalizeApiKeyEntry(item) {
     if (typeof item === 'string') {
+        const provider = detectProviderByKey(item);
         return {
             key: item,
-            provider: detectProviderByKey(item),
-            model: '',
+            provider,
+            model: getDefaultModel(provider),
         };
     }
 
     const provider = getProviderDefinition(item?.provider).id;
+    const validModels = new Set(getModelOptions(provider).map((model) => model.value));
+    const model = validModels.has(item?.model) ? item.model : getDefaultModel(provider);
     return {
         key: item?.key || '',
         provider,
-        model: item?.model || '',
+        model,
     };
 }
 
@@ -127,6 +134,6 @@ export function createEmptyApiKeyEntry(provider = 'openai') {
     return {
         key: '',
         provider: getProviderDefinition(provider).id,
-        model: '',
+        model: getDefaultModel(provider),
     };
 }

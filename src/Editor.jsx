@@ -28,6 +28,7 @@ import { DEFAULT_SPACE_MODE, getSpacePath, isSpaceMode, resolveSpaceRouteParams 
 import { createDefaultMapState, createInitialEdges, createInitialNodes, normalizeMapState } from './lib/space';
 import {
     createEmptyApiKeyEntry,
+    getDefaultModel,
     getModelOptions,
     getProviderOptions,
     normalizeApiKeyEntry,
@@ -1346,7 +1347,7 @@ function EditorContent() {
                                                 value={item.provider}
                                                 onChange={(e) => {
                                                     const nk = [...apiKeys];
-                                                    nk[index] = { ...nk[index], provider: e.target.value, model: '' };
+                                                    nk[index] = { ...nk[index], provider: e.target.value, model: getDefaultModel(e.target.value) };
                                                     setApiKeys(nk);
                                                 }}
                                             >
@@ -1369,15 +1370,6 @@ function EditorContent() {
                                             </select>
                                         </div>
                                     </div>
-                                    <div style={{ marginBottom: '0.4rem' }}>
-                                        <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Model ID</label>
-                                        <input
-                                            type="text"
-                                            placeholder="gpt-5.2 / gemini-2.5-pro / claude-sonnet-4-20250514"
-                                            value={item.model || ''}
-                                            onChange={(e) => { const nk = [...apiKeys]; nk[index] = { ...nk[index], model: e.target.value.trim() }; setApiKeys(nk); }}
-                                        />
-                                    </div>
                                     <div>
                                         <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{t('settings.secretKey')}</label>
                                         <input type="password" placeholder={`${item.provider}${t('settings.secretPlaceholder')}`} value={item.key || ''} onChange={(e) => { const nk = [...apiKeys]; nk[index] = { ...nk[index], key: e.target.value }; setApiKeys(nk); }} />
@@ -1385,13 +1377,8 @@ function EditorContent() {
                                 </div>
                                 );
                             })}
-                            {/*
                             <p className="help-text" style={{ marginTop: '-0.25rem', marginBottom: '0.9rem' }}>
-                                ChatGPT のサブスク課金と OpenAI API の課金は別管理です。このアプリでは API 対応の認証情報のみ使えます。
-                            </p>
-                            */}
-                            <p className="help-text" style={{ marginTop: '-0.25rem', marginBottom: '0.9rem' }}>
-                                ChatGPT のサブスク課金と OpenAI API の課金は別です。このアプリでは API キーで使うプロバイダーのみ利用でき、リストにないモデルIDも直接入力できます。
+                                同じ OpenAI アカウントで ChatGPT と API を併用することはできますが、このアプリのプロバイダー接続は API 側を使います。モデルは選択式です。
                             </p>
                             {apiKeys.length < 5 && <button className="btn btn-secondary btn-sm" style={{ marginTop: '0.4rem', width: '100%' }} onClick={() => setApiKeys([...apiKeys, createEmptyApiKeyEntry('openai')])}>{t('settings.addKey')}</button>}
                         </div>
