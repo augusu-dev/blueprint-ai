@@ -13,7 +13,7 @@ import {
     Trash2,
 } from 'lucide-react';
 import Sidebar from './Sidebar';
-import { getSpacePath } from './lib/routes';
+import { getDictionaryPath, getSpacePath } from './lib/routes';
 import { resolveSpaceTitle } from './lib/space';
 import {
     getDictionaryEntryExplanation,
@@ -60,7 +60,22 @@ function clampIndex(value, length) {
     return Math.min(Math.max(parsed, 0), length - 1);
 }
 
+const MANUAL_DICTIONARY_SPACE_ID = 'manual';
+
+function hasChatSourceAnchor(sourceRef) {
+    return Boolean(
+        sourceRef
+        && typeof sourceRef === 'object'
+        && sourceRef.spaceId
+        && (
+            sourceRef.chatNodeId
+            || Number.isInteger(sourceRef.messageIndex)
+        )
+    );
+}
+
 function getEntrySpaceTitle(entry) {
+    if (!hasChatSourceAnchor(entry?.sourceRef)) return '';
     const sourceSpaceId = entry?.sourceRef?.spaceId || '';
     if (!sourceSpaceId) return '';
     return resolveSpaceTitle(sourceSpaceId, loadSpaceTitle(sourceSpaceId, 'space'), 'space');
@@ -68,12 +83,7 @@ function getEntrySpaceTitle(entry) {
 
 function buildJumpPath(entry) {
     const sourceRef = entry?.sourceRef;
-    if (!sourceRef || typeof sourceRef !== 'object') return null;
-    const hasChatAnchor = Boolean(
-        sourceRef.chatNodeId
-        || Number.isInteger(sourceRef.messageIndex),
-    );
-    if (!hasChatAnchor) return null;
+    if (!hasChatSourceAnchor(sourceRef)) return null;
 
     const targetSpaceId = sourceRef.spaceId || null;
     if (!targetSpaceId) return null;
@@ -86,6 +96,54 @@ function buildJumpPath(entry) {
     const basePath = getSpacePath(targetSpaceId, 'chat');
     const query = params.toString();
     return query ? `${basePath}?${query}` : basePath;
+}
+
+function isUsefulExplanationText(text) {
+    const normalized = String(text || '').trim();
+    if (!normalized) return false;
+    if (/^Error:/i.test(normalized)) return false;
+    if (/^No response\.?$/i.test(normalized)) return false;
+    return normalized.length > 4;
+}
+
+function normalizeExplanationText(text) {
+    return String(text || '')
+        .replace(/\r\n/g, '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+}
+
+function buildExplanationAttempts(term, existingExplanation, forceNewVariant) {
+    const variationHint = existingExplanation && forceNewVariant
+        ? `Previous explanation: ${existingExplanation}\nWrite a fresh explanation with different wording.`
+        : '';
+
+    return [
+        {
+            systemPrompt: [
+                'You are a concise Japanese dictionary writer.',
+                'Return only a short Japanese explanation.',
+                'Use exactly 2 short sentences.',
+                'State the meaning directly and avoid filler.',
+            ].join('\n'),
+            userPrompt: [
+                `Term: ${term}`,
+                variationHint,
+            ].filter(Boolean).join('\n'),
+            timeoutMs: 9000,
+            maxTokens: 160,
+        },
+        {
+            systemPrompt: [
+                'Explain the given term in simple Japanese.',
+                'Return only 1 or 2 short sentences.',
+                'If the meaning depends on context, say so briefly.',
+            ].join('\n'),
+            userPrompt: `Term: ${term}`,
+            timeoutMs: 8000,
+            maxTokens: 120,
+        },
+    ];
 }
 
 function sortEntries(entries, sortMode, collator) {
@@ -280,70 +338,61 @@ export default function DictionaryPage() {
                 && item?.manualModel === candidate?.manualModel
             )) === index;
         });
-        const primaryCandidate = apiCandidates[0] || null;
-        const fallbackCandidate = apiCandidates[1] || null;
-        const { key } = resolveModelSelection(primaryCandidate);
-        if (!key) {
+
+        if (apiCandidates.length === 0) {
             setStatusMessage('API キーを設定してください。');
             return;
         }
 
+        const primaryCandidate = apiCandidates[0];
         const existingExplanation = getDictionaryEntryExplanation(entry);
+        const explanationAttempts = buildExplanationAttempts(entry.term, existingExplanation, forceNewVariant);
+
         setStatusMessage('');
         setIsGenerating((current) => ({ ...current, [entry.id]: true }));
         try {
-            const prompts = [
-                [
-                    '次の単語や短い表現を、日本語で短く説明してください。',
-                    '- 2〜4文でまとめる',
-                    '- 曖昧な一般論ではなく、意味が伝わる説明にする',
-                    '- 似た表現との違いがあれば一言だけ添える',
-                    '',
-                    `単語: ${entry.term}`,
-                    existingExplanation && forceNewVariant
-                        ? `前回の説明: ${existingExplanation}\n前回と少し角度を変えて、より分かりやすく説明してください。`
-                        : '',
-                ].filter(Boolean).join('\n'),
-                `「${entry.term}」を日本語で2〜3文で説明してください。返答は説明文だけにしてください。`,
-                `単語: ${entry.term}\n日本語で簡潔に意味を説明してください。`,
-            ];
-
             let rawText = '';
             let lastError = null;
-            const candidatePool = primaryCandidate
-                ? [primaryCandidate, ...(fallbackCandidate ? [fallbackCandidate] : [])]
-                : [];
-            const promptLimit = Math.min(prompts.length, 2);
-            for (let attempt = 0; attempt < promptLimit; attempt += 1) {
-                const activeCandidates = attempt === 0 ? candidatePool.slice(0, 1) : candidatePool;
-                for (const candidate of activeCandidates) {
-                    try {
-                        rawText = (await requestChatText({
-                            apiKeyEntry: candidate,
-                            history: createSingleTurnHistory(prompts[attempt]),
-                            maxTokens: attempt === 0 ? 220 : 160,
-                            attempts: 1,
-                            timeoutMs: attempt === 0 ? 12000 : 9000,
-                        })).trim();
-                        if (rawText && !/^Error:/i.test(rawText) && !/^No response\.?$/i.test(rawText) && rawText.length > 4) {
-                            break;
-                        }
-                    } catch (error) {
-                        lastError = error;
-                        rawText = '';
+            const executionQueue = [
+                ...explanationAttempts.map((item) => ({ ...item, apiKeyEntry: primaryCandidate, attempts: 2 })),
+                ...apiCandidates.slice(1).flatMap((candidate) => explanationAttempts.map((item) => ({
+                    ...item,
+                    apiKeyEntry: candidate,
+                    attempts: 1,
+                }))),
+            ];
+
+            for (const attempt of executionQueue) {
+                try {
+                    rawText = normalizeExplanationText(await requestChatText({
+                        apiKeyEntry: attempt.apiKeyEntry,
+                        history: createSingleTurnHistory(attempt.userPrompt),
+                        systemPrompt: attempt.systemPrompt,
+                        maxTokens: attempt.maxTokens,
+                        attempts: attempt.attempts,
+                        timeoutMs: attempt.timeoutMs,
+                    }));
+
+                    if (isUsefulExplanationText(rawText)) {
+                        break;
                     }
+
+                    lastError = new Error('No response');
+                    rawText = '';
+                } catch (error) {
+                    lastError = error;
+                    rawText = '';
                 }
-                if (rawText && !/^Error:/i.test(rawText) && !/^No response\.?$/i.test(rawText) && rawText.length > 4) break;
             }
 
-            if (!rawText || /^Error:/i.test(rawText) || /^No response\.?$/i.test(rawText)) {
+            if (!isUsefulExplanationText(rawText)) {
                 if (lastError) throw lastError;
-                throw new Error(rawText || 'No response');
+                throw new Error('No response');
             }
 
-            upsertDictionaryEntry(entry.spaceId, {
+            upsertDictionaryEntry(entry.spaceId || MANUAL_DICTIONARY_SPACE_ID, {
                 id: entry.id,
-                spaceId: entry.spaceId,
+                spaceId: entry.spaceId || MANUAL_DICTIONARY_SPACE_ID,
                 term: entry.term,
                 variants: [{ text: rawText }],
                 forceAddVariant: forceNewVariant || getDictionaryEntryVariants(entry).length > 0,
@@ -352,8 +401,13 @@ export default function DictionaryPage() {
                 sourceRef: entry.sourceRef ?? null,
             });
             refreshEntries();
+            setStatusMessage('');
         } catch (error) {
-            setStatusMessage(`説明の生成に失敗しました: ${error.message}`);
+            const message = String(error?.message || 'No response');
+            const friendlyMessage = /^No response/i.test(message)
+                ? 'AI から本文が返りませんでした。モデルか API キーを切り替えて再試行してください。'
+                : message;
+            setStatusMessage(`説明の生成に失敗しました: ${friendlyMessage}`);
         } finally {
             setIsGenerating((current) => {
                 const next = { ...current };
@@ -388,9 +442,9 @@ export default function DictionaryPage() {
         const term = searchQuery.trim();
         if (!term) return;
 
-        upsertDictionaryEntry(currentSpaceId || 'manual', {
+        upsertDictionaryEntry(MANUAL_DICTIONARY_SPACE_ID, {
             id: crypto.randomUUID(),
-            spaceId: currentSpaceId || 'manual',
+            spaceId: MANUAL_DICTIONARY_SPACE_ID,
             term,
             explanation: '',
             collapsed: true,
@@ -404,12 +458,14 @@ export default function DictionaryPage() {
     };
 
     const openSettingsFromDictionary = () => {
-        if (!currentSpaceId) {
+        const targetSpaceId = currentSpaceId || localStorage.getItem('blueprint_dictionary_context_space') || '';
+        if (!targetSpaceId) {
             navigate('/');
             return;
         }
         sessionStorage.setItem('blueprint_open_settings', '1');
-        navigate(getSpacePath(currentSpaceId, 'chat'));
+        sessionStorage.setItem('blueprint_settings_return_path', getDictionaryPath());
+        navigate(getSpacePath(targetSpaceId, 'chat'));
     };
 
     return (

@@ -565,11 +565,19 @@ function EditorContent() {
         setShowSettings(true);
     }, [apiKeys, lang]);
 
+    const consumeSettingsReturnPath = useCallback(() => {
+        const returnPath = sessionStorage.getItem('blueprint_settings_return_path');
+        if (!returnPath) return;
+        sessionStorage.removeItem('blueprint_settings_return_path');
+        navigate(returnPath);
+    }, [navigate]);
+
     const closeSettings = useCallback(() => {
         setSettingsDraftApiKeys(cloneApiKeyEntries(apiKeys));
         setSettingsDraftLang(lang);
         setShowSettings(false);
-    }, [apiKeys, lang]);
+        consumeSettingsReturnPath();
+    }, [apiKeys, consumeSettingsReturnPath, lang]);
 
     useEffect(() => {
         if (sessionStorage.getItem('blueprint_open_settings') !== '1') return;
@@ -585,7 +593,16 @@ function EditorContent() {
             setLang(settingsDraftLang);
         }
         setShowSettings(false);
-    }, [lang, setLang, settingsDraftApiKeys, settingsDraftLang]);
+        consumeSettingsReturnPath();
+    }, [consumeSettingsReturnPath, lang, setLang, settingsDraftApiKeys, settingsDraftLang]);
+
+    const handleLogout = useCallback(() => {
+        sessionStorage.removeItem('blueprint_settings_return_path');
+        setSettingsDraftApiKeys(cloneApiKeyEntries(apiKeys));
+        setSettingsDraftLang(lang);
+        setShowSettings(false);
+        supabase.auth.signOut();
+    }, [apiKeys, lang]);
 
     useEffect(() => {
         const handleWorkspaceMetaUpdate = () => setWorkspaceMetaVersion((current) => current + 1);
@@ -1975,7 +1992,7 @@ function EditorContent() {
                             {settingsDraftApiKeys.length < 5 && <button className="btn btn-secondary btn-sm" style={{ marginTop: '0.4rem', width: '100%', height: '44px', borderRadius: '14px' }} onClick={() => setSettingsDraftApiKeys((current) => [...current, createEmptyApiKeyEntry('openai')])}>{t('settings.addKey')}</button>}
                         </div>
                         <div className="settings-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap', paddingTop: '1rem', borderTop: '1px solid rgba(116, 130, 166, 0.14)' }}>
-                            <button className="btn-text-danger" style={{ fontSize: '0.82rem' }} onClick={() => { closeSettings(); supabase.auth.signOut(); }}><LogOut size={14} style={{ display: 'inline', verticalAlign: 'text-bottom', marginRight: '4px' }} /> {t('settings.logout')}</button>
+                            <button className="btn-text-danger" style={{ fontSize: '0.82rem' }} onClick={handleLogout}><LogOut size={14} style={{ display: 'inline', verticalAlign: 'text-bottom', marginRight: '4px' }} /> {t('settings.logout')}</button>
                             <div style={{ display: 'flex', gap: '0.5rem' }}>
                                 <button className="btn btn-secondary" onClick={closeSettings}>{t('settings.cancel')}</button>
                                 <button className="btn btn-primary" onClick={handleSaveSettings}>{t('settings.save')}</button>

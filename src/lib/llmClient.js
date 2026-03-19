@@ -241,12 +241,21 @@ export async function requestChatText({
                 return extractGeminiText(data) || 'No response.';
             };
 
+            const runRequestWithFallback = async () => {
+                let text = await runRequest();
+                if (isEmptyModelResponse(text) && activeModel !== defaultModel) {
+                    activeModel = defaultModel;
+                    text = await runRequest();
+                }
+                return text;
+            };
+
             try {
-                return await runRequest();
+                return await runRequestWithFallback();
             } catch (error) {
                 if (activeModel !== defaultModel && isModelSelectionError(error?.message)) {
                     activeModel = defaultModel;
-                    return runRequest();
+                    return runRequestWithFallback();
                 }
                 throw error;
             }
@@ -282,12 +291,21 @@ export async function requestChatText({
                 return extractAnthropicText(data) || 'No response.';
             };
 
+            const runRequestWithFallback = async () => {
+                let text = await runRequest();
+                if (isEmptyModelResponse(text) && activeModel !== defaultModel) {
+                    activeModel = defaultModel;
+                    text = await runRequest();
+                }
+                return text;
+            };
+
             try {
-                return await runRequest();
+                return await runRequestWithFallback();
             } catch (error) {
                 if (activeModel !== defaultModel && isModelSelectionError(error?.message)) {
                     activeModel = defaultModel;
-                    return runRequest();
+                    return runRequestWithFallback();
                 }
                 throw error;
             }
@@ -319,12 +337,21 @@ export async function requestChatText({
             return extractOpenAICompatibleText(data) || 'No response.';
         };
 
+        const runRequestWithFallback = async () => {
+            let text = await runRequest();
+            if (isEmptyModelResponse(text) && activeModel !== defaultModel) {
+                activeModel = defaultModel;
+                text = await runRequest();
+            }
+            return text;
+        };
+
         try {
-            return await runRequest();
+            return await runRequestWithFallback();
         } catch (error) {
             if (activeModel !== defaultModel && isModelSelectionError(error?.message)) {
                 activeModel = defaultModel;
-                return runRequest();
+                return runRequestWithFallback();
             }
             throw error;
         }
