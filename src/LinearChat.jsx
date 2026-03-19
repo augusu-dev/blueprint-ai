@@ -4,6 +4,7 @@ import { supabase } from './lib/supabase';
 import { useParams } from 'react-router-dom';
 import { useLanguage } from './i18n';
 import { resolveSpaceRouteParams } from './lib/routes';
+import { createSingleTurnHistory, requestChatText, resolveModelSelection } from './lib/llmClient';
 
 export default function LinearChat({ isOpen, onClose, node, onUpdateNodeData, onBranchFromChat }) {
     const routeParams = useParams();
@@ -27,6 +28,37 @@ export default function LinearChat({ isOpen, onClose, node, onUpdateNodeData, on
         }
     }, [chatHistory, isOpen]);
 
+    const generateSpaceTitle = async (apiKeyObj, messageText) => {
+        if (!spaceId) return;
+
+        try {
+            const { key } = resolveModelSelection(apiKeyObj);
+            if (!key) return;
+            /*
+
+            const titlePrompt = `次の最初のメッセージをもとに、このスペースの短いタイトルを日本語で1つだけ作成してください。記号や引用符は不要です。\n\n${messageText}`;
+            */
+            const titlePrompt = `Create one short Japanese title for this space from the first message below. Return only the title with no quotes or extra punctuation.\n\n${messageText}`;
+            let newTitle = (await requestChatText({
+                apiKeyEntry: apiKeyObj,
+                history: createSingleTurnHistory(titlePrompt),
+                maxTokens: 50,
+            })).trim();
+
+            newTitle = newTitle.replace(/^["']|["']$/g, '');
+            if (!newTitle || newTitle.includes('Untitled')) return;
+
+            await supabase
+                .from('spaces')
+                .update({ title: newTitle })
+                .eq('id', spaceId);
+
+            window.dispatchEvent(new CustomEvent('spaceTitleUpdated'));
+        } catch (error) {
+            console.error('Title Generation Failed:', error);
+        }
+    };
+
     const handleSend = async (retryContent = null) => {
         const messageText = retryContent || input.trim();
         if (!messageText || !node) return;
@@ -47,11 +79,9 @@ export default function LinearChat({ isOpen, onClose, node, onUpdateNodeData, on
         setIsLoading(true);
 
         const apiKeyObj = node.data.apiKeys?.[node.data.selectedApiKey || 0];
-        const keyToUse = apiKeyObj?.key?.trim();
-        const provider = apiKeyObj?.provider || 'openai';
-        const userModel = apiKeyObj?.model;
+        const { key, provider } = resolveModelSelection(apiKeyObj);
 
-        if (!keyToUse) {
+        if (!key) {
             const errorMsg = { role: 'ai', content: `${t('chat.noApiKey')} (${provider})` };
             const finalHistory = [...updatedHistory, errorMsg];
             setChatHistory(finalHistory);
@@ -62,6 +92,23 @@ export default function LinearChat({ isOpen, onClose, node, onUpdateNodeData, on
 
         try {
             let reply = "";
+
+            reply = await requestChatText({
+                apiKeyEntry: apiKeyObj,
+                history: updatedHistory,
+                systemPrompt: node.data.systemPrompt || '',
+                enableGeminiSearch: true,
+            });
+
+            const finalHistory = [...updatedHistory, { role: 'ai', content: reply }];
+            setChatHistory(finalHistory);
+            onUpdateNodeData(node.id, 'chatHistory', finalHistory);
+
+            if (chatHistory.length === 0 && spaceId && !retryContent) {
+                await generateSpaceTitle(apiKeyObj, messageText);
+            }
+            return;
+            /*
 
             if (provider === 'gemini') {
                 const modelToUse = userModel || 'gemini-3.1-pro-preview';
@@ -181,6 +228,7 @@ export default function LinearChat({ isOpen, onClose, node, onUpdateNodeData, on
                     console.error("Title Generation Failed:", tErr);
                 }
             }
+            */
         } catch (err) {
             const errorMsg = { role: 'ai', content: `Error: ${err.message}` };
             const finalHistory = [...updatedHistory, errorMsg];

@@ -26,6 +26,7 @@ import {
     saveProjectImprovementVersion,
     saveProjectPlanSection,
 } from './lib/workspace';
+import { createSingleTurnHistory, requestChatText, resolveModelSelection } from './lib/llmClient';
 
 const PLAN_SECTION_PROMPTS = {
     plan: `あなたはプロジェクトの計画設計アシスタントです。ここでは目標ではなく、具体的な進め方だけを整理してください。
@@ -242,91 +243,18 @@ export default function ChatView({
 
     const callAI = async (history, systemPrompt) => {
         const apiKeyObj = apiKeys?.[node?.data?.selectedApiKey || 0];
-        const keyToUse = apiKeyObj?.key?.trim();
-        const provider = apiKeyObj?.provider || 'openai';
-        const userModel = apiKeyObj?.model;
+        const { key, provider } = resolveModelSelection(apiKeyObj);
         const fullSystemPrompt = [projectContextPrompt, systemPrompt].filter(Boolean).join('\n\n');
 
-        if (!keyToUse) return `${t('chat.noApiKey')} (${provider})`;
+        if (!key) return `${t('chat.noApiKey')} (${provider})`;
 
         try {
-            if (provider === 'gemini') {
-                const modelToUse = userModel || 'gemini-3.1-pro-preview';
-                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelToUse}:generateContent?key=${keyToUse}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        systemInstruction: fullSystemPrompt ? { parts: [{ text: fullSystemPrompt }] } : undefined,
-                        contents: history.map((message) => ({
-                            role: message.role === 'user' ? 'user' : 'model',
-                            parts: [{ text: message.content }],
-                        })),
-                        tools: [{ googleSearch: {} }],
-                    }),
-                });
-                const data = await response.json();
-                if (!response.ok) throw new Error(data.error?.message || 'Gemini Error');
-                return data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response.';
-            }
-
-            if (provider === 'anthropic') {
-                const modelToUse = userModel || 'claude-sonnet-4-6';
-                const messages = history.map((message) => ({
-                    role: message.role === 'ai' ? 'assistant' : 'user',
-                    content: message.content,
-                }));
-                const response = await fetch('https://api.anthropic.com/v1/messages', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'x-api-key': keyToUse,
-                        'anthropic-version': '2023-06-01',
-                        'anthropic-dangerously-allow-browser': 'true',
-                    },
-                    body: JSON.stringify({
-                        model: modelToUse,
-                        max_tokens: 2048,
-                        system: fullSystemPrompt || undefined,
-                        messages,
-                    }),
-                });
-                const data = await response.json();
-                if (!response.ok) throw new Error(data.error?.message || 'Anthropic Error');
-                return data.content?.[0]?.text || 'No response.';
-            }
-
-            const modelToUse = userModel || (
-                provider === 'openai'
-                    ? 'gpt-5.3-chat-latest'
-                    : provider === 'openrouter'
-                        ? 'google/gemini-3.1-pro-preview'
-                        : 'glm-4-plus'
-            );
-            const endpoint = provider === 'openrouter'
-                ? 'https://openrouter.ai/api/v1/chat/completions'
-                : provider === 'glm'
-                    ? 'https://open.bigmodel.cn/api/paas/v4/chat/completions'
-                    : 'https://api.openai.com/v1/chat/completions';
-            const messages = [];
-            if (fullSystemPrompt) messages.push({ role: 'system', content: fullSystemPrompt });
-            history.forEach((message) => {
-                messages.push({
-                    role: message.role === 'ai' ? 'assistant' : 'user',
-                    content: message.content,
-                });
+            return await requestChatText({
+                apiKeyEntry: apiKeyObj,
+                history,
+                systemPrompt: fullSystemPrompt,
+                enableGeminiSearch: true,
             });
-
-            const response = await fetch(endpoint, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    Authorization: `Bearer ${keyToUse}`,
-                },
-                body: JSON.stringify({ model: modelToUse, messages }),
-            });
-            const data = await response.json();
-            if (!response.ok) throw new Error(data.error?.message || 'LLM Error');
-            return data.choices?.[0]?.message?.content || 'No response.';
         } catch (error) {
             return `Error: ${error.message}`;
         }
@@ -337,68 +265,21 @@ export default function ChatView({
 
         try {
             const apiKeyObj = apiKeys?.[node?.data?.selectedApiKey || 0];
-            const keyToUse = apiKeyObj?.key?.trim();
-            const provider = apiKeyObj?.provider || 'openai';
-            const userModel = apiKeyObj?.model;
-            if (!keyToUse) return;
+            const { key } = resolveModelSelection(apiKeyObj);
+            if (!key) return;
+            /*
 
             const titlePrompt = `次の最初のメッセージ「${messageText}」をもとに、このワークスペースのタイトルを10文字以内で1つだけ返してください。説明は不要です。`;
-            let newTitle = '';
-
-            if (provider === 'gemini') {
-                const modelToUse = userModel || 'gemini-3.1-pro-preview';
-                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelToUse}:generateContent?key=${keyToUse}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: titlePrompt }] }] }),
-                });
-                const data = await response.json();
-                newTitle = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
-            } else if (provider === 'anthropic') {
-                const modelToUse = userModel || 'claude-sonnet-4-6';
-                const response = await fetch('https://api.anthropic.com/v1/messages', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'x-api-key': keyToUse,
-                        'anthropic-version': '2023-06-01',
-                        'anthropic-dangerously-allow-browser': 'true',
-                    },
-                    body: JSON.stringify({
-                        model: modelToUse,
-                        max_tokens: 50,
-                        messages: [{ role: 'user', content: titlePrompt }],
-                    }),
-                });
-                const data = await response.json();
-                newTitle = data.content?.[0]?.text?.trim() || '';
-            } else {
-                const modelToUse = userModel || (
-                    provider === 'openai'
-                        ? 'gpt-5.3-chat-latest'
-                        : provider === 'openrouter'
-                            ? 'google/gemini-3.1-pro-preview'
-                            : 'glm-4-plus'
-                );
-                const endpoint = provider === 'openrouter'
-                    ? 'https://openrouter.ai/api/v1/chat/completions'
-                    : provider === 'glm'
-                        ? 'https://open.bigmodel.cn/api/paas/v4/chat/completions'
-                        : 'https://api.openai.com/v1/chat/completions';
-                const response = await fetch(endpoint, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        Authorization: `Bearer ${keyToUse}`,
-                    },
-                    body: JSON.stringify({
-                        model: modelToUse,
-                        messages: [{ role: 'user', content: titlePrompt }],
-                    }),
-                });
-                const data = await response.json();
-                newTitle = data.choices?.[0]?.message?.content?.trim() || '';
-            }
+            */
+            /*
+            const titlePrompt = `次の最初のメッセージをもとに、このスペースの短いタイトルを日本語で1つだけ作成してください。記号や引用符は不要です。\n\n${messageText}`;
+            */
+            const titlePrompt = `Create one short Japanese title for this space from the first message below. Return only the title with no quotes or extra punctuation.\n\n${messageText}`;
+            let newTitle = (await requestChatText({
+                apiKeyEntry: apiKeyObj,
+                history: createSingleTurnHistory(titlePrompt),
+                maxTokens: 50,
+            })).trim();
 
             newTitle = newTitle.replace(/^["']|["']$/g, '');
             if (!newTitle || newTitle.includes('Untitled')) return;

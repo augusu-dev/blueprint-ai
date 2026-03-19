@@ -27,6 +27,12 @@ import DeleteEdge from './nodes/DeleteEdge';
 import { DEFAULT_SPACE_MODE, getSpacePath, isSpaceMode, resolveSpaceRouteParams } from './lib/routes';
 import { createDefaultMapState, createInitialEdges, createInitialNodes, normalizeMapState } from './lib/space';
 import {
+    createEmptyApiKeyEntry,
+    getModelOptions,
+    getProviderOptions,
+    normalizeApiKeyEntry,
+} from './lib/aiCatalog';
+import {
     getProjectContextPrompt,
     loadWorkspaceMeta,
     syncWorkspaceProjectFromSpace,
@@ -388,21 +394,13 @@ function EditorContent() {
             try {
                 const parsed = JSON.parse(saved);
                 if (Array.isArray(parsed) && parsed.length > 0) {
-                    return parsed.map(item => {
-                        if (typeof item === 'string') {
-                            let provider = 'openai';
-                            if (item.startsWith('AIza')) provider = 'gemini';
-                            else if (item.startsWith('sk-ant')) provider = 'anthropic';
-                            return { key: item, provider, model: '' };
-                        }
-                        return { ...item, model: item.model || '' };
-                    });
+                    return parsed.map((item) => normalizeApiKeyEntry(item));
                 }
             } catch {
                 // Ignore invalid locally stored API keys.
             }
         }
-        return [{ key: '', provider: 'openai', model: '' }];
+        return [createEmptyApiKeyEntry('openai')];
     });
 
     useEffect(() => {
@@ -1327,7 +1325,13 @@ function EditorContent() {
                                 <p style={{ fontSize: '0.8rem', margin: 0, fontWeight: 400, lineHeight: 1.5 }}>🔒 <strong>{t('settings.securityLabel')}</strong> {t('settings.security')}</p>
                             </div>
                             <p className="help-text" style={{ marginBottom: '1rem' }}>{t('settings.apiHelp')}</p>
-                            {apiKeys.map((item, index) => (
+                            {apiKeys.map((item, index) => {
+                                const modelOptions = getModelOptions(item.provider);
+                                const selectedPresetModel = modelOptions.some((modelOption) => modelOption.value === item.model)
+                                    ? item.model
+                                    : '';
+
+                                return (
                                 <div className="form-group glass-panel" key={index} style={{ marginBottom: '0.75rem', padding: '0.65rem', borderRadius: '8px' }}>
                                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
                                         <label style={{ marginBottom: 0, fontWeight: 500, fontSize: '0.82rem' }}>{t('settings.apiKey')} {index + 1} {index === 0 && t('settings.default')}</label>
@@ -1336,33 +1340,60 @@ function EditorContent() {
                                     <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.4rem' }}>
                                         <div style={{ flex: 1 }}>
                                             <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{t('settings.provider')}</label>
-                                            <select className="node-input" style={{ padding: '0.4rem', height: '34px' }} value={item.provider} onChange={(e) => { const nk = [...apiKeys]; nk[index] = { ...nk[index], provider: e.target.value }; setApiKeys(nk); }}>
-                                                <option value="openai">OpenAI</option>
-                                                <option value="gemini">Google Gemini</option>
-                                                <option value="anthropic">Anthropic (Claude)</option>
-                                                <option value="openrouter">OpenRouter</option>
-                                                <option value="glm">GLM (ZhipuAI)</option>
+                                            <select
+                                                className="node-input"
+                                                style={{ padding: '0.4rem', height: '34px' }}
+                                                value={item.provider}
+                                                onChange={(e) => {
+                                                    const nk = [...apiKeys];
+                                                    nk[index] = { ...nk[index], provider: e.target.value, model: '' };
+                                                    setApiKeys(nk);
+                                                }}
+                                            >
+                                                {getProviderOptions().map((providerOption) => (
+                                                    <option key={providerOption.id} value={providerOption.id}>
+                                                        {providerOption.label}
+                                                    </option>
+                                                ))}
                                             </select>
                                         </div>
                                         <div style={{ flex: 1 }}>
                                             <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{t('settings.model')}</label>
-                                            <select className="node-input" style={{ padding: '0.4rem', height: '34px' }} value={item.model || ''} onChange={(e) => { const nk = [...apiKeys]; nk[index] = { ...nk[index], model: e.target.value }; setApiKeys(nk); }}>
+                                            <select className="node-input" style={{ padding: '0.4rem', height: '34px' }} value={selectedPresetModel} onChange={(e) => { const nk = [...apiKeys]; nk[index] = { ...nk[index], model: e.target.value }; setApiKeys(nk); }}>
                                                 <option value="">{t('settings.modelDefault')}</option>
-                                                {item.provider === 'openai' && <><option value="gpt-5.3-chat-latest">gpt-5.3-chat-latest</option><option value="gpt-5">gpt-5</option><option value="gpt-4o">gpt-4o</option><option value="o4-mini">o4-mini</option><option value="o3-mini">o3-mini</option></>}
-                                                {item.provider === 'gemini' && <><option value="gemini-3.1-pro-preview">gemini-3.1-pro-preview</option><option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite</option><option value="gemini-3-flash-preview">gemini-3-flash-preview</option><option value="gemini-3-pro-preview">gemini-3-pro-preview</option><option value="gemini-2.5-pro">gemini-2.5-pro</option><option value="gemini-2.5-flash">gemini-2.5-flash</option></>}
-                                                {item.provider === 'anthropic' && <><option value="claude-opus-4-6">Claude Opus 4.6</option><option value="claude-sonnet-4-6">Claude Sonnet 4.6</option><option value="claude-sonnet-4-5">Claude Sonnet 4.5</option><option value="claude-haiku-4-5-20251015">Claude Haiku 4.5</option></>}
-                                                {item.provider === 'openrouter' && <><option value="google/gemini-3.1-pro-preview">Gemini 3.1 Pro</option><option value="google/gemini-3-flash-preview">Gemini 3 Flash</option><option value="anthropic/claude-sonnet-4.6">Claude Sonnet 4.6</option><option value="openai/gpt-5.3-chat-latest">GPT-5.3 Chat</option><option value="openai/o4-mini">o4-mini</option></>}
-                                                {item.provider === 'glm' && <><option value="glm-4-plus">glm-4-plus</option><option value="glm-4v-plus">glm-4v-plus</option></>}
+                                                {modelOptions.map((modelOption) => (
+                                                    <option key={modelOption.value} value={modelOption.value}>
+                                                        {modelOption.label}
+                                                    </option>
+                                                ))}
                                             </select>
                                         </div>
+                                    </div>
+                                    <div style={{ marginBottom: '0.4rem' }}>
+                                        <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Model ID</label>
+                                        <input
+                                            type="text"
+                                            placeholder="gpt-5.2 / gemini-2.5-pro / claude-sonnet-4-20250514"
+                                            value={item.model || ''}
+                                            onChange={(e) => { const nk = [...apiKeys]; nk[index] = { ...nk[index], model: e.target.value.trim() }; setApiKeys(nk); }}
+                                        />
                                     </div>
                                     <div>
                                         <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{t('settings.secretKey')}</label>
                                         <input type="password" placeholder={`${item.provider}${t('settings.secretPlaceholder')}`} value={item.key || ''} onChange={(e) => { const nk = [...apiKeys]; nk[index] = { ...nk[index], key: e.target.value }; setApiKeys(nk); }} />
                                     </div>
                                 </div>
-                            ))}
-                            {apiKeys.length < 5 && <button className="btn btn-secondary btn-sm" style={{ marginTop: '0.4rem', width: '100%' }} onClick={() => setApiKeys([...apiKeys, { key: '', provider: 'openai', model: '' }])}>{t('settings.addKey')}</button>}
+                                );
+                            })}
+                            {/*
+                            <p className="help-text" style={{ marginTop: '-0.25rem', marginBottom: '0.9rem' }}>
+                                ChatGPT のサブスク課金と OpenAI API の課金は別管理です。このアプリでは API 対応の認証情報のみ使えます。
+                            </p>
+                            */}
+                            <p className="help-text" style={{ marginTop: '-0.25rem', marginBottom: '0.9rem' }}>
+                                ChatGPT のサブスク課金と OpenAI API の課金は別です。このアプリでは API キーで使うプロバイダーのみ利用でき、リストにないモデルIDも直接入力できます。
+                            </p>
+                            {apiKeys.length < 5 && <button className="btn btn-secondary btn-sm" style={{ marginTop: '0.4rem', width: '100%' }} onClick={() => setApiKeys([...apiKeys, createEmptyApiKeyEntry('openai')])}>{t('settings.addKey')}</button>}
                         </div>
                         <div className="settings-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <button className="btn-text-danger" style={{ fontSize: '0.82rem' }} onClick={() => { setShowSettings(false); supabase.auth.signOut(); }}><LogOut size={14} style={{ display: 'inline', verticalAlign: 'text-bottom', marginRight: '4px' }} /> {t('settings.logout')}</button>

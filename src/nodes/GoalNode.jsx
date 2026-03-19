@@ -8,6 +8,7 @@ import {
     hasInteractiveSelection,
     parseInteractiveContent,
 } from '../lib/interactiveContent';
+import { requestChatText, resolveModelSelection } from '../lib/llmClient';
 
 const GOAL_SYSTEM_PROMPT = `あなたは Plan 設計アシスタントです。
 このセッションでは、目標、計画、報酬設計、改善ポイントを短い対話で整理してください。
@@ -84,13 +85,18 @@ export default function GoalNode({ data, id }) {
 
     const callAI = async (history) => {
         const apiKeyObj = apiKeys?.[selectedApiKey || 0];
-        const keyToUse = apiKeyObj?.key?.trim();
-        const provider = apiKeyObj?.provider || 'openai';
-        const userModel = apiKeyObj?.model;
+        const { key, provider } = resolveModelSelection(apiKeyObj);
 
-        if (!keyToUse) return t('chat.noApiKey');
+        if (!key) return `${t('chat.noApiKey')} (${provider})`;
 
         try {
+            return await requestChatText({
+                apiKeyEntry: apiKeyObj,
+                history,
+                systemPrompt: GOAL_SYSTEM_PROMPT,
+            });
+            /*
+
             if (provider === 'gemini') {
                 const modelToUse = userModel || 'gemini-3.1-pro-preview';
                 const contents = [
@@ -177,6 +183,7 @@ export default function GoalNode({ data, id }) {
             const resData = await response.json();
             if (!response.ok) throw new Error(resData.error?.message || 'LLM Error');
             return resData.choices?.[0]?.message?.content || 'No response.';
+            */
         } catch (error) {
             return `Error: ${error.message}`;
         }
