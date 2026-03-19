@@ -1883,7 +1883,7 @@ function EditorContent() {
                             <div className="glass-panel" style={{ padding: '0.9rem 1rem', marginBottom: '1.1rem', borderRadius: '18px', background: 'linear-gradient(135deg, rgba(108, 140, 255, 0.12) 0%, rgba(96,165,250,0.08) 100%)', border: '1px solid rgba(108, 140, 255, 0.18)', boxShadow: '0 16px 32px rgba(56, 84, 154, 0.10)' }}>
                                 <p style={{ fontSize: '0.82rem', margin: 0, fontWeight: 400, lineHeight: 1.7, color: '#34425e' }}><strong>{t('settings.securityLabel')}</strong> API keys stay in localStorage only, and nothing changes until you press Save.</p>
                             </div>
-                            <p className="help-text" style={{ marginBottom: '1rem', lineHeight: 1.7 }}>Updated provider catalog: OpenAI, Gemini, Anthropic, OpenRouter, DeepSeek, Qwen, and GLM. OpenRouter loads a live model list, and every provider also supports a manual model ID.</p>
+                            <p className="help-text" style={{ marginBottom: '1rem', lineHeight: 1.7 }}>Updated provider catalog: OpenAI, Gemini, Anthropic, OpenRouter, DeepSeek, Qwen, and GLM. OpenRouter is limited to 15 curated high-usage models, and every provider also supports a manual model ID.</p>
                             {settingsDraftApiKeys.map((item, index) => {
                                 const modelOptions = getSettingsModelOptions(item.provider);
                                 const selectedPresetModel = modelOptions.some((modelOption) => modelOption.value === item.model)
@@ -1930,7 +1930,7 @@ function EditorContent() {
                                             </select>
                                             {item.provider === 'openrouter' && (
                                                 <div style={{ marginTop: '0.38rem', fontSize: '0.72rem', color: '#7a8194' }}>
-                                                    {isLoadingOpenRouterModels ? 'Loading OpenRouter live models...' : `${modelOptions.length} OpenRouter model IDs available.`}
+                                                    {isLoadingOpenRouterModels ? 'Loading curated OpenRouter models...' : `${modelOptions.length} curated OpenRouter models available.`}
                                                 </div>
                                             )}
                                         </div>

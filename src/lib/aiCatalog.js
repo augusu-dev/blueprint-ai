@@ -52,15 +52,21 @@ const PROVIDER_DEFINITIONS = {
         defaultModel: 'openrouter/auto',
         models: [
             { value: 'openrouter/auto', label: 'OpenRouter Auto' },
-            { value: 'openai/gpt-5.4', label: 'OpenAI GPT-5.4' },
-            { value: 'openai/gpt-5.4-mini', label: 'OpenAI GPT-5.4 Mini' },
-            { value: 'anthropic/claude-sonnet-4.6', label: 'Anthropic Claude Sonnet 4.6' },
-            { value: 'anthropic/claude-opus-4.6', label: 'Anthropic Claude Opus 4.6' },
-            { value: 'google/gemini-3.1-pro-preview', label: 'Google Gemini 3.1 Pro Preview' },
-            { value: 'google/gemini-3.1-flash-lite-preview', label: 'Google Gemini 3.1 Flash-Lite Preview' },
+            { value: 'minimax/minimax-m2.5', label: 'MiniMax M2.5' },
+            { value: 'stepfun/step-3.5-flash', label: 'Step 3.5 Flash' },
             { value: 'deepseek/deepseek-v3.2', label: 'DeepSeek V3.2' },
+            { value: 'google/gemini-3-flash-preview', label: 'Gemini 3 Flash Preview' },
+            { value: 'anthropic/claude-sonnet-4.6', label: 'Claude Sonnet 4.6' },
+            { value: 'anthropic/claude-opus-4.6', label: 'Claude Opus 4.6' },
+            { value: 'google/gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
+            { value: 'moonshotai/kimi-k2.5', label: 'Kimi K2.5' },
+            { value: 'x-ai/grok-4.1-fast', label: 'Grok 4.1 Fast' },
+            { value: 'openai/gpt-5.4', label: 'GPT-5.4' },
+            { value: 'openai/gpt-5.4-mini', label: 'GPT-5.4 Mini' },
             { value: 'qwen/qwen3-max-thinking', label: 'Qwen3 Max Thinking' },
             { value: 'z-ai/glm-5', label: 'GLM-5' },
+            { value: 'minimax/minimax-m2.7', label: 'MiniMax M2.7' },
+            { value: 'google/gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro Preview' },
         ],
     },
     deepseek: {
@@ -99,10 +105,7 @@ const PROVIDER_DEFINITIONS = {
 };
 
 const PROVIDER_ORDER = ['openai', 'gemini', 'anthropic', 'openrouter', 'deepseek', 'qwen', 'glm'];
-const OPENROUTER_MODELS_URL = 'https://openrouter.ai/api/v1/models';
-
 let openRouterModelCache = null;
-let openRouterModelPromise = null;
 
 function toUniqueModelList(models = []) {
     const seen = new Set();
@@ -189,31 +192,7 @@ export async function fetchOpenRouterModels({ signal } = {}) {
     if (openRouterModelCache) {
         return openRouterModelCache;
     }
-
-    if (!openRouterModelPromise) {
-        openRouterModelPromise = fetch(OPENROUTER_MODELS_URL, { signal })
-            .then(async (response) => {
-                if (!response.ok) {
-                    throw new Error('Failed to load OpenRouter models.');
-                }
-                const data = await response.json();
-                const dynamicModels = Array.isArray(data?.data)
-                    ? data.data.map((model) => ({
-                        value: model.id,
-                        label: model.name || model.id,
-                    }))
-                    : [];
-
-                openRouterModelCache = toUniqueModelList([
-                    ...getProviderDefinition('openrouter').models,
-                    ...dynamicModels,
-                ]);
-                return openRouterModelCache;
-            })
-            .finally(() => {
-                openRouterModelPromise = null;
-            });
-    }
-
-    return openRouterModelPromise;
+    void signal;
+    openRouterModelCache = toUniqueModelList(getProviderDefinition('openrouter').models);
+    return openRouterModelCache;
 }

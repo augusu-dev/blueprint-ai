@@ -460,6 +460,7 @@ export default function ChatView({
     };
 
     const chatTree = useMemo(() => analyzeChatHistory(chatHistory), [chatHistory]);
+    const isWorkflowMode = chatTree.rootNodes.length > 0;
     const lastOrderedNode = chatTree.orderedNodes[chatTree.orderedNodes.length - 1] || null;
     const activePromptNodeId = branchTargetNodeId || focusedChatNodeId || lastOrderedNode?.id || null;
     const branchTargetLabel = branchTargetNodeId
@@ -1051,8 +1052,6 @@ export default function ChatView({
 
         return segments;
     };
-
-    const isWorkflowMode = chatTree.rootNodes.length > 0;
 
     const isInteractiveDragTarget = (target) => (
         target instanceof Element
