@@ -1741,6 +1741,7 @@ function EditorContent() {
                         onNavigateToBranch={onNavigateToBranch}
                         projectContextPrompt={projectContextPrompt}
                         spaceId={spaceId}
+                        spaceTitle={spaceTitle}
                     />
                 ) : currentMode === 'map' ? (
                     <MapView

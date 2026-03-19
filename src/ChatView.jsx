@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+﻿import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
     Bot,
     BookOpen,
@@ -124,10 +124,177 @@ function normalizeAiMessage(message) {
 }
 
 function normalizeHistory(history) {
+    let previousUserNodeId = null;
+
     return (history || []).map((message) => {
         const baseMessage = ensureMessageId(message);
-        return baseMessage?.role === 'ai' ? normalizeAiMessage(baseMessage) : baseMessage;
+        if (baseMessage?.role === 'user') {
+            const normalizedUser = {
+                ...baseMessage,
+                chatNodeId: typeof baseMessage.chatNodeId === 'string' && baseMessage.chatNodeId
+                    ? baseMessage.chatNodeId
+                    : baseMessage.id,
+                chatParentId: typeof baseMessage.chatParentId === 'string' ? baseMessage.chatParentId : previousUserNodeId,
+                chatBranchKind: baseMessage.chatBranchKind === 'branch' ? 'branch' : 'send',
+            };
+            previousUserNodeId = normalizedUser.chatNodeId;
+            return normalizedUser;
+        }
+
+        if (baseMessage?.role === 'ai') {
+            return {
+                ...normalizeAiMessage(baseMessage),
+                chatNodeId: typeof baseMessage.chatNodeId === 'string' && baseMessage.chatNodeId
+                    ? baseMessage.chatNodeId
+                    : previousUserNodeId || baseMessage.id,
+            };
+        }
+
+        return baseMessage;
     });
+}
+
+function indexToBranchLetter(index) {
+    let value = index;
+    let label = '';
+    do {
+        label = String.fromCharCode(97 + (value % 26)) + label;
+        value = Math.floor(value / 26) - 1;
+    } while (value >= 0);
+    return label;
+}
+
+function analyzeChatHistory(history) {
+    const normalizedHistory = normalizeHistory(history);
+    const nodeById = new Map();
+    const orderedNodes = [];
+    let lastUserNode = null;
+
+    normalizedHistory.forEach((message, index) => {
+        if (message.role === 'user') {
+            const nodeId = message.chatNodeId || message.id;
+            const parentId = typeof message.chatParentId === 'string' ? message.chatParentId : lastUserNode?.id || null;
+            const branchKind = message.chatBranchKind === 'branch' ? 'branch' : 'send';
+            const node = {
+                id: nodeId,
+                parentId,
+                branchKind,
+                order: orderedNodes.length,
+                userIndex: index,
+                replyIndex: null,
+                userMessage: message,
+                replyMessage: null,
+                children: [],
+                numericStep: 0,
+                displayLabel: '',
+                branchLetter: '',
+            };
+
+            nodeById.set(nodeId, node);
+            orderedNodes.push(node);
+            lastUserNode = node;
+            return;
+        }
+
+        if (message.role === 'ai') {
+            const attachId = message.chatNodeId || lastUserNode?.id || null;
+            const targetNode = attachId ? nodeById.get(attachId) : null;
+            if (targetNode && !targetNode.replyMessage) {
+                targetNode.replyIndex = index;
+                targetNode.replyMessage = message;
+            }
+        }
+    });
+
+    orderedNodes.forEach((node) => {
+        const parent = node.parentId ? nodeById.get(node.parentId) : null;
+        if (parent) {
+            parent.children.push(node);
+        }
+    });
+
+    orderedNodes.forEach((node) => {
+        node.children.sort((left, right) => left.order - right.order);
+    });
+
+    const assignLabels = (node, numericStep) => {
+        node.numericStep = numericStep;
+        node.displayLabel = node.parentId && node.branchKind === 'branch'
+            ? `${numericStep}${node.branchLetter || ''}`
+            : String(numericStep);
+
+        const sendChildren = node.children.filter((child) => child.branchKind !== 'branch');
+        const branchChildren = node.children.filter((child) => child.branchKind === 'branch');
+        const primarySendChild = sendChildren[0] || null;
+
+        if (primarySendChild) {
+            assignLabels(primarySendChild, numericStep + 1);
+        }
+
+        branchChildren.forEach((child, index) => {
+            child.branchLetter = indexToBranchLetter(index);
+            assignLabels(child, numericStep);
+        });
+
+        sendChildren.slice(1).forEach((child, index) => {
+            child.branchKind = 'branch';
+            child.branchLetter = indexToBranchLetter(branchChildren.length + index);
+            assignLabels(child, numericStep);
+        });
+    };
+
+    const rootNodes = orderedNodes.filter((node) => !node.parentId || !nodeById.has(node.parentId));
+    rootNodes.forEach((node, index) => {
+        node.branchKind = node.branchKind || 'send';
+        node.branchLetter = '';
+        assignLabels(node, index + 1);
+    });
+
+    return {
+        nodeById,
+        orderedNodes,
+        rootNodes,
+    };
+}
+
+function buildHistoryPath(history, targetNodeId) {
+    const tree = analyzeChatHistory(history);
+    const targetNode = tree.nodeById.get(targetNodeId);
+    if (!targetNode) return [];
+
+    const chain = [];
+    let current = targetNode;
+    while (current) {
+        chain.unshift(current);
+        current = current.parentId ? tree.nodeById.get(current.parentId) : null;
+    }
+
+    const pathHistory = [];
+    chain.forEach((node) => {
+        pathHistory.push(node.userMessage);
+        if (node.replyMessage) {
+            pathHistory.push(node.replyMessage);
+        }
+    });
+
+    return pathHistory;
+}
+
+function collectSubtreeNodeIds(history, targetNodeId) {
+    const tree = analyzeChatHistory(history);
+    const targetNode = tree.nodeById.get(targetNodeId);
+    if (!targetNode) return new Set();
+
+    const collected = new Set();
+    const queue = [targetNode];
+    while (queue.length > 0) {
+        const current = queue.shift();
+        if (!current || collected.has(current.id)) continue;
+        collected.add(current.id);
+        current.children.forEach((child) => queue.push(child));
+    }
+
+    return collected;
 }
 
 function getActiveResponseVariant(message) {
@@ -189,6 +356,7 @@ export default function ChatView({
     onNavigateToBranch,
     projectContextPrompt,
     spaceId,
+    spaceTitle,
 }) {
     const { t } = useLanguage();
     const navigate = useNavigate();
@@ -205,7 +373,9 @@ export default function ChatView({
     const [workspaceMetaVersion, setWorkspaceMetaVersion] = useState(0);
     const [activePlanSection, setActivePlanSection] = useState('goal');
     const [selectedImprovementVersionId, setSelectedImprovementVersionId] = useState(null);
+    const [branchTargetNodeId, setBranchTargetNodeId] = useState(null);
     const messagesEndRef = useRef(null);
+    const inputRef = useRef(null);
     const messageContentRefs = useRef({});
     const workflowRailRef = useRef(null);
     const workflowDragStateRef = useRef({
@@ -242,6 +412,17 @@ export default function ChatView({
             onUpdateNodeData(node.id, 'chatHistory', normalized);
         }
     };
+
+    const chatTree = useMemo(() => analyzeChatHistory(chatHistory), [chatHistory]);
+    const branchTargetLabel = branchTargetNodeId
+        ? chatTree.nodeById.get(branchTargetNodeId)?.displayLabel || ''
+        : '';
+
+    useEffect(() => {
+        if (branchTargetNodeId && !chatTree.nodeById.has(branchTargetNodeId)) {
+            setBranchTargetNodeId(null);
+        }
+    }, [branchTargetNodeId, chatTree]);
 
     const closeInlineOverlay = () => {
         setSelectionDraft(null);
@@ -478,33 +659,55 @@ export default function ChatView({
     const handleQueuePrompt = () => {
         const messageText = input.trim();
         if (!messageText || !node) return;
-        const nextHistory = normalizeHistory([...chatHistory, { role: 'user', content: messageText }]);
+        const selectedBranchNode = branchTargetNodeId ? chatTree.nodeById.get(branchTargetNodeId) || null : null;
+        const lastUserNode = [...chatTree.orderedNodes].slice(-1)[0] || null;
+        const parentNodeId = selectedBranchNode?.id || lastUserNode?.id || null;
+        const branchKind = selectedBranchNode ? 'branch' : 'send';
+        const nextHistory = normalizeHistory([
+            ...chatHistory,
+            {
+                role: 'user',
+                content: messageText,
+                chatNodeId: crypto.randomUUID(),
+                chatParentId: parentNodeId,
+                chatBranchKind: branchKind,
+            },
+        ]);
 
         setInput('');
+        setBranchTargetNodeId(null);
         persistChatHistory(nextHistory);
     };
 
-    const handleDeletePrompt = (messageIndex) => {
-        const targetMessage = chatHistory[messageIndex];
-        if (!targetMessage || targetMessage.role !== 'user') return;
+    const handleDeletePrompt = (nodeId) => {
+        if (!nodeId) return;
 
-        const nextMessage = chatHistory[messageIndex + 1];
-        const removeCount = nextMessage?.role === 'ai' ? 2 : 1;
+        const subtreeIds = collectSubtreeNodeIds(chatHistory, nodeId);
+        if (subtreeIds.size === 0) return;
+
         const nextHistory = normalizeHistory(
-            chatHistory.filter((_, index) => index < messageIndex || index >= messageIndex + removeCount),
+            chatHistory.filter((message) => {
+                if (!message || typeof message !== 'object') return true;
+                const messageNodeId = message.chatNodeId || message.id || null;
+                return !subtreeIds.has(messageNodeId);
+            }),
         );
 
-        if (generatingPromptIndex !== null) {
-            if (generatingPromptIndex === messageIndex) {
-                setGeneratingPromptIndex(null);
-            } else if (generatingPromptIndex > messageIndex) {
-                setGeneratingPromptIndex(Math.max(0, generatingPromptIndex - removeCount));
-            }
-        }
-
+        setGeneratingPromptIndex(null);
         setSelectionDraft(null);
         setActiveExplanation(null);
+        if (branchTargetNodeId && subtreeIds.has(branchTargetNodeId)) {
+            setBranchTargetNodeId(null);
+        }
         persistChatHistory(nextHistory);
+    };
+
+    const handleSelectBranchTarget = (nodeId) => {
+        if (!nodeId) return;
+        setBranchTargetNodeId((current) => (current === nodeId ? null : nodeId));
+        window.setTimeout(() => {
+            inputRef.current?.focus?.();
+        }, 0);
     };
 
     const handleCopy = async (content, idx) => {
@@ -534,20 +737,21 @@ export default function ChatView({
         }
     };
 
-    const handleGeneratePrompt = async (userIndex, options = {}) => {
+    const handleGeneratePrompt = async (nodeId, options = {}) => {
         if (!node || isLoading) return;
 
-        const userMessage = chatHistory[userIndex];
-        if (!userMessage || userMessage.role !== 'user') return;
+        const treeNode = chatTree.nodeById.get(nodeId);
+        if (!treeNode) return;
 
-        const existingReplyIndex = chatHistory[userIndex + 1]?.role === 'ai' ? userIndex + 1 : -1;
+        const userMessage = treeNode.userMessage;
+        const existingReplyIndex = chatHistory.findIndex((message) => message.role === 'ai' && (message.chatNodeId === nodeId));
         const shouldAppendVariant = Boolean(options.appendVariant && existingReplyIndex >= 0);
         const wasFirstGeneratedReply = !chatHistory.some((message) => message.role === 'ai');
-        const historyForReply = normalizeHistory(chatHistory.slice(0, userIndex + 1));
+        const historyForReply = buildHistoryPath(chatHistory, nodeId);
 
         setSelectionDraft(null);
         setActiveExplanation(null);
-        setGeneratingPromptIndex(userIndex);
+        setGeneratingPromptIndex(treeNode.userIndex);
         setIsLoading(true);
 
         try {
@@ -565,10 +769,10 @@ export default function ChatView({
                     );
             } else {
                 nextHistory.splice(
-                    userIndex + 1,
+                    treeNode.userIndex + 1,
                     0,
                     syncAiMessage(
-                        { role: 'ai', collapsed: false },
+                        { role: 'ai', collapsed: false, chatNodeId: nodeId, chatParentId: treeNode.parentId || null },
                         [createResponseVariant(parsedReply)],
                         0,
                     ),
@@ -591,16 +795,10 @@ export default function ChatView({
         const targetMessage = chatHistory[idx];
         if (!targetMessage || targetMessage.role !== 'ai') return;
 
-        let userIndex = -1;
-        for (let i = idx - 1; i >= 0; i -= 1) {
-            if (chatHistory[i].role === 'user') {
-                userIndex = i;
-                break;
-            }
-        }
-        if (userIndex < 0) return;
+        const targetNodeId = targetMessage.chatNodeId || null;
+        if (!targetNodeId) return;
 
-        await handleGeneratePrompt(userIndex, { appendVariant: true });
+        await handleGeneratePrompt(targetNodeId, { appendVariant: true });
     };
 
     const handleSwitchResponseVariant = (idx, direction) => {
@@ -718,38 +916,7 @@ export default function ChatView({
         return segments;
     };
 
-    const conversationColumns = useMemo(() => {
-        const columns = [];
-
-        for (let index = 0; index < chatHistory.length; index += 1) {
-            const message = chatHistory[index];
-            if (!message) continue;
-
-            if (message.role === 'user') {
-                const replyIndex = chatHistory[index + 1]?.role === 'ai' ? index + 1 : null;
-                columns.push({
-                    key: message.id || `user-${index}`,
-                    userIndex: index,
-                    replyIndex,
-                });
-                if (replyIndex !== null) {
-                    index += 1;
-                }
-                continue;
-            }
-
-            columns.push({
-                key: message.id || `ai-${index}`,
-                userIndex: null,
-                replyIndex: index,
-            });
-        }
-
-        return columns;
-    }, [chatHistory]);
-
-    const workflowPromptCount = conversationColumns.filter((column) => column.userIndex !== null).length;
-    const isWorkflowMode = workflowPromptCount >= 2;
+    const isWorkflowMode = chatTree.rootNodes.length > 0;
 
     const isInteractiveDragTarget = (target) => (
         target instanceof Element
@@ -1001,14 +1168,15 @@ export default function ChatView({
         fontSize: 0,
         lineHeight: 0,
     };
-    const generatePromptButtonStyle = {
+    const promptTriggerButtonStyle = {
         ...iconActionStyle,
-        width: '120px',
-        padding: '0 0.9rem',
-        gap: '0.35rem',
-        fontSize: '0.78rem',
-        lineHeight: 1,
-        fontWeight: 600,
+        color: '#5e67a2',
+        background: 'rgba(255,255,255,0.92)',
+    };
+    const branchTriggerButtonStyle = {
+        ...iconActionStyle,
+        color: '#5e67a2',
+        background: 'rgba(255,255,255,0.92)',
     };
     const avatarColumnStyle = {
         display: 'flex',
@@ -1036,12 +1204,6 @@ export default function ChatView({
         alignItems: 'center',
         gap: '0.28rem',
         flexWrap: 'wrap',
-    };
-    const counterTextStyle = {
-        fontSize: 0,
-        color: '#8b91a1',
-        minWidth: '8px',
-        textAlign: 'center',
     };
     const cardActionStyle = {
         padding: '0.42rem 0.82rem',
@@ -1076,10 +1238,9 @@ export default function ChatView({
         lineHeight: 1.78,
         border: '1px solid rgba(34, 37, 47, 0.06)',
     };
-    const getWorkflowColumnOffset = (columnIndex) => Math.min(columnIndex * 52, 156);
-    const renderConversationColumn = (column, columnIndex) => {
-        const userMessage = column.userIndex !== null ? chatHistory[column.userIndex] : null;
-        const replyMessage = column.replyIndex !== null ? normalizeAiMessage(chatHistory[column.replyIndex]) : null;
+    const renderConversationColumn = (treeNode) => {
+        const userMessage = treeNode.userIndex !== null ? chatHistory[treeNode.userIndex] : null;
+        const replyMessage = treeNode.replyIndex !== null ? normalizeAiMessage(chatHistory[treeNode.replyIndex]) : null;
         const replyCollapsed = replyMessage ? isReplyCollapsed(replyMessage) : false;
         const replyVariant = replyMessage ? getActiveResponseVariant(replyMessage) : null;
         const displayedReplyContent = replyVariant?.content || replyMessage?.content || '';
@@ -1089,57 +1250,55 @@ export default function ChatView({
         const activeResponseVariantIndex = replyMessage?.activeVariantIndex || 0;
         const hasPreviousResponseVariant = responseVariantCount > 1 && activeResponseVariantIndex > 0;
         const hasNextResponseVariant = responseVariantCount > 1 && activeResponseVariantIndex < responseVariantCount - 1;
-        const canGeneratePrompt = userMessage && column.replyIndex === null;
-        const isGeneratingPrompt = userMessage && generatingPromptIndex === column.userIndex;
+        const canGeneratePrompt = userMessage && treeNode.replyIndex === null;
+        const isGeneratingPrompt = userMessage && generatingPromptIndex === treeNode.userIndex;
         const replyExplanations = replyMessage ? getInlineExplanations(replyMessage) : [];
         const activeExplanationIndex = replyExplanations.findIndex((item) => item.id === activeExplanation?.explanationId);
-        const currentExplanation = activeExplanation?.messageIndex === column.replyIndex && activeExplanationIndex >= 0
+        const currentExplanation = activeExplanation?.messageIndex === treeNode.replyIndex && activeExplanationIndex >= 0
             ? replyExplanations[activeExplanationIndex]
             : null;
-        const isSelectionOverlayVisible = selectionDraft?.messageIndex === column.replyIndex;
+        const isSelectionOverlayVisible = selectionDraft?.messageIndex === treeNode.replyIndex;
         const isExplanationOverlayVisible = Boolean(currentExplanation);
-        const columnOffset = isWorkflowMode ? getWorkflowColumnOffset(columnIndex) : 0;
-        const columnWidth = isWorkflowMode ? 'clamp(280px, 44vw, 430px)' : '100%';
-        const columnShellStyle = isWorkflowMode
-            ? {
-                flex: `0 0 ${columnWidth}`,
-                width: columnWidth,
-                minWidth: columnWidth,
-                marginTop: `${columnOffset}px`,
-                padding: '0.95rem 0.9rem 1rem',
-                borderRadius: '30px',
-                background: 'linear-gradient(180deg, rgba(255,255,255,0.82) 0%, rgba(247,243,250,0.94) 100%)',
-                border: '1px solid rgba(126, 136, 166, 0.12)',
-                boxShadow: '0 18px 38px rgba(24, 27, 35, 0.08)',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '1rem',
-                position: 'relative',
-                minHeight: '220px',
-            }
-            : {
-                width: '100%',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '1.5rem',
-            };
-        const bubbleWidthStyle = {
-            maxWidth: isWorkflowMode ? '100%' : undefined,
-            width: isWorkflowMode ? '100%' : undefined,
+        const isBranchTarget = branchTargetNodeId === treeNode.id;
+        const columnWidth = 'clamp(280px, 44vw, 430px)';
+        const columnShellStyle = {
+            flex: `0 0 ${columnWidth}`,
+            width: columnWidth,
+            minWidth: columnWidth,
+            padding: '1rem 0.95rem 1.05rem',
+            borderRadius: '30px',
+            background: 'linear-gradient(180deg, rgba(255,255,255,0.86) 0%, rgba(247,243,250,0.96) 100%)',
+            border: isBranchTarget ? '2px solid rgba(92, 124, 250, 0.58)' : '1px solid rgba(126, 136, 166, 0.12)',
+            boxShadow: isBranchTarget
+                ? '0 20px 42px rgba(92, 124, 250, 0.16)'
+                : '0 18px 38px rgba(24, 27, 35, 0.08)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '1rem',
+            position: 'relative',
+            minHeight: '220px',
         };
-        const floatingCardWidth = isWorkflowMode ? 'calc(100% - 2.7rem)' : 'min(560px, calc(100% - 2.5rem))';
-        const actionCardWidth = isWorkflowMode ? 'calc(100% - 2.7rem)' : 'min(400px, calc(100% - 2.5rem))';
+        const bubbleWidthStyle = {
+            maxWidth: '100%',
+            width: '100%',
+        };
+        const actionCardWidth = 'min(400px, calc(100% - 2.5rem))';
 
         return (
-            <div key={column.key} style={columnShellStyle}>
-                {isWorkflowMode && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', paddingLeft: '0.1rem' }}>
+            <div key={treeNode.id} style={columnShellStyle}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.45rem', paddingLeft: '0.1rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
                         <div style={{ width: '8px', height: '8px', borderRadius: '999px', background: 'rgba(116, 129, 255, 0.82)' }} />
-                        <span style={{ fontSize: '0.72rem', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#7a8194', fontWeight: 600 }}>
-                            Step {columnIndex + 1}
+                        <span style={{ fontSize: '0.74rem', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#7a8194', fontWeight: 700 }}>
+                            {treeNode.displayLabel || treeNode.numericStep}
                         </span>
                     </div>
-                )}
+                    {isBranchTarget && (
+                        <span style={{ fontSize: '0.68rem', fontWeight: 700, color: '#4f63d9', background: 'rgba(92,124,250,0.1)', border: '1px solid rgba(92,124,250,0.18)', borderRadius: '999px', padding: '0.16rem 0.48rem' }}>
+                            分岐先
+                        </span>
+                    )}
+                </div>
 
                 {userMessage && (
                     <div
@@ -1179,7 +1338,7 @@ export default function ChatView({
                                     <User size={14} color="#664b8d" />
                                 </div>
                                 <button
-                                    onClick={() => handleDeletePrompt(column.userIndex)}
+                                    onClick={() => handleDeletePrompt(treeNode.id)}
                                     style={userDeleteButtonStyle}
                                     title="この候補を削除"
                                     aria-label="この候補を削除"
@@ -1208,9 +1367,9 @@ export default function ChatView({
                                 maxWidth: isWorkflowMode ? 'calc(100% - 2.55rem)' : undefined,
                             }}
                         >
-                            {column.replyIndex !== null && (
+                            {treeNode.replyIndex !== null && (
                                 <button
-                                    onClick={() => handleToggleReplyCollapse(column.replyIndex)}
+                                    onClick={() => handleToggleReplyCollapse(treeNode.replyIndex)}
                                     style={iconActionStyle}
                                     title={replyCollapsed ? '返信を展開' : '返信を折りたたむ'}
                                     aria-label={replyCollapsed ? '返信を展開' : '返信を折りたたむ'}
@@ -1222,16 +1381,33 @@ export default function ChatView({
 
                             {canGeneratePrompt && (
                                 <button
-                                    onClick={() => handleGeneratePrompt(column.userIndex)}
+                                    onClick={() => handleGeneratePrompt(treeNode.id)}
                                     disabled={isLoading}
-                                    style={generatePromptButtonStyle}
+                                    style={promptTriggerButtonStyle}
                                     title="質問を送る"
                                     aria-label="質問を送る"
                                 >
-                                    <Sparkles size={11} />
-                                    {isGeneratingPrompt ? '送信中...' : '質問を送る'}
+                                    {isGeneratingPrompt ? <RefreshCw size={11} /> : <Send size={11} />}
                                 </button>
                             )}
+                            <button
+                                type="button"
+                                onClick={() => handleSelectBranchTarget(treeNode.id)}
+                                style={{
+                                    ...branchTriggerButtonStyle,
+                                    border: branchTargetNodeId === treeNode.id
+                                        ? '1px solid rgba(92, 124, 250, 0.36)'
+                                        : branchTriggerButtonStyle.border,
+                                    background: branchTargetNodeId === treeNode.id
+                                        ? 'rgba(92, 124, 250, 0.14)'
+                                        : branchTriggerButtonStyle.background,
+                                    color: branchTargetNodeId === treeNode.id ? '#4f63d9' : branchTriggerButtonStyle.color,
+                                }}
+                                title="分岐を追加"
+                                aria-label="分岐を追加"
+                            >
+                                <GitBranch size={11} />
+                            </button>
                         </div>
                     </div>
                 )}
@@ -1278,7 +1454,7 @@ export default function ChatView({
                                 {hasPreviousResponseVariant && (
                                     <button
                                         type="button"
-                                        onClick={() => handleSwitchResponseVariant(column.replyIndex, -1)}
+                                        onClick={() => handleSwitchResponseVariant(treeNode.replyIndex, -1)}
                                         aria-label="Previous reply"
                                         style={{
                                             ...iconActionStyle,
@@ -1300,7 +1476,7 @@ export default function ChatView({
                                 {hasNextResponseVariant && (
                                     <button
                                         type="button"
-                                        onClick={() => handleSwitchResponseVariant(column.replyIndex, 1)}
+                                        onClick={() => handleSwitchResponseVariant(treeNode.replyIndex, 1)}
                                         aria-label="Next reply"
                                         style={{
                                             ...iconActionStyle,
@@ -1321,11 +1497,11 @@ export default function ChatView({
                                 )}
                                 <div
                                     ref={(element) => {
-                                        if (element) messageContentRefs.current[column.replyIndex] = element;
-                                        else delete messageContentRefs.current[column.replyIndex];
+                                        if (element) messageContentRefs.current[treeNode.replyIndex] = element;
+                                        else delete messageContentRefs.current[treeNode.replyIndex];
                                     }}
-                                    onMouseUp={() => setTimeout(() => handleTextSelection(column.replyIndex), 0)}
-                                    onTouchEnd={() => setTimeout(() => handleTextSelection(column.replyIndex), 0)}
+                                    onMouseUp={() => setTimeout(() => handleTextSelection(treeNode.replyIndex), 0)}
+                                    onTouchEnd={() => setTimeout(() => handleTextSelection(treeNode.replyIndex), 0)}
                                     style={{
                                         ...assistantBubbleStyle,
                                         ...bubbleWidthStyle,
@@ -1350,7 +1526,7 @@ export default function ChatView({
                                             {activeResponseVariantIndex + 1}/{responseVariantCount}
                                         </div>
                                     )}
-                                    {renderMessageContent(replyMessage, column.replyIndex)}
+                                    {renderMessageContent(replyMessage, treeNode.replyIndex)}
                                 </div>
                             </div>
                         </div>
@@ -1425,13 +1601,13 @@ export default function ChatView({
                                             </div>
                                             {replyExplanations.length > 1 && (
                                                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                                                    <button style={iconActionStyle} disabled={activeExplanationIndex <= 0} onClick={() => shiftExplanation(column.replyIndex, -1)} aria-label="前の説明">
+                                                    <button style={iconActionStyle} disabled={activeExplanationIndex <= 0} onClick={() => shiftExplanation(treeNode.replyIndex, -1)} aria-label="前の説明">
                                                         <ChevronLeft size={12} />
                                                     </button>
                                                     <span style={{ fontSize: '0.72rem', color: '#63779a', minWidth: '36px', textAlign: 'center' }}>
                                                         {activeExplanationIndex + 1}/{replyExplanations.length}
                                                     </span>
-                                                    <button style={iconActionStyle} disabled={activeExplanationIndex >= replyExplanations.length - 1} onClick={() => shiftExplanation(column.replyIndex, 1)} aria-label="次の説明">
+                                                    <button style={iconActionStyle} disabled={activeExplanationIndex >= replyExplanations.length - 1} onClick={() => shiftExplanation(treeNode.replyIndex, 1)} aria-label="次の説明">
                                                         <ChevronRight size={12} />
                                                     </button>
                                                 </div>
@@ -1444,7 +1620,7 @@ export default function ChatView({
                                             {currentExplanation.summary}
                                         </div>
                                         <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
-                                            <button style={cardActionStyle} onClick={() => openExplanation(column.replyIndex, currentExplanation.id)}>
+                                            <button style={cardActionStyle} onClick={() => openExplanation(treeNode.replyIndex, currentExplanation.id)}>
                                                 もう一度見る
                                             </button>
                                             <button style={cardActionStyle} onClick={closeInlineOverlay}>
@@ -1485,7 +1661,7 @@ export default function ChatView({
                                 {actionStatus === 'pending' ? (
                                     <div style={{ display: 'flex', gap: '0.5rem' }}>
                                         <button
-                                            onClick={() => handleActionApprove(column.replyIndex)}
+                                            onClick={() => handleActionApprove(treeNode.replyIndex)}
                                             style={{
                                                 padding: '0.4rem 0.8rem',
                                                 background: 'var(--primary)',
@@ -1502,7 +1678,7 @@ export default function ChatView({
                                             {t('chat.approve')}
                                         </button>
                                         <button
-                                            onClick={() => handleActionReject(column.replyIndex)}
+                                            onClick={() => handleActionReject(treeNode.replyIndex)}
                                             style={{
                                                 padding: '0.4rem 0.8rem',
                                                 background: 'rgba(255,100,100,0.15)',
@@ -1527,14 +1703,14 @@ export default function ChatView({
                         )}
 
                         <div className="chat-actions" style={{ marginLeft: '2.7rem', marginTop: '0.4rem', ...actionStripStyle }}>
-                            <button style={iconActionStyle} onClick={() => handleCopy(displayedReplyContent, column.replyIndex)} title={copiedIdx === column.replyIndex ? t('chat.copied') : t('chat.copy')} aria-label={copiedIdx === column.replyIndex ? t('chat.copied') : t('chat.copy')}>
-                                {copiedIdx === column.replyIndex ? <Check size={14} /> : <Copy size={14} />}
+                            <button style={iconActionStyle} onClick={() => handleCopy(displayedReplyContent, treeNode.replyIndex)} title={copiedIdx === treeNode.replyIndex ? t('chat.copied') : t('chat.copy')} aria-label={copiedIdx === treeNode.replyIndex ? t('chat.copied') : t('chat.copy')}>
+                                {copiedIdx === treeNode.replyIndex ? <Check size={14} /> : <Copy size={14} />}
                             </button>
-                            <button style={iconActionStyle} onClick={() => handleRetry(column.replyIndex)} disabled={isLoading} title={t('chat.retry')} aria-label={t('chat.retry')}>
+                            <button style={iconActionStyle} onClick={() => handleRetry(treeNode.replyIndex)} disabled={isLoading} title={t('chat.retry')} aria-label={t('chat.retry')}>
                                 <RefreshCw size={14} />
                             </button>
 
-                            <button style={iconActionStyle} onClick={() => handleBranch(column.replyIndex)} disabled={branchCount >= 10} title={branchCount >= 10 ? t('chat.branchMax') : t('chat.branch')} aria-label={branchCount >= 10 ? t('chat.branchMax') : t('chat.branch')}>
+                            <button style={iconActionStyle} onClick={() => handleBranch(treeNode.replyIndex)} disabled={branchCount >= 10} title={branchCount >= 10 ? t('chat.branchMax') : t('chat.branch')} aria-label={branchCount >= 10 ? t('chat.branchMax') : t('chat.branch')}>
                                 <GitBranch size={14} />
                             </button>
 
@@ -1578,6 +1754,21 @@ export default function ChatView({
             </div>
         );
     };
+
+    const renderChatNodeTree = (treeNode) => (
+        <div key={treeNode.id} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem', minWidth: 0, width: 'fit-content' }}>
+            {renderConversationColumn(treeNode)}
+            {treeNode.children.length > 0 && (
+                <div style={{ position: 'relative', width: 'fit-content', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem', paddingTop: '1rem' }}>
+                    <div style={{ position: 'absolute', top: 0, left: '50%', transform: 'translateX(-50%)', width: '2px', height: '1rem', background: 'linear-gradient(180deg, rgba(125,161,255,0.46) 0%, rgba(125,161,255,0.06) 100%)' }} />
+                    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'flex-start', gap: '1rem', flexWrap: 'wrap', width: 'fit-content' }}>
+                        {treeNode.children.map((child) => renderChatNodeTree(child))}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+
     return (
         <div
             style={{
@@ -1651,7 +1842,7 @@ export default function ChatView({
                     display: 'flex',
                     flexDirection: 'column',
                     gap: '1.5rem',
-                    maxWidth: '920px',
+                    maxWidth: 'min(1240px, calc(100vw - 2rem))',
                     width: '100%',
                     margin: '0 auto',
                     minWidth: 0,
@@ -1680,12 +1871,12 @@ export default function ChatView({
                         style={{
                             display: 'flex',
                             alignItems: 'flex-start',
-                            gap: isWorkflowMode ? '0.85rem' : '1.5rem',
+                            gap: '1rem',
                             minWidth: 0,
                             width: '100%',
                             overflowX: isWorkflowMode ? 'auto' : 'visible',
                             overflowY: 'visible',
-                            paddingBottom: isWorkflowMode ? '1rem' : 0,
+                            paddingBottom: '1rem',
                             cursor: isWorkflowMode ? (isWorkflowDragging ? 'grabbing' : 'grab') : 'default',
                             userSelect: isWorkflowMode && isWorkflowDragging ? 'none' : 'auto',
                             touchAction: isWorkflowMode ? 'pan-x pan-y' : 'auto',
@@ -1695,29 +1886,23 @@ export default function ChatView({
                         <div
                             style={{
                                 display: 'flex',
-                                alignItems: 'flex-start',
-                                gap: isWorkflowMode ? '0.85rem' : 0,
-                                minWidth: isWorkflowMode ? 'max-content' : 0,
-                                width: isWorkflowMode ? 'max-content' : '100%',
+                                flexDirection: 'column',
+                                alignItems: 'center',
+                                gap: '1.5rem',
+                                minWidth: 'max-content',
+                                width: 'max-content',
+                                margin: '0 auto',
                             }}
                         >
-                            {conversationColumns.map((column, columnIndex) => (
-                                <React.Fragment key={column.key}>
-                                    {isWorkflowMode && columnIndex > 0 && (
-                                        <div
-                                            style={{
-                                                flex: '0 0 48px',
-                                                width: '48px',
-                                                alignSelf: 'flex-start',
-                                                marginTop: `${Math.max(64, getWorkflowColumnOffset(columnIndex) + 26)}px`,
-                                                borderTop: '2px dashed rgba(125, 161, 255, 0.45)',
-                                                opacity: 0.92,
-                                            }}
-                                        />
-                                    )}
-                                    {renderConversationColumn(column, columnIndex)}
-                                </React.Fragment>
-                            ))}
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.45rem', paddingTop: '0.1rem' }}>
+                                <div style={{ width: '2px', height: '18px', background: 'linear-gradient(180deg, rgba(125,161,255,0.62) 0%, rgba(125,161,255,0.08) 100%)' }} />
+                                <div style={{ fontSize: '1.05rem', fontWeight: 700, color: '#2a3242', letterSpacing: '0.03em', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                                    {spaceTitle || t('editor.untitled')}
+                                </div>
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2rem', width: '100%' }}>
+                                {chatTree.rootNodes.map((treeNode) => renderChatNodeTree(treeNode))}
+                            </div>
                         </div>
                     </div>
                 )}
@@ -1752,7 +1937,22 @@ export default function ChatView({
                         minWidth: 0,
                     }}
                 >
+                    {branchTargetLabel && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', alignSelf: 'center', marginRight: '0.75rem', padding: '0.3rem 0.6rem', borderRadius: '999px', background: 'rgba(92,124,250,0.1)', border: '1px solid rgba(92,124,250,0.18)', color: '#4f63d9', fontSize: '0.74rem', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                            分岐先 {branchTargetLabel}
+                            <button
+                                type="button"
+                                onClick={() => setBranchTargetNodeId(null)}
+                                style={{ ...iconActionStyle, width: '20px', height: '20px', background: 'transparent', boxShadow: 'none', border: 'none', color: '#4f63d9' }}
+                                aria-label="分岐先を解除"
+                                title="分岐先を解除"
+                            >
+                                <X size={11} />
+                            </button>
+                        </div>
+                    )}
                     <textarea
+                        ref={inputRef}
                         value={input}
                         onChange={(event) => setInput(event.target.value)}
                         onKeyDown={(event) => {
@@ -1761,7 +1961,7 @@ export default function ChatView({
                                 handleQueuePrompt();
                             }
                         }}
-                        placeholder={t('chat.placeholder')}
+                        placeholder={branchTargetLabel ? `分岐先 ${branchTargetLabel} への質問を入力` : t('chat.placeholder')}
                         style={{
                             flex: 1,
                             background: 'transparent',
@@ -1805,6 +2005,4 @@ export default function ChatView({
         </div>
     );
 }
-
-
 
