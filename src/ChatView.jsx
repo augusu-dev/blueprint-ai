@@ -18,7 +18,7 @@ import {
     X,
     User,
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useLanguage } from './i18n';
 import GoalWizard from './GoalWizard';
 import { getDictionaryPath } from './lib/routes';
@@ -448,6 +448,7 @@ export default function ChatView({
 }) {
     const { t } = useLanguage();
     const navigate = useNavigate();
+    const location = useLocation();
     const [input, setInput] = useState('');
     const [chatHistory, setChatHistory] = useState([]);
     const [isLoading, setIsLoading] = useState(false);
@@ -463,6 +464,7 @@ export default function ChatView({
     const [selectedImprovementVersionId, setSelectedImprovementVersionId] = useState(null);
     const [branchTargetNodeId, setBranchTargetNodeId] = useState(null);
     const [focusedChatNodeId, setFocusedChatNodeId] = useState(null);
+    const [messageJumpTarget, setMessageJumpTarget] = useState(null);
     const [chatZoom, setChatZoom] = useState(1);
     const inputRef = useRef(null);
     const messageContentRefs = useRef({});
@@ -579,6 +581,41 @@ export default function ChatView({
         return () => window.cancelAnimationFrame(frame);
     }, [activePromptNodeId, centerChatNode, isWorkflowMode]);
 
+    useEffect(() => {
+        const params = new URLSearchParams(location.search);
+        const focusNode = params.get('focusNode');
+        if (!focusNode) return;
+
+        const rawMessageIndex = params.get('focusMessage');
+        const parsedMessageIndex = Number.parseInt(rawMessageIndex || '', 10);
+        const nextMessageIndex = Number.isInteger(parsedMessageIndex) ? parsedMessageIndex : null;
+        const nextTerm = params.get('focusTerm') || '';
+
+        setBranchTargetNodeId(null);
+        setFocusedChatNodeId(focusNode);
+        setMessageJumpTarget({
+            nodeId: focusNode,
+            messageIndex: nextMessageIndex,
+            term: nextTerm,
+            token: `${focusNode}:${nextMessageIndex ?? 'none'}:${nextTerm}`,
+        });
+    }, [location.search]);
+
+    useEffect(() => {
+        if (!messageJumpTarget?.nodeId) return undefined;
+        const frame = window.requestAnimationFrame(() => {
+            centerChatNode(messageJumpTarget.nodeId, 'smooth');
+            if (Number.isInteger(messageJumpTarget.messageIndex)) {
+                messageContentRefs.current[messageJumpTarget.messageIndex]?.scrollIntoView?.({
+                    behavior: 'smooth',
+                    block: 'center',
+                    inline: 'nearest',
+                });
+            }
+        });
+        return () => window.cancelAnimationFrame(frame);
+    }, [centerChatNode, messageJumpTarget, chatHistory]);
+
     const closeInlineOverlay = () => {
         setSelectionDraft(null);
         setActiveExplanation(null);
@@ -681,6 +718,16 @@ export default function ChatView({
         setSelectionDraft(null);
         setActiveExplanation({ messageIndex, explanationId });
     };
+
+    const buildDictionarySourceRef = useCallback((messageIndex, sourceMessage, selectedText, explanationId = null) => ({
+        spaceId,
+        chatNodeId: sourceMessage?.chatNodeId || null,
+        messageIndex: Number.isInteger(messageIndex) ? messageIndex : null,
+        start: Number.isInteger(selectionDraft?.start) ? selectionDraft.start : null,
+        end: Number.isInteger(selectionDraft?.end) ? selectionDraft.end : null,
+        term: selectedText || selectionDraft?.text || '',
+        explanationId,
+    }), [selectionDraft, spaceId]);
 
     const shiftExplanation = (messageIndex, direction) => {
         const explanations = getInlineExplanations(chatHistory[messageIndex]);
@@ -795,6 +842,21 @@ export default function ChatView({
             }));
 
             persistChatHistory(nextHistory);
+            if (spaceId && explanationText && !/^Error:/i.test(explanationText)) {
+                upsertDictionaryEntry(spaceId, {
+                    term: selectionDraft.text,
+                    variants: [{ text: explanationText }],
+                    forceAddVariant: true,
+                    collapsed: true,
+                    sourceKinds: ['explanation'],
+                    sourceRef: buildDictionarySourceRef(
+                        selectionDraft.messageIndex,
+                        sourceMessage,
+                        selectionDraft.text,
+                        explanation.id,
+                    ),
+                });
+            }
             setActiveExplanation({ messageIndex: selectionDraft.messageIndex, explanationId: explanation.id });
             setSelectionDraft(null);
         } finally {
@@ -814,10 +876,18 @@ export default function ChatView({
     const handleSaveSelectionToDictionary = () => {
         if (!selectionDraft?.text || !spaceId) return;
 
+        const sourceMessage = chatHistory[selectionDraft.messageIndex];
+
         upsertDictionaryEntry(spaceId, {
             term: selectionDraft.text,
             explanation: '',
             collapsed: true,
+            sourceKinds: ['dictionary'],
+            sourceRef: buildDictionarySourceRef(
+                selectionDraft.messageIndex,
+                sourceMessage,
+                selectionDraft.text,
+            ),
         });
         closeInlineOverlay();
         navigate(getDictionaryPath(spaceId));
@@ -1471,6 +1541,7 @@ export default function ChatView({
         const isExplanationOverlayVisible = Boolean(currentExplanation);
         const isBranchTarget = branchTargetNodeId === treeNode.id;
         const isFocusedNode = focusedChatNodeId === treeNode.id;
+        const isJumpHighlightedReply = messageJumpTarget?.messageIndex === treeNode.replyIndex;
         const columnWidth = 'clamp(320px, 34vw, 420px)';
         const columnShellStyle = {
             flex: `0 0 ${columnWidth}`,
@@ -1806,11 +1877,29 @@ export default function ChatView({
                                         ...assistantBubbleStyle,
                                         ...bubbleWidthStyle,
                                         minWidth: 0,
+                                        border: isJumpHighlightedReply
+                                            ? '1px solid rgba(83, 113, 255, 0.42)'
+                                            : assistantBubbleStyle.border,
+                                        boxShadow: isJumpHighlightedReply
+                                            ? '0 16px 30px rgba(83, 113, 255, 0.16)'
+                                            : assistantBubbleStyle.boxShadow,
                                         opacity: isSelectionOverlayVisible || isExplanationOverlayVisible ? 0.68 : 1,
                                         filter: 'none',
                                         userSelect: isSelectionOverlayVisible || isExplanationOverlayVisible ? 'none' : 'text',
                                     }}
                                 >
+                                    {isJumpHighlightedReply && (
+                                        <div
+                                            style={{
+                                                marginBottom: '0.55rem',
+                                                fontSize: '0.7rem',
+                                                fontWeight: 700,
+                                                color: '#536fd8',
+                                            }}
+                                        >
+                                            辞書から移動: {messageJumpTarget?.term || 'この位置'}
+                                        </div>
+                                    )}
                                     {responseVariantCount > 1 && (
                                         <div
                                             style={{

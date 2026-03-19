@@ -4,14 +4,18 @@ import {
     BookOpen,
     ChevronDown,
     ChevronLeft,
-    ChevronUp,
+    ChevronRight,
+    RefreshCw,
     Search,
+    Sparkles,
     Trash2,
 } from 'lucide-react';
 import { useLanguage } from './i18n';
 import { getSpacePath } from './lib/routes';
 import { resolveSpaceTitle } from './lib/space';
 import {
+    getDictionaryEntryExplanation,
+    getDictionaryEntryVariants,
     loadAllDictionaryEntries,
     removeDictionaryEntriesById,
     updateDictionaryEntryById,
@@ -47,6 +51,31 @@ function loadSpaceTitle(spaceId, fallback) {
     }
 }
 
+function clampIndex(value, length) {
+    if (length <= 0) return 0;
+    const parsed = Number.isInteger(value) ? value : Number.parseInt(value ?? '0', 10);
+    if (!Number.isFinite(parsed)) return 0;
+    return Math.min(Math.max(parsed, 0), length - 1);
+}
+
+function getEntrySpaceTitle(entry) {
+    return resolveSpaceTitle(entry?.spaceId, loadSpaceTitle(entry?.spaceId, 'space'), 'space');
+}
+
+function buildJumpPath(entry) {
+    const targetSpaceId = entry?.sourceRef?.spaceId || entry?.spaceId;
+    if (!targetSpaceId) return null;
+
+    const params = new URLSearchParams();
+    if (entry?.sourceRef?.chatNodeId) params.set('focusNode', entry.sourceRef.chatNodeId);
+    if (Number.isInteger(entry?.sourceRef?.messageIndex)) params.set('focusMessage', String(entry.sourceRef.messageIndex));
+    if (entry?.sourceRef?.term || entry?.term) params.set('focusTerm', entry.sourceRef?.term || entry.term);
+
+    const basePath = getSpacePath(targetSpaceId, 'chat');
+    const query = params.toString();
+    return query ? `${basePath}?${query}` : basePath;
+}
+
 function sortEntries(entries, sortMode, collator) {
     const nextEntries = [...entries];
     if (sortMode === 'oldest') {
@@ -58,22 +87,33 @@ function sortEntries(entries, sortMode, collator) {
     return nextEntries.sort((left, right) => new Date(right.createdAt) - new Date(left.createdAt));
 }
 
-function getEntrySpaceTitle(entry) {
-    return resolveSpaceTitle(entry?.spaceId, loadSpaceTitle(entry?.spaceId, 'space'), 'space');
-}
-
 const iconButtonStyle = {
-    width: '30px',
-    height: '30px',
+    width: '28px',
+    height: '28px',
     borderRadius: '999px',
-    border: '1px solid rgba(68, 76, 95, 0.12)',
-    background: 'rgba(255,255,255,0.78)',
-    color: '#707789',
+    border: '1px solid rgba(35, 39, 48, 0.12)',
+    background: 'rgba(255,255,255,0.96)',
+    color: '#596074',
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
     cursor: 'pointer',
-    boxShadow: '0 8px 18px rgba(29, 33, 44, 0.08)',
+    boxShadow: '0 8px 16px rgba(17, 24, 39, 0.08)',
+};
+
+const compactActionStyle = {
+    border: '1px solid rgba(18, 22, 28, 0.12)',
+    background: 'rgba(255,255,255,0.92)',
+    color: '#232b38',
+    borderRadius: '999px',
+    padding: '0.34rem 0.72rem',
+    fontSize: '0.74rem',
+    fontWeight: 600,
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '0.35rem',
 };
 
 export default function DictionaryPage() {
@@ -121,6 +161,7 @@ export default function DictionaryPage() {
             setEntries(loadAllDictionaryEntries());
             setSpaceTitle(loadSpaceTitle(currentSpaceId, t('editor.untitled')));
         };
+
         window.addEventListener('dictionaryUpdated', handleDictionaryUpdated);
         window.addEventListener('storage', handleStorage);
         window.addEventListener('spaceTitleUpdated', handleSpaceTitleUpdated);
@@ -150,19 +191,22 @@ export default function DictionaryPage() {
         () => new Intl.Collator('ja', { sensitivity: 'base', numeric: true }),
         [],
     );
+
     const selectedApiEntry = apiKeys[selectedApiIndex] || apiKeys[0] || null;
-    const sortedEntries = useMemo(
-        () => sortEntries(entries.filter((entry) => {
-            const query = searchQuery.trim();
+    const filteredEntries = useMemo(() => {
+        const query = searchQuery.trim();
+        const baseEntries = entries.filter((entry) => {
             if (!query) return true;
+            const variants = getDictionaryEntryVariants(entry);
             return entry.term.includes(query)
-                || entry.explanation.includes(query)
+                || variants.some((variant) => variant.text.includes(query))
                 || getEntrySpaceTitle(entry).includes(query);
-        }), sortMode, collator),
-        [collator, entries, searchQuery, sortMode],
-    );
+        });
+        return sortEntries(baseEntries, sortMode, collator);
+    }, [collator, entries, searchQuery, sortMode]);
+
     const selectedCount = selectedIds.length;
-    const allVisibleSelected = sortedEntries.length > 0 && sortedEntries.every((entry) => selectedIds.includes(entry.id));
+    const allVisibleSelected = filteredEntries.length > 0 && filteredEntries.every((entry) => selectedIds.includes(entry.id));
 
     const refreshEntries = () => {
         setEntries(loadAllDictionaryEntries());
@@ -170,11 +214,11 @@ export default function DictionaryPage() {
 
     const handleToggleSelectAll = () => {
         if (allVisibleSelected) {
-            setSelectedIds((current) => current.filter((id) => !sortedEntries.some((entry) => entry.id === id)));
+            setSelectedIds((current) => current.filter((id) => !filteredEntries.some((entry) => entry.id === id)));
             return;
         }
-        const nextVisibleIds = sortedEntries.map((entry) => entry.id);
-        setSelectedIds((current) => [...new Set([...current, ...nextVisibleIds])]);
+        const visibleIds = filteredEntries.map((entry) => entry.id);
+        setSelectedIds((current) => [...new Set([...current, ...visibleIds])]);
     };
 
     const handleToggleSelected = (entryId) => {
@@ -190,37 +234,56 @@ export default function DictionaryPage() {
         removeDictionaryEntriesById(selectedIds);
         setSelectedIds([]);
         refreshEntries();
-        setStatusMessage('選択した項目を削除しました');
+        setStatusMessage('選択した単語を削除しました。');
     };
 
-    const handleToggleCollapsed = (entry) => {
-        updateDictionaryEntryById(entry.id, (current) => ({
-            ...current,
-            collapsed: !current.collapsed,
-            updatedAt: new Date().toISOString(),
-        }));
+    const handleDeleteEntry = (entryId) => {
+        removeDictionaryEntriesById([entryId]);
+        setSelectedIds((current) => current.filter((id) => id !== entryId));
         refreshEntries();
     };
 
-    const handleGenerateExplanation = async (entry) => {
+    const handleCycleVariant = (entry, direction) => {
+        const variants = getDictionaryEntryVariants(entry);
+        if (variants.length <= 1) return;
+
+        updateDictionaryEntryById(entry.id, (current) => {
+            const nextVariants = getDictionaryEntryVariants(current);
+            return {
+                ...current,
+                activeVariantIndex: clampIndex((current?.activeVariantIndex || 0) + direction, nextVariants.length),
+                collapsed: false,
+                updatedAt: new Date().toISOString(),
+            };
+        });
+        refreshEntries();
+    };
+
+    const handleGenerateExplanation = async (entry, { forceNewVariant = false } = {}) => {
         if (!entry || isGenerating[entry.id]) return;
+
         const apiKeyEntry = selectedApiEntry;
         const { key } = resolveModelSelection(apiKeyEntry);
         if (!key) {
-            setStatusMessage('APIキーを設定してください');
+            setStatusMessage('API キーを設定してください。');
             return;
         }
 
+        const existingExplanation = getDictionaryEntryExplanation(entry);
         setStatusMessage('');
         setIsGenerating((current) => ({ ...current, [entry.id]: true }));
         try {
             const prompt = [
-                '次の語句を日本語で簡潔に説明してください。',
-                '2〜4文で、必要なら補足を1行だけ足してください。',
-                '余計な前置きや箇条書きは避けてください。',
+                '次の単語や短い表現を、日本語で短く説明してください。',
+                '- 2〜4文でまとめる',
+                '- 曖昧な一般論ではなく、意味が伝わる説明にする',
+                '- 似た表現との違いがあれば一言だけ添える',
                 '',
-                `語句: ${entry.term}`,
-            ].join('\n');
+                `単語: ${entry.term}`,
+                existingExplanation && forceNewVariant
+                    ? `前回の説明: ${existingExplanation}\n前回と少し角度を変えて、より分かりやすく説明してください。`
+                    : '',
+            ].filter(Boolean).join('\n');
 
             const rawText = (await requestChatText({
                 apiKeyEntry,
@@ -228,21 +291,23 @@ export default function DictionaryPage() {
                 maxTokens: 320,
             })).trim();
 
-            if (!rawText) {
-                throw new Error('No response.');
+            if (!rawText || /^Error:/i.test(rawText)) {
+                throw new Error(rawText || 'No response');
             }
 
             upsertDictionaryEntry(entry.spaceId, {
                 id: entry.id,
                 spaceId: entry.spaceId,
                 term: entry.term,
-                explanation: rawText,
-                collapsed: true,
-                createdAt: entry.createdAt,
+                variants: [{ text: rawText }],
+                forceAddVariant: forceNewVariant || getDictionaryEntryVariants(entry).length > 0,
+                collapsed: false,
+                sourceKinds: ['explanation'],
+                sourceRef: entry.sourceRef || { spaceId: entry.spaceId, term: entry.term },
             });
             refreshEntries();
         } catch (error) {
-            setStatusMessage(`説明文の作成に失敗しました: ${error.message}`);
+            setStatusMessage(`説明の生成に失敗しました: ${error.message}`);
         } finally {
             setIsGenerating((current) => {
                 const next = { ...current };
@@ -252,37 +317,50 @@ export default function DictionaryPage() {
         }
     };
 
-    const handleEntryClick = (entry) => {
-        if (!entry.explanation) {
+    const handleToggleCollapsed = (entry) => {
+        const hasExplanation = Boolean(getDictionaryEntryExplanation(entry));
+        if (!hasExplanation) {
             handleGenerateExplanation(entry);
             return;
         }
 
-        handleToggleCollapsed(entry);
+        updateDictionaryEntryById(entry.id, (current) => ({
+            ...current,
+            collapsed: !current.collapsed,
+            updatedAt: new Date().toISOString(),
+        }));
+        refreshEntries();
     };
 
-    const handleDeleteEntry = (entryId) => {
-        removeDictionaryEntriesById([entryId]);
-        setSelectedIds((current) => current.filter((id) => id !== entryId));
-        refreshEntries();
+    const handleJumpToSource = (entry) => {
+        const nextPath = buildJumpPath(entry);
+        if (!nextPath) return;
+        navigate(nextPath);
     };
 
     const handleAddFromSearch = () => {
         const term = searchQuery.trim();
         if (!term || !currentSpaceId) return;
+
         upsertDictionaryEntry(currentSpaceId, {
             spaceId: currentSpaceId,
             term,
             explanation: '',
             collapsed: true,
+            sourceKinds: ['dictionary'],
+            sourceRef: { spaceId: currentSpaceId, term },
         });
         refreshEntries();
         setSearchQuery('');
-        setStatusMessage('辞書に追加しました');
+        setStatusMessage('単語を辞書に追加しました。');
     };
 
     const goBackToSpace = () => {
-        navigate(getSpacePath(currentSpaceId));
+        if (!currentSpaceId) {
+            navigate('/');
+            return;
+        }
+        navigate(getSpacePath(currentSpaceId, 'chat'));
     };
 
     return (
@@ -292,7 +370,7 @@ export default function DictionaryPage() {
                 height: '100dvh',
                 width: '100vw',
                 overflow: 'hidden',
-                background: 'linear-gradient(180deg, #f7f4f7 0%, #f1eff3 100%)',
+                background: 'linear-gradient(180deg, #f8f5f7 0%, #f2eff4 100%)',
                 color: 'var(--text-main)',
             }}
         >
@@ -334,27 +412,27 @@ export default function DictionaryPage() {
             <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                 <div
                     style={{
-                        padding: '0.9rem 1.25rem 0.75rem',
+                        padding: '1rem 1.25rem 0.8rem',
                         display: 'flex',
                         justifyContent: 'space-between',
                         alignItems: 'center',
-                        gap: '0.75rem',
-                        minWidth: 0,
+                        gap: '0.9rem',
+                        flexWrap: 'wrap',
                     }}
                 >
                     <div style={{ minWidth: 0 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0, flexWrap: 'wrap' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.58rem' }}>
                             <div
                                 style={{
                                     width: '34px',
                                     height: '34px',
                                     borderRadius: '12px',
-                                    background: 'linear-gradient(135deg, rgba(108,140,255,0.95), rgba(96,165,250,0.95))',
+                                    background: 'linear-gradient(135deg, rgba(83, 113, 255, 0.92), rgba(99, 190, 255, 0.92))',
                                     display: 'flex',
                                     alignItems: 'center',
                                     justifyContent: 'center',
                                     color: 'white',
-                                    boxShadow: '0 8px 24px rgba(108, 140, 255, 0.25)',
+                                    boxShadow: '0 12px 26px rgba(90, 116, 215, 0.24)',
                                 }}
                             >
                                 <BookOpen size={16} />
@@ -362,32 +440,27 @@ export default function DictionaryPage() {
                             <div style={{ minWidth: 0 }}>
                                 <h1 style={{ margin: 0, fontSize: '1rem', fontWeight: 700 }}>辞書</h1>
                                 <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                                    すべてのスペースの単語一覧
+                                    すべてのスペースから集めた単語をまとめています
                                 </div>
                             </div>
-                            <button
-                                type="button"
-                                onClick={goBackToSpace}
-                                style={{
-                                    marginLeft: '0.25rem',
-                                    border: '1px solid rgba(108,140,255,0.18)',
-                                    background: 'rgba(108,140,255,0.08)',
-                                    color: '#5a74d7',
-                                    borderRadius: '999px',
-                                    padding: '0.38rem 0.75rem',
-                                    fontSize: '0.75rem',
-                                    fontWeight: 600,
-                                    cursor: 'pointer',
-                                }}
-                            >
-                                {spaceTitle} に戻る
-                            </button>
                         </div>
                     </div>
 
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                        <button
+                            type="button"
+                            onClick={goBackToSpace}
+                            style={{
+                                ...compactActionStyle,
+                                background: 'rgba(108,140,255,0.08)',
+                                border: '1px solid rgba(108,140,255,0.16)',
+                                color: '#536fd8',
+                            }}
+                        >
+                            {spaceTitle} に戻る
+                        </button>
                         <label style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                            APIキー
+                            API
                             <select
                                 className="node-select-sm"
                                 value={selectedApiIndex}
@@ -412,77 +485,16 @@ export default function DictionaryPage() {
                     </div>
                 </div>
 
-                <div
-                    style={{
-                        padding: '0 1.25rem 0.8rem',
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        gap: '0.75rem',
-                        flexWrap: 'wrap',
-                    }}
-                >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
-                        {[
-                            ['newest', '新しい順'],
-                            ['oldest', '古い順'],
-                            ['alpha', 'アルファベット / ひらがな順'],
-                        ].map(([id, label]) => (
-                            <button
-                                key={id}
-                                type="button"
-                                onClick={() => setSortMode(id)}
-                                style={{
-                                    border: '1px solid rgba(108,140,255,0.18)',
-                                    borderRadius: '999px',
-                                    background: sortMode === id ? 'rgba(108,140,255,0.12)' : 'rgba(255,255,255,0.72)',
-                                    color: sortMode === id ? '#5a74d7' : 'var(--text-muted)',
-                                    padding: '0.35rem 0.75rem',
-                                    fontSize: '0.75rem',
-                                    cursor: 'pointer',
-                                    fontFamily: 'inherit',
-                                }}
-                            >
-                                {label}
-                            </button>
-                        ))}
-                    </div>
-
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                        <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                            <input type="checkbox" checked={allVisibleSelected} onChange={handleToggleSelectAll} />
-                            すべて選択
-                        </label>
-                        <button
-                            type="button"
-                            onClick={handleDeleteSelected}
-                            disabled={selectedCount === 0}
-                            style={{
-                                border: '1px solid rgba(248,113,113,0.22)',
-                                borderRadius: '999px',
-                                background: selectedCount === 0 ? 'rgba(255,255,255,0.62)' : 'rgba(248,113,113,0.1)',
-                                color: selectedCount === 0 ? 'var(--text-muted)' : '#b84f4f',
-                                padding: '0.35rem 0.75rem',
-                                fontSize: '0.75rem',
-                                cursor: selectedCount === 0 ? 'default' : 'pointer',
-                                fontFamily: 'inherit',
-                            }}
-                        >
-                            選択削除 {selectedCount > 0 ? `(${selectedCount})` : ''}
-                        </button>
-                    </div>
-                </div>
-
-                <div style={{ padding: '0 1.25rem 1rem', minWidth: 0 }}>
+                <div style={{ padding: '0 1.25rem 0.85rem', display: 'grid', gap: '0.7rem' }}>
                     <div
                         style={{
                             display: 'flex',
                             gap: '0.5rem',
                             alignItems: 'center',
-                            background: 'rgba(255,255,255,0.72)',
+                            background: 'rgba(255,255,255,0.84)',
                             border: '1px solid rgba(31, 41, 55, 0.08)',
                             borderRadius: '999px',
-                            padding: '0.48rem 0.8rem',
+                            padding: '0.5rem 0.82rem',
                             boxShadow: '0 12px 28px rgba(29, 33, 44, 0.06)',
                         }}
                     >
@@ -506,23 +518,67 @@ export default function DictionaryPage() {
                             onClick={handleAddFromSearch}
                             disabled={!searchQuery.trim() || !currentSpaceId}
                             style={{
-                                border: 'none',
-                                borderRadius: '999px',
+                                ...compactActionStyle,
                                 background: searchQuery.trim() && currentSpaceId ? 'rgba(108,140,255,0.12)' : 'rgba(108,140,255,0.04)',
                                 color: searchQuery.trim() && currentSpaceId ? '#5a74d7' : 'var(--text-muted)',
-                                padding: '0.32rem 0.7rem',
-                                fontSize: '0.74rem',
+                                border: '1px solid rgba(108,140,255,0.16)',
                                 cursor: searchQuery.trim() && currentSpaceId ? 'pointer' : 'default',
-                                fontFamily: 'inherit',
                             }}
                         >
-                            現在のスペースに追加
+                            追加
                         </button>
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.42rem', flexWrap: 'wrap' }}>
+                            {[
+                                ['newest', '新しい順'],
+                                ['oldest', '古い順'],
+                                ['alpha', 'アルファベット / ひらがな順'],
+                            ].map(([id, label]) => (
+                                <button
+                                    key={id}
+                                    type="button"
+                                    onClick={() => setSortMode(id)}
+                                    style={{
+                                        ...compactActionStyle,
+                                        background: sortMode === id ? 'rgba(108,140,255,0.12)' : 'rgba(255,255,255,0.76)',
+                                        color: sortMode === id ? '#536fd8' : '#5f6778',
+                                        border: sortMode === id
+                                            ? '1px solid rgba(108,140,255,0.22)'
+                                            : '1px solid rgba(18,22,28,0.08)',
+                                    }}
+                                >
+                                    {label}
+                                </button>
+                            ))}
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', flexWrap: 'wrap' }}>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                                <input type="checkbox" checked={allVisibleSelected} onChange={handleToggleSelectAll} />
+                                すべて選択
+                            </label>
+                            <button
+                                type="button"
+                                onClick={handleDeleteSelected}
+                                disabled={selectedCount === 0}
+                                style={{
+                                    ...compactActionStyle,
+                                    border: '1px solid rgba(248,113,113,0.18)',
+                                    background: selectedCount === 0 ? 'rgba(255,255,255,0.72)' : 'rgba(248,113,113,0.08)',
+                                    color: selectedCount === 0 ? 'var(--text-muted)' : '#b65757',
+                                    cursor: selectedCount === 0 ? 'default' : 'pointer',
+                                }}
+                            >
+                                選択削除 {selectedCount > 0 ? `(${selectedCount})` : ''}
+                            </button>
+                        </div>
                     </div>
                 </div>
 
                 {statusMessage && (
-                    <div style={{ padding: '0 1.25rem 0.6rem', fontSize: '0.8rem', color: '#5f6e8f' }}>
+                    <div style={{ padding: '0 1.25rem 0.55rem', fontSize: '0.8rem', color: '#5f6e8f' }}>
                         {statusMessage}
                     </div>
                 )}
@@ -532,146 +588,236 @@ export default function DictionaryPage() {
                         flex: 1,
                         overflowY: 'auto',
                         padding: '0 1.25rem 1.25rem',
-                        display: 'grid',
-                        gap: '0.7rem',
-                        alignContent: 'start',
                     }}
                 >
-                    {sortedEntries.length === 0 ? (
+                    {filteredEntries.length === 0 ? (
                         <div
                             style={{
-                                margin: 'auto',
-                                padding: '3rem 1rem',
-                                textAlign: 'center',
+                                height: '100%',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                alignItems: 'center',
+                                justifyContent: 'center',
                                 color: 'var(--text-muted)',
+                                textAlign: 'center',
+                                gap: '0.55rem',
                             }}
                         >
-                            <BookOpen size={38} style={{ opacity: 0.22, marginBottom: '0.8rem' }} />
-                            <div style={{ fontSize: '0.95rem', fontWeight: 600, marginBottom: '0.3rem' }}>
-                                まだ辞書項目がありません
-                            </div>
+                            <BookOpen size={38} style={{ opacity: 0.22 }} />
+                            <div style={{ fontSize: '0.95rem', fontWeight: 700 }}>辞書はまだ空です</div>
                             <div style={{ fontSize: '0.82rem', lineHeight: 1.7 }}>
-                                チャットで辞書に追加した単語や、このページで追加した単語がここに並びます。
+                                チャットの選択範囲を保存するか、このページから単語を追加してください。
                             </div>
                         </div>
                     ) : (
-                        sortedEntries.map((entry) => {
-                            const collapsed = Boolean(entry.collapsed);
-                            const isSelected = selectedIds.includes(entry.id);
-                            const isGeneratingEntry = Boolean(isGenerating[entry.id]);
+                        <div style={{ borderTop: '1px solid rgba(8, 10, 14, 0.92)' }}>
+                            {filteredEntries.map((entry) => {
+                                const variants = getDictionaryEntryVariants(entry);
+                                const activeVariantIndex = clampIndex(entry.activeVariantIndex, variants.length);
+                                const activeVariant = variants[activeVariantIndex] || null;
+                                const explanation = activeVariant?.text || getDictionaryEntryExplanation(entry);
+                                const collapsed = Boolean(entry.collapsed);
+                                const isSelected = selectedIds.includes(entry.id);
+                                const isGeneratingEntry = Boolean(isGenerating[entry.id]);
+                                const jumpPath = buildJumpPath(entry);
 
-                            return (
-                                <div
-                                    key={entry.id}
-                                    style={{
-                                        borderRadius: '20px',
-                                        border: '1px solid rgba(125,161,255,0.2)',
-                                        background: 'rgba(255,255,255,0.88)',
-                                        boxShadow: '0 18px 36px rgba(17,31,66,0.08)',
-                                        overflow: 'hidden',
-                                    }}
-                                >
+                                return (
                                     <div
+                                        key={entry.id}
                                         style={{
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            gap: '0.55rem',
-                                            padding: '0.85rem 0.95rem',
+                                            borderBottom: '1px solid rgba(8, 10, 14, 0.92)',
+                                            padding: '0.7rem 0 0.55rem',
                                         }}
                                     >
-                                        <label style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-                                            <input
-                                                type="checkbox"
-                                                checked={isSelected}
-                                                onChange={() => handleToggleSelected(entry.id)}
-                                            />
-                                        </label>
-                                        <button
-                                            type="button"
-                                            onClick={() => handleEntryClick(entry)}
-                                            style={{
-                                                flex: 1,
-                                                border: 'none',
-                                                background: 'transparent',
-                                                textAlign: 'left',
-                                                padding: 0,
-                                                cursor: 'pointer',
-                                                color: '#22314d',
-                                                fontSize: '0.92rem',
-                                                fontWeight: 700,
-                                                fontFamily: 'inherit',
-                                            }}
-                                        >
-                                            {entry.term}
-                                            <div style={{ fontSize: '0.72rem', color: '#7b8397', fontWeight: 500, marginTop: '0.2rem' }}>
-                                                {getEntrySpaceTitle(entry)}
+                                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.7rem' }}>
+                                            <label style={{ paddingTop: '0.18rem' }}>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={isSelected}
+                                                    onChange={() => handleToggleSelected(entry.id)}
+                                                />
+                                            </label>
+
+                                            <div style={{ flex: 1, minWidth: 0 }}>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleToggleCollapsed(entry)}
+                                                    style={{
+                                                        border: 'none',
+                                                        background: 'transparent',
+                                                        padding: 0,
+                                                        margin: 0,
+                                                        textAlign: 'left',
+                                                        cursor: 'pointer',
+                                                        display: 'block',
+                                                        width: '100%',
+                                                        color: '#1e2430',
+                                                        fontFamily: 'inherit',
+                                                    }}
+                                                >
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.46rem', minWidth: 0 }}>
+                                                        <span style={{ fontSize: '0.94rem', fontWeight: 700, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                            {entry.term}
+                                                        </span>
+                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.22rem', flexShrink: 0, color: '#5f6778' }}>
+                                                            {entry.sourceKinds.includes('dictionary') && (
+                                                                <span title="辞書から追加" aria-label="辞書から追加" style={{ display: 'inline-flex', alignItems: 'center' }}>
+                                                                    <BookOpen size={12} />
+                                                                </span>
+                                                            )}
+                                                            {entry.sourceKinds.includes('explanation') && (
+                                                                <span title="説明から追加" aria-label="説明から追加" style={{ display: 'inline-flex', alignItems: 'center' }}>
+                                                                    <Sparkles size={12} />
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                </button>
+
+                                                <div style={{ marginTop: '0.16rem', display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleJumpToSource(entry)}
+                                                        disabled={!jumpPath}
+                                                        style={{
+                                                            border: 'none',
+                                                            background: 'transparent',
+                                                            padding: 0,
+                                                            margin: 0,
+                                                            cursor: jumpPath ? 'pointer' : 'default',
+                                                            color: jumpPath ? '#5f6778' : '#a1a7b5',
+                                                            fontFamily: 'inherit',
+                                                            fontSize: '0.72rem',
+                                                            textDecoration: jumpPath ? 'underline' : 'none',
+                                                        }}
+                                                    >
+                                                        {getEntrySpaceTitle(entry)}
+                                                    </button>
+                                                    {isGeneratingEntry && (
+                                                        <span style={{ fontSize: '0.72rem', color: '#6a7796' }}>説明を生成中...</span>
+                                                    )}
+                                                    {!isGeneratingEntry && !explanation && (
+                                                        <span style={{ fontSize: '0.72rem', color: '#6a7796' }}>右の開閉ボタンで説明を作成できます</span>
+                                                    )}
+                                                </div>
+
+                                                <div
+                                                    style={{
+                                                        overflow: 'hidden',
+                                                        maxHeight: collapsed ? '0px' : '420px',
+                                                        opacity: collapsed ? 0 : 1,
+                                                        transition: 'max-height 220ms ease, opacity 180ms ease, padding-top 220ms ease',
+                                                        paddingTop: collapsed ? '0px' : '0.52rem',
+                                                    }}
+                                                >
+                                                    <div
+                                                        style={{
+                                                            paddingLeft: '0.1rem',
+                                                            display: 'flex',
+                                                            flexDirection: 'column',
+                                                            gap: '0.56rem',
+                                                        }}
+                                                    >
+                                                        <div
+                                                            style={{
+                                                                whiteSpace: 'pre-wrap',
+                                                                color: '#222b39',
+                                                                fontSize: '0.84rem',
+                                                                lineHeight: 1.75,
+                                                            }}
+                                                        >
+                                                            {isGeneratingEntry
+                                                                ? '説明を生成しています...'
+                                                                : explanation || 'まだ説明がありません。'}
+                                                        </div>
+
+                                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handleGenerateExplanation(entry, { forceNewVariant: true })}
+                                                                disabled={isGeneratingEntry}
+                                                                style={{
+                                                                    ...compactActionStyle,
+                                                                    cursor: isGeneratingEntry ? 'default' : 'pointer',
+                                                                    opacity: isGeneratingEntry ? 0.68 : 1,
+                                                                }}
+                                                            >
+                                                                <RefreshCw size={12} />
+                                                                もう一度
+                                                            </button>
+
+                                                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => handleCycleVariant(entry, -1)}
+                                                                    disabled={variants.length <= 1}
+                                                                    style={{
+                                                                        ...iconButtonStyle,
+                                                                        opacity: variants.length <= 1 ? 0.4 : 1,
+                                                                        cursor: variants.length <= 1 ? 'default' : 'pointer',
+                                                                    }}
+                                                                    aria-label="前の説明"
+                                                                    title="前の説明"
+                                                                >
+                                                                    <ChevronLeft size={13} />
+                                                                </button>
+                                                                <div style={{ minWidth: '3.1rem', textAlign: 'center', fontSize: '0.73rem', color: '#677086', fontWeight: 700 }}>
+                                                                    {variants.length === 0 ? '0/0' : `${activeVariantIndex + 1}/${variants.length}`}
+                                                                </div>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => handleCycleVariant(entry, 1)}
+                                                                    disabled={variants.length <= 1}
+                                                                    style={{
+                                                                        ...iconButtonStyle,
+                                                                        opacity: variants.length <= 1 ? 0.4 : 1,
+                                                                        cursor: variants.length <= 1 ? 'default' : 'pointer',
+                                                                    }}
+                                                                    aria-label="次の説明"
+                                                                    title="次の説明"
+                                                                >
+                                                                    <ChevronRight size={13} />
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
                                             </div>
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => handleToggleCollapsed(entry)}
-                                            style={{
-                                                ...iconButtonStyle,
-                                                background: collapsed ? 'rgba(255,255,255,0.8)' : 'rgba(108,140,255,0.12)',
-                                            }}
-                                            aria-label={collapsed ? '開く' : '閉じる'}
-                                            title={collapsed ? '開く' : '閉じる'}
-                                        >
-                                            {collapsed ? <ChevronDown size={13} /> : <ChevronUp size={13} />}
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => handleDeleteEntry(entry.id)}
-                                            style={iconButtonStyle}
-                                            aria-label="削除"
-                                            title="削除"
-                                        >
-                                            <Trash2 size={13} />
-                                        </button>
+
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.38rem', paddingTop: '0.05rem' }}>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleToggleCollapsed(entry)}
+                                                    style={{
+                                                        ...iconButtonStyle,
+                                                        background: collapsed ? 'rgba(255,255,255,0.98)' : 'rgba(108,140,255,0.1)',
+                                                    }}
+                                                    aria-label={collapsed ? '開く' : '閉じる'}
+                                                    title={collapsed ? '開く' : '閉じる'}
+                                                >
+                                                    <ChevronDown
+                                                        size={13}
+                                                        style={{
+                                                            transform: collapsed ? 'rotate(0deg)' : 'rotate(180deg)',
+                                                            transition: 'transform 180ms ease',
+                                                        }}
+                                                    />
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleDeleteEntry(entry.id)}
+                                                    style={iconButtonStyle}
+                                                    aria-label="削除"
+                                                    title="削除"
+                                                >
+                                                    <Trash2 size={13} />
+                                                </button>
+                                            </div>
+                                        </div>
                                     </div>
-
-                                    {!collapsed && (
-                                        <div
-                                            style={{
-                                                padding: '0 0.95rem 0.95rem',
-                                                borderTop: '1px solid rgba(125,161,255,0.12)',
-                                            }}
-                                        >
-                                            <div
-                                                style={{
-                                                    padding: '0.9rem 0.95rem',
-                                                    borderRadius: '16px',
-                                                    background: 'linear-gradient(180deg, rgba(235,242,255,0.95) 0%, rgba(219,231,255,0.92) 100%)',
-                                                    border: '1px solid rgba(125,161,255,0.25)',
-                                                    color: '#22314d',
-                                                    fontSize: '0.88rem',
-                                                    lineHeight: 1.85,
-                                                    whiteSpace: 'pre-wrap',
-                                                }}
-                                            >
-                                                {isGeneratingEntry
-                                                    ? '説明文を作成中...'
-                                                    : entry.explanation || 'まだ説明文がありません。クリックすると説明文を生成します。'}
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {collapsed && (
-                                        <div
-                                            style={{
-                                                padding: '0 0.95rem 0.9rem',
-                                                color: 'var(--text-muted)',
-                                                fontSize: '0.78rem',
-                                            }}
-                                        >
-                                            {isGeneratingEntry
-                                                ? '説明文を作成中...'
-                                                : (entry.explanation ? 'クリックで説明を表示' : 'クリックで説明文を生成')}
-                                        </div>
-                                    )}
-                                </div>
-                            );
-                        })
+                                );
+                            })}
+                        </div>
                     )}
                 </div>
             </div>
