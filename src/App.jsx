@@ -76,6 +76,14 @@ function AppContent() {
             element={session ? <ErrorBoundary><Editor /></ErrorBoundary> : <Navigate to="/auth" replace />}
           />
           <Route
+            path="/s/:id"
+            element={session ? <SpaceModeRedirect /> : <Navigate to="/auth" replace />}
+          />
+          <Route
+            path="/s/:first/:second"
+            element={session ? <SpaceRouteResolver /> : <Navigate to="/auth" replace />}
+          />
+          <Route
             path="/S/:id"
             element={session ? <SpaceModeRedirect /> : <Navigate to="/auth" replace />}
           />

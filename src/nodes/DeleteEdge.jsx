@@ -88,7 +88,7 @@ export default function DeleteEdge({
     return (
         <>
             <BaseEdge path={edgePath} markerEnd={markerEnd} style={style} />
-            {!isLoopEdge && (
+            {!isLoopEdge && data?.canDelete !== false && (
                 <EdgeLabelRenderer>
                     <div
                         style={{

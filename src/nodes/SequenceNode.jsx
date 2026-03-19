@@ -11,19 +11,22 @@ export default function SequenceNode({ data, id }) {
     const isLR = data.dir === 'LR';
     const sourcePos = isLR ? Position.Right : Position.Bottom;
     const targetPos = isLR ? Position.Left : Position.Top;
+    const nodeClassName = `custom-node node-sequence${data.showSharedHighlight ? ' node-shared-edit' : ''}${data.isGraphEditMode && !data.isProjectShared ? ' node-muted-edit' : ''}`;
 
     useEffect(() => {
         try { updateNodeInternals(id); } catch (e) { }
     }, [id, isLR, updateNodeInternals]);
 
     return (
-        <div className="custom-node node-sequence">
+        <div className={nodeClassName}>
             <Handle type="target" position={targetPos} className="custom-handle" />
 
             <div className="node-header" style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                     <Target size={14} />
                     <button
+                        disabled={!data.canToggleLoop}
+                        className={!data.canToggleLoop ? 'node-action-disabled' : ''}
                         onClick={() => data.onToggleLoop ? data.onToggleLoop(id) : (data.onChange && data.onChange(id, 'isLooping', !data.isLooping))}
                         style={{
                             background: data.isLooping ? 'rgba(251, 191, 36, 0.15)' : 'transparent',
@@ -39,7 +42,10 @@ export default function SequenceNode({ data, id }) {
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.2rem' }}>
                     {!data.isStarter && (
-                        <button onClick={() => data.onDeleteNode && data.onDeleteNode(id)}
+                        <button
+                            disabled={!data.canDeleteNode}
+                            className={!data.canDeleteNode ? 'node-action-disabled' : ''}
+                            onClick={() => data.onDeleteNode && data.onDeleteNode(id)}
                             style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '0.15rem', display: 'flex', alignItems: 'center', opacity: 0.5, transition: 'opacity 0.2s' }}
                             title={t('node.delete')}
                             onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.color = '#f87171'; }}
@@ -48,7 +54,10 @@ export default function SequenceNode({ data, id }) {
                             <Trash2 size={12} />
                         </button>
                     )}
-                    <button onClick={() => data.onQuickAdd && data.onQuickAdd(id, 'sequenceNode')}
+                    <button
+                        disabled={!data.canQuickAdd}
+                        className={!data.canQuickAdd ? 'node-action-disabled' : ''}
+                        onClick={() => data.onQuickAdd && data.onQuickAdd(id, 'sequenceNode')}
                         style={{ background: 'transparent', border: 'none', color: 'var(--text-main)', cursor: 'pointer', padding: '0.15rem', display: 'flex', alignItems: 'center', opacity: 0.7, transition: 'opacity 0.2s' }}
                         title={t('node.addNode')}
                         onMouseEnter={(e) => e.currentTarget.style.opacity = '1'}

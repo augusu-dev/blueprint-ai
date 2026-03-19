@@ -1,6 +1,6 @@
 export const SPACE_MODES = ['chat', 'graph', 'map'];
 export const DEFAULT_SPACE_MODE = 'chat';
-export const SPACE_ROUTE_PREFIX = 'S';
+export const SPACE_ROUTE_PREFIX = 's';
 
 export function isSpaceMode(mode) {
     return SPACE_MODES.includes(mode);

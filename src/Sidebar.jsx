@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
+    Edit3,
     FolderClosed,
     FolderOpen,
     FolderPlus,
@@ -15,11 +16,13 @@ import {
 import { supabase } from './lib/supabase';
 import { useLanguage } from './i18n';
 import { DEFAULT_SPACE_MODE, getSpacePath, isSpaceMode, resolveSpaceRouteParams } from './lib/routes';
+import { resolveSpaceTitle } from './lib/space';
 import {
     assignSpaceToProject,
     createWorkspaceProject,
     loadWorkspaceMeta,
     removeSpaceFromWorkspace,
+    renameWorkspaceSpace,
     setDraftProjectId,
     setSelectedProjectId,
     syncWorkspaceProjectFromSpace,
@@ -36,6 +39,7 @@ function SidebarSpaceRow({
     draggable = false,
     isDragging = false,
     onOpen,
+    onRename,
     onPin,
     onDelete,
     onDragStart,
@@ -99,6 +103,27 @@ function SidebarSpaceRow({
                     </div>
                 )}
             </div>
+            <button
+                type="button"
+                onClick={(event) => {
+                    event.stopPropagation();
+                    onRename(space.id);
+                }}
+                style={{
+                    background: 'transparent',
+                    border: 'none',
+                    color: 'var(--text-muted)',
+                    cursor: 'pointer',
+                    padding: '0.15rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    flexShrink: 0,
+                }}
+                title="Rename"
+                aria-label="Rename"
+            >
+                <Edit3 size={12} />
+            </button>
             {showPin && (
                 <button
                     type="button"
@@ -185,7 +210,7 @@ export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
                 const id = key.replace('blueprint_space_', '');
                 nextSpaces.push({
                     id,
-                    title: spaceData.title || t('editor.untitled'),
+                    title: resolveSpaceTitle(id, spaceData.title, t('editor.untitled')),
                     updated_at: spaceData.updated_at || new Date().toISOString(),
                 });
             } catch {
@@ -201,11 +226,15 @@ export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
                     .order('updated_at', { ascending: false });
                 if (!error && data) {
                     data.forEach((remoteSpace) => {
+                        const resolvedRemoteSpace = {
+                            ...remoteSpace,
+                            title: resolveSpaceTitle(remoteSpace.id, remoteSpace.title, t('editor.untitled')),
+                        };
                         const existingIndex = nextSpaces.findIndex((space) => space.id === remoteSpace.id);
                         if (existingIndex >= 0) {
-                            nextSpaces[existingIndex] = remoteSpace;
+                            nextSpaces[existingIndex] = resolvedRemoteSpace;
                         } else {
-                            nextSpaces.push(remoteSpace);
+                            nextSpaces.push(resolvedRemoteSpace);
                         }
                     });
                 }
@@ -267,6 +296,46 @@ export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
         if (spaceId === currentSpaceId) navigate('/');
         fetchSpaces();
     };
+
+    const handleRenameSpace = useCallback(async (targetSpaceId) => {
+        const targetSpace = spaces.find((space) => space.id === targetSpaceId);
+        const currentTitle = resolveSpaceTitle(targetSpaceId, targetSpace?.title, t('editor.untitled'));
+        const nextTitle = window.prompt('スペース名を変更', currentTitle);
+        if (nextTitle === null) return;
+
+        const cleanedTitle = nextTitle.trim() || resolveSpaceTitle(targetSpaceId, '', t('editor.untitled'));
+
+        try {
+            const storageKey = `blueprint_space_${targetSpaceId}`;
+            const stored = localStorage.getItem(storageKey);
+            if (stored) {
+                const parsed = JSON.parse(stored);
+                localStorage.setItem(storageKey, JSON.stringify({
+                    ...parsed,
+                    title: cleanedTitle,
+                    updated_at: new Date().toISOString(),
+                }));
+            }
+        } catch {
+            // Ignore malformed local snapshots during rename.
+        }
+
+        renameWorkspaceSpace(targetSpaceId, cleanedTitle);
+
+        if (supabase) {
+            try {
+                await supabase
+                    .from('spaces')
+                    .update({ title: cleanedTitle, updated_at: new Date().toISOString() })
+                    .eq('id', targetSpaceId);
+            } catch {
+                // Keep local rename even if remote update fails.
+            }
+        }
+
+        window.dispatchEvent(new CustomEvent('spaceTitleUpdated'));
+        fetchSpaces();
+    }, [fetchSpaces, spaces, t]);
 
     const handleCreateProject = useCallback(() => {
         const trimmedName = newProjectName.trim();
@@ -586,6 +655,7 @@ export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
                                                         navigate(getSpacePath(spaceId, currentMode));
                                                         onClose();
                                                     }}
+                                                    onRename={handleRenameSpace}
                                                     onPin={() => togglePinnedSpace(space.id)}
                                                     onDelete={handleDeleteSpace}
                                                 />
@@ -626,6 +696,7 @@ export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
                                                 navigate(getSpacePath(spaceId, currentMode));
                                                 onClose();
                                             }}
+                                            onRename={handleRenameSpace}
                                             onPin={() => togglePinnedSpace(space.id)}
                                             onDelete={handleDeleteSpace}
                                             onDragStart={handleSpaceDragStart}
@@ -657,6 +728,7 @@ export default function Sidebar({ isOpen, onClose, onOpenSettings }) {
                                                 navigate(getSpacePath(spaceId, currentMode));
                                                 onClose();
                                             }}
+                                            onRename={handleRenameSpace}
                                             onPin={() => togglePinnedSpace(space.id)}
                                             onDelete={handleDeleteSpace}
                                             onDragStart={handleSpaceDragStart}

@@ -383,10 +383,11 @@ export default function GoalNode({ data, id }) {
     };
 
     const hasCompletedGoal = goalHistory.some((message) => message.content.includes('[GOAL_COMPLETE]'));
+    const nodeClassName = `glass-panel${data.showSharedHighlight ? ' node-shared-edit' : ''}`;
 
     return (
         <div
-            className="glass-panel"
+            className={nodeClassName}
             style={{
                 width: '380px',
                 height: '460px',

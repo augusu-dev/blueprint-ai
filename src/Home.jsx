@@ -4,7 +4,7 @@ import { supabase } from './lib/supabase';
 import { Box, LogOut, ChevronRight } from 'lucide-react';
 import { useLanguage } from './i18n';
 import { getSpacePath } from './lib/routes';
-import { createSpaceData } from './lib/space';
+import { createSpaceData, getDefaultSpaceTitle, resolveSpaceTitle } from './lib/space';
 
 export default function Home() {
     const navigate = useNavigate();
@@ -35,9 +35,17 @@ export default function Home() {
                     const { data, error } = insertResult;
 
                     if (!error && data) {
+                        const resolvedTitle = resolveSpaceTitle(data.id, data.title || spaceData.title, t('editor.untitled'));
+                        if (resolvedTitle !== data.title) {
+                            try {
+                                await supabase.from('spaces').update({ title: resolvedTitle }).eq('id', data.id);
+                            } catch {
+                                // Keep local title even if remote correction fails.
+                            }
+                        }
                         localStorage.setItem(`blueprint_space_${data.id}`, JSON.stringify({
                             ...spaceData,
-                            title: data.title || spaceData.title,
+                            title: resolvedTitle,
                             updated_at: data.updated_at || spaceData.updated_at,
                         }));
                         navigate(getSpacePath(data.id));
@@ -51,7 +59,10 @@ export default function Home() {
 
         // Fallback for local / unauthenticated
         const newId = crypto.randomUUID();
-        localStorage.setItem(`blueprint_space_${newId}`, JSON.stringify(spaceData));
+        localStorage.setItem(`blueprint_space_${newId}`, JSON.stringify({
+            ...spaceData,
+            title: getDefaultSpaceTitle(newId, t('editor.untitled')),
+        }));
         navigate(getSpacePath(newId));
     };
 

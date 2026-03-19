@@ -1,3 +1,4 @@
+import { normalizeMapState } from './space';
 import { deriveStudySettings } from './studySettings';
 
 const WORKSPACE_META_KEY = 'blueprint_workspace_meta_v1';
@@ -45,6 +46,7 @@ function normalizeSharedSnapshot(snapshot) {
     return {
         nodes: Array.isArray(snapshot?.nodes) ? snapshot.nodes : [],
         edges: Array.isArray(snapshot?.edges) ? snapshot.edges : [],
+        mapState: snapshot?.mapState ? normalizeMapState(snapshot.mapState) : normalizeMapState(snapshot?.map_state),
         updatedAt: snapshot?.updatedAt || null,
     };
 }
@@ -231,6 +233,22 @@ export function assignSpaceToProject(spaceId, projectId, title = '') {
     });
 }
 
+export function renameWorkspaceSpace(spaceId, title) {
+    const meta = loadWorkspaceMeta();
+    const nextTitle = typeof title === 'string' ? title.trim() : '';
+
+    return saveWorkspaceMeta({
+        ...meta,
+        spaces: {
+            ...meta.spaces,
+            [spaceId]: {
+                ...(meta.spaces[spaceId] || {}),
+                title: nextTitle,
+            },
+        },
+    });
+}
+
 export function removeSpaceFromWorkspace(spaceId) {
     const meta = loadWorkspaceMeta();
     const nextSpaces = { ...meta.spaces };
@@ -253,6 +271,7 @@ export function syncWorkspaceProjectFromSpace(spaceId, spaceData, explicitProjec
         ? normalizeSharedSnapshot({
             nodes: spaceData.nodes,
             edges: spaceData.edges,
+            mapState: spaceData?.map_state,
             updatedAt: spaceData?.updated_at || new Date().toISOString(),
         })
         : null;
@@ -291,6 +310,35 @@ export function syncWorkspaceProjectFromSpace(spaceId, spaceData, explicitProjec
         spaces: nextSpaces,
         projects: nextProjects,
         selectedProjectId: projectId || meta.selectedProjectId || null,
+    });
+}
+
+export function saveProjectSharedSnapshot(projectId, snapshot) {
+    if (!projectId) return loadWorkspaceMeta();
+
+    const meta = loadWorkspaceMeta();
+    const normalizedSnapshot = normalizeSharedSnapshot({
+        ...snapshot,
+        updatedAt: snapshot?.updatedAt || new Date().toISOString(),
+    });
+    const insights = deriveProjectInsights({
+        nodes: normalizedSnapshot.nodes,
+        edges: normalizedSnapshot.edges,
+    });
+
+    return saveWorkspaceMeta({
+        ...meta,
+        projects: meta.projects.map((project) => (
+            project.id === projectId
+                ? {
+                    ...project,
+                    updatedAt: new Date().toISOString(),
+                    sharedGoal: insights.sharedGoal || project.sharedGoal,
+                    sharedMemory: insights.sharedMemory || project.sharedMemory,
+                    sharedSnapshot: normalizedSnapshot,
+                }
+                : project
+        )),
     });
 }
 

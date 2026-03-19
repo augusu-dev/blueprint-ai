@@ -11,6 +11,30 @@ export function createTileId(x, y) {
     return `${x},${y}`;
 }
 
+const UNTITLED_TITLES = new Set([
+    '無題のスペース',
+    'Untitled Space',
+    '未命名空间',
+]);
+
+export function getDefaultSpaceTitle(spaceId, fallback = 'space') {
+    if (typeof spaceId === 'string' && spaceId.trim()) {
+        const prefix = spaceId.trim().split('-')[0].slice(0, 8);
+        if (prefix) return prefix;
+    }
+
+    return fallback;
+}
+
+export function resolveSpaceTitle(spaceId, title, fallback = 'space') {
+    const trimmedTitle = typeof title === 'string' ? title.trim() : '';
+    if (!trimmedTitle || UNTITLED_TITLES.has(trimmedTitle)) {
+        return getDefaultSpaceTitle(spaceId, fallback);
+    }
+
+    return trimmedTitle;
+}
+
 function createDefaultRevealedTiles() {
     const revealed = new Set();
 

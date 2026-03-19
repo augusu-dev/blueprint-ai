@@ -25,7 +25,13 @@ import BranchNode from './nodes/BranchNode';
 import GoalNode from './nodes/GoalNode';
 import DeleteEdge from './nodes/DeleteEdge';
 import { DEFAULT_SPACE_MODE, getSpacePath, isSpaceMode, resolveSpaceRouteParams } from './lib/routes';
-import { createDefaultMapState, createInitialEdges, createInitialNodes, normalizeMapState } from './lib/space';
+import {
+    createDefaultMapState,
+    createInitialEdges,
+    createInitialNodes,
+    normalizeMapState,
+    resolveSpaceTitle,
+} from './lib/space';
 import {
     createEmptyApiKeyEntry,
     getDefaultModel,
@@ -36,6 +42,8 @@ import {
 import {
     getProjectContextPrompt,
     loadWorkspaceMeta,
+    renameWorkspaceSpace,
+    saveProjectSharedSnapshot,
     syncWorkspaceProjectFromSpace,
 } from './lib/workspace';
 
@@ -60,9 +68,55 @@ const LOOP_EDGE_PREFIX = 'e-loop-';
 const LOOP_COLUMN_OFFSET = 320;
 const LOOP_ROW_OFFSET = 250;
 const LOOP_STACK_SPACING = 190;
+const PROJECT_SCOPE_SHARED = 'project';
+const PROJECT_SCOPE_LOCAL = 'space';
 
 function getNodeMeasure(node, key, fallback) {
     return Number(node?.measured?.[key] || node?.[key] || fallback);
+}
+
+function cloneSerializable(value) {
+    if (value == null) return value;
+    return JSON.parse(JSON.stringify(value));
+}
+
+function getNodeProjectScope(node, fallback = PROJECT_SCOPE_LOCAL) {
+    return node?.data?.projectScope === PROJECT_SCOPE_SHARED ? PROJECT_SCOPE_SHARED : fallback;
+}
+
+function getEdgeProjectScope(edge, fallback = PROJECT_SCOPE_LOCAL) {
+    return edge?.data?.projectScope === PROJECT_SCOPE_SHARED ? PROJECT_SCOPE_SHARED : fallback;
+}
+
+function applyNodeProjectScope(node, fallback = PROJECT_SCOPE_LOCAL) {
+    return {
+        ...node,
+        data: {
+            ...(node?.data || {}),
+            projectScope: getNodeProjectScope(node, fallback),
+        },
+    };
+}
+
+function applyEdgeProjectScope(edge, fallback = PROJECT_SCOPE_LOCAL) {
+    return {
+        ...edge,
+        data: {
+            ...(edge?.data || {}),
+            projectScope: getEdgeProjectScope(edge, fallback),
+        },
+    };
+}
+
+function getEdgeSignature(edge) {
+    return [
+        edge?.source || '',
+        edge?.sourceHandle || '',
+        edge?.target || '',
+        edge?.targetHandle || '',
+        edge?.type || '',
+        edge?.data?.edgeKind || '',
+    ].join(':');
 }
 
 function getGoalAnchorPosition(rawNodes, direction) {
@@ -309,7 +363,7 @@ function applyLoopGroups(rawNodes, groups, direction) {
         .map((node) => nodeMap.get(node.id));
 }
 
-function createLoopEdge(sourceId, targetId, rootId, direction, role, index, count) {
+function createLoopEdge(sourceId, targetId, rootId, direction, role, index, count, projectScope = PROJECT_SCOPE_LOCAL) {
     return {
         id: `${LOOP_EDGE_PREFIX}${rootId}-${sourceId}-${targetId}`,
         source: sourceId,
@@ -326,23 +380,27 @@ function createLoopEdge(sourceId, targetId, rootId, direction, role, index, coun
             loopNodeCount: count,
             loopDirection: direction,
             loopGroupId: rootId,
+            projectScope,
         },
     };
 }
 
 function rebuildLoopEdges(rawNodes, rawEdges, direction) {
     const baseEdges = rawEdges.filter((edge) => !isLoopEdge(edge));
+    const nodesById = new Map(rawNodes.map((node) => [node.id, node]));
     const groups = extractLoopGroups(rawNodes);
     const loopEdges = groups.flatMap((chain) => {
         if (chain.length < 2) return [];
 
         return chain.map((sourceId, index) => {
             const targetId = chain[(index + 1) % chain.length];
+            const sourceNode = nodesById.get(sourceId);
             const role = index === 0
                 ? 'entry'
                 : (index === chain.length - 1 ? 'close' : 'chain');
+            const projectScope = getNodeProjectScope(sourceNode, PROJECT_SCOPE_LOCAL);
 
-            return createLoopEdge(sourceId, targetId, chain[0], direction, role, index, chain.length);
+            return createLoopEdge(sourceId, targetId, chain[0], direction, role, index, chain.length, projectScope);
         });
     });
 
@@ -362,6 +420,88 @@ function prepareLoopGraphFromGroups(rawNodes, rawEdges, groups, direction) {
     return { nodes, edges };
 }
 
+function mergeProjectSpaceGraph(project, spaceData) {
+    const sharedSnapshot = project?.sharedSnapshot || null;
+    const hasSharedSnapshot = Array.isArray(sharedSnapshot?.nodes) && sharedSnapshot.nodes.length > 0;
+    const shouldPromoteLocalGraph = !hasSharedSnapshot && Array.isArray(spaceData?.nodes) && spaceData.nodes.length > 0;
+
+    const sharedNodes = shouldPromoteLocalGraph
+        ? spaceData.nodes.map((node) => applyNodeProjectScope(node, PROJECT_SCOPE_SHARED))
+        : (Array.isArray(sharedSnapshot?.nodes) ? sharedSnapshot.nodes : []).map((node) => applyNodeProjectScope(node, PROJECT_SCOPE_SHARED));
+    const sharedEdges = shouldPromoteLocalGraph
+        ? (Array.isArray(spaceData?.edges) ? spaceData.edges : []).map((edge) => applyEdgeProjectScope(edge, PROJECT_SCOPE_SHARED))
+        : (Array.isArray(sharedSnapshot?.edges) ? sharedSnapshot.edges : []).map((edge) => applyEdgeProjectScope(edge, PROJECT_SCOPE_SHARED));
+    const sharedNodeIds = new Set(sharedNodes.map((node) => node.id));
+    const sharedEdgeSignatures = new Set(sharedEdges.map(getEdgeSignature));
+
+    const localNodes = shouldPromoteLocalGraph
+        ? []
+        : (Array.isArray(spaceData?.nodes) ? spaceData.nodes : [])
+            .map((node) => applyNodeProjectScope(node, sharedNodeIds.has(node.id) ? PROJECT_SCOPE_SHARED : PROJECT_SCOPE_LOCAL))
+            .filter((node) => getNodeProjectScope(node) === PROJECT_SCOPE_LOCAL && !sharedNodeIds.has(node.id));
+    const localNodeIds = new Set(localNodes.map((node) => node.id));
+
+    const localEdges = shouldPromoteLocalGraph
+        ? []
+        : (Array.isArray(spaceData?.edges) ? spaceData.edges : [])
+            .map((edge) => {
+                const inferredShared = sharedEdgeSignatures.has(getEdgeSignature(edge));
+                return applyEdgeProjectScope(edge, inferredShared ? PROJECT_SCOPE_SHARED : PROJECT_SCOPE_LOCAL);
+            })
+            .filter((edge) => {
+                if (getEdgeProjectScope(edge) === PROJECT_SCOPE_SHARED) return false;
+                if (sharedEdgeSignatures.has(getEdgeSignature(edge))) return false;
+                const sourceExists = sharedNodeIds.has(edge.source) || localNodeIds.has(edge.source);
+                const targetExists = sharedNodeIds.has(edge.target) || localNodeIds.has(edge.target);
+                return sourceExists && targetExists;
+            });
+
+    const nodes = [...sharedNodes, ...localNodes];
+    const edges = [...sharedEdges, ...localEdges];
+
+    return {
+        nodes: nodes.length > 0 ? nodes : createInitialNodes().map((node) => applyNodeProjectScope(node, PROJECT_SCOPE_SHARED)),
+        edges: edges.length > 0 ? edges : createInitialEdges().map((edge) => applyEdgeProjectScope(edge, PROJECT_SCOPE_SHARED)),
+        mapState: sharedSnapshot?.mapState
+            ? normalizeMapState(sharedSnapshot.mapState)
+            : normalizeMapState(spaceData?.map_state),
+    };
+}
+
+function splitProjectSpaceGraph(rawNodes, rawEdges) {
+    const sharedNodes = rawNodes
+        .filter((node) => getNodeProjectScope(node) === PROJECT_SCOPE_SHARED)
+        .map((node) => applyNodeProjectScope(node, PROJECT_SCOPE_SHARED));
+    const localNodes = rawNodes
+        .filter((node) => getNodeProjectScope(node) !== PROJECT_SCOPE_SHARED)
+        .map((node) => applyNodeProjectScope(node, PROJECT_SCOPE_LOCAL));
+    const sharedNodeIds = new Set(sharedNodes.map((node) => node.id));
+    const localNodeIds = new Set(localNodes.map((node) => node.id));
+
+    const normalizedEdges = rawEdges.map((edge) => {
+        const inferredScope = sharedNodeIds.has(edge.source) && sharedNodeIds.has(edge.target)
+            ? PROJECT_SCOPE_SHARED
+            : PROJECT_SCOPE_LOCAL;
+        return applyEdgeProjectScope(edge, inferredScope);
+    });
+
+    return {
+        sharedNodes,
+        localNodes,
+        sharedEdges: normalizedEdges.filter((edge) => (
+            getEdgeProjectScope(edge) === PROJECT_SCOPE_SHARED
+            && sharedNodeIds.has(edge.source)
+            && sharedNodeIds.has(edge.target)
+        )),
+        localEdges: normalizedEdges.filter((edge) => {
+            if (getEdgeProjectScope(edge) === PROJECT_SCOPE_SHARED) return false;
+            const sourceExists = sharedNodeIds.has(edge.source) || localNodeIds.has(edge.source);
+            const targetExists = sharedNodeIds.has(edge.target) || localNodeIds.has(edge.target);
+            return sourceExists && targetExists;
+        }),
+    };
+}
+
 function EditorContent() {
     const routeParams = useParams();
     const { spaceId, mode } = resolveSpaceRouteParams(routeParams);
@@ -378,6 +518,7 @@ function EditorContent() {
     const direction = 'LR';
     const [showSettings, setShowSettings] = useState(false);
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+    const [isGraphEditMode, setIsGraphEditMode] = useState(false);
 
     const [isEditingTitle, setIsEditingTitle] = useState(false);
     const [tempTitle, setTempTitle] = useState('');
@@ -387,6 +528,7 @@ function EditorContent() {
     const currentMode = isDraft ? draftMode : (isSpaceMode(mode) ? mode : DEFAULT_SPACE_MODE);
     const draftSnapshotRef = useRef(null);
     const promoteDraftPromiseRef = useRef(null);
+    const graphEditSnapshotRef = useRef(null);
     const [workspaceMetaVersion, setWorkspaceMetaVersion] = useState(0);
 
     const [apiKeys, setApiKeys] = useState(() => {
@@ -430,6 +572,12 @@ function EditorContent() {
         [currentProject],
     );
 
+    useEffect(() => {
+        if (!isGraphEditMode) return;
+        setIsSidebarOpen(false);
+        setShowSettings(false);
+    }, [isGraphEditMode]);
+
     const applyProjectGoalToNodes = useCallback((rawNodes, project) => {
         if (!project?.sharedGoal) return rawNodes;
 
@@ -445,11 +593,11 @@ function EditorContent() {
         const draftProjectId = latestWorkspaceMeta.draftProjectId || null;
         const draftProject = latestWorkspaceMeta.projects.find((project) => project.id === draftProjectId) || null;
         const draftNodes = Array.isArray(draftProject?.sharedSnapshot?.nodes) && draftProject.sharedSnapshot.nodes.length > 0
-            ? draftProject.sharedSnapshot.nodes
-            : createInitialNodes();
+            ? draftProject.sharedSnapshot.nodes.map((node) => applyNodeProjectScope(node, PROJECT_SCOPE_SHARED))
+            : createInitialNodes().map((node) => applyNodeProjectScope(node, draftProject ? PROJECT_SCOPE_SHARED : PROJECT_SCOPE_LOCAL));
         const draftEdges = Array.isArray(draftProject?.sharedSnapshot?.edges) && draftProject.sharedSnapshot.edges.length > 0
-            ? draftProject.sharedSnapshot.edges
-            : createInitialEdges();
+            ? draftProject.sharedSnapshot.edges.map((edge) => applyEdgeProjectScope(edge, PROJECT_SCOPE_SHARED))
+            : createInitialEdges().map((edge) => applyEdgeProjectScope(edge, draftProject ? PROJECT_SCOPE_SHARED : PROJECT_SCOPE_LOCAL));
         const preparedDraftGraph = prepareLoopGraph(
             applyProjectGoalToNodes(draftNodes, draftProject),
             draftEdges,
@@ -460,10 +608,11 @@ function EditorContent() {
         setSpaceTitle(t('editor.untitled'));
         setNodes(alignGoalNode(preparedDraftGraph.nodes, direction));
         setEdges(preparedDraftGraph.edges);
-        setMapState(createDefaultMapState());
+        setMapState(draftProject?.sharedSnapshot?.mapState ? normalizeMapState(draftProject.sharedSnapshot.mapState) : createDefaultMapState());
         setActiveChatNodeId('1');
         setDraftMode(DEFAULT_SPACE_MODE);
         setDraftDirty(false);
+        setIsGraphEditMode(false);
         promoteDraftPromiseRef.current = null;
         setIsHydrated(true);
     }, [applyProjectGoalToNodes, direction, setEdges, setNodes, t]);
@@ -510,6 +659,8 @@ function EditorContent() {
 
         if (!spaceId || !isSpaceMode(mode)) return undefined;
         let isCancelled = false;
+        graphEditSnapshotRef.current = null;
+        setIsGraphEditMode(false);
         setIsHydrated(false);
 
         const applySpaceData = (data) => {
@@ -518,27 +669,26 @@ function EditorContent() {
             const projectForSpace = latestWorkspaceMeta.projects.find(
                 (project) => project.id === latestWorkspaceMeta.spaces[spaceId]?.projectId,
             ) || null;
-            const projectNodes = Array.isArray(projectForSpace?.sharedSnapshot?.nodes) && projectForSpace.sharedSnapshot.nodes.length > 0
-                ? projectForSpace.sharedSnapshot.nodes
-                : null;
-            const projectEdges = Array.isArray(projectForSpace?.sharedSnapshot?.edges) && projectForSpace.sharedSnapshot.edges.length > 0
-                ? projectForSpace.sharedSnapshot.edges
-                : null;
-            const localNodes = Array.isArray(data.nodes) && data.nodes.length > 0 ? data.nodes : null;
-            const localEdges = Array.isArray(data.edges) && data.edges.length > 0 ? data.edges : null;
-            const resolvedNodes = localNodes || projectNodes || createInitialNodes();
-            const resolvedEdges = localEdges || projectEdges || createInitialEdges();
+            const mergedGraph = projectForSpace
+                ? mergeProjectSpaceGraph(projectForSpace, data)
+                : {
+                    nodes: (Array.isArray(data.nodes) && data.nodes.length > 0 ? data.nodes : createInitialNodes())
+                        .map((node) => applyNodeProjectScope(node, PROJECT_SCOPE_LOCAL)),
+                    edges: (Array.isArray(data.edges) && data.edges.length > 0 ? data.edges : createInitialEdges())
+                        .map((edge) => applyEdgeProjectScope(edge, PROJECT_SCOPE_LOCAL)),
+                    mapState: normalizeMapState(data.map_state),
+                };
             const preparedGraph = prepareLoopGraph(
                 applyProjectGoalToNodes(
-                    resolvedNodes,
+                    mergedGraph.nodes,
                     projectForSpace,
                 ),
-                resolvedEdges,
+                mergedGraph.edges,
                 direction,
             );
 
-            setSpaceTitle(data.title || t('editor.untitled'));
-            setMapState(normalizeMapState(data.map_state));
+            setSpaceTitle(resolveSpaceTitle(spaceId, data.title, t('editor.untitled')));
+            setMapState(mergedGraph.mapState);
             setNodes(alignGoalNode(preparedGraph.nodes, direction));
             setEdges(preparedGraph.edges);
             if (data.viewport && Object.keys(data.viewport).length > 0) {
@@ -554,7 +704,10 @@ function EditorContent() {
                 if (stored) {
                     localData = JSON.parse(stored);
                     if (localData?.project_id) {
-                        syncWorkspaceProjectFromSpace(spaceId, localData, localData.project_id);
+                        syncWorkspaceProjectFromSpace(spaceId, {
+                            title: localData.title,
+                            updated_at: localData.updated_at,
+                        }, localData.project_id);
                     }
                 }
             } catch {
@@ -562,9 +715,9 @@ function EditorContent() {
             }
 
             const fallbackData = localData || {
-                title: t('editor.untitled'),
-                nodes: createInitialNodes(),
-                edges: createInitialEdges(),
+                title: resolveSpaceTitle(spaceId, '', t('editor.untitled')),
+                nodes: createInitialNodes().map((node) => applyNodeProjectScope(node, PROJECT_SCOPE_LOCAL)),
+                edges: createInitialEdges().map((edge) => applyEdgeProjectScope(edge, PROJECT_SCOPE_LOCAL)),
                 map_state: createDefaultMapState(),
             };
 
@@ -601,8 +754,19 @@ function EditorContent() {
 
         const handleTitleUpdate = async () => {
             try {
+                const stored = localStorage.getItem(`blueprint_space_${spaceId}`);
+                if (stored && !isCancelled) {
+                    const parsed = JSON.parse(stored);
+                    setSpaceTitle(resolveSpaceTitle(spaceId, parsed?.title, t('editor.untitled')));
+                    return;
+                }
+
+                if (!supabase) return;
+
                 const { data } = await supabase.from('spaces').select('title').eq('id', spaceId).single();
-                if (!isCancelled && data?.title) setSpaceTitle(data.title);
+                if (!isCancelled && data) {
+                    setSpaceTitle(resolveSpaceTitle(spaceId, data.title, t('editor.untitled')));
+                }
             } catch {
                 // Ignore title refresh failures.
             }
@@ -618,6 +782,7 @@ function EditorContent() {
         return rawNodes.map(n => ({
             id: n.id, type: n.type, position: n.position,
             data: n.data ? {
+                projectScope: n.data.projectScope,
                 dir: n.data.dir, prompt: n.data.prompt, systemPrompt: n.data.systemPrompt,
                 chatHistory: n.data.chatHistory, response: n.data.response, isStarter: n.data.isStarter,
                 numBranches: n.data.numBranches, loopMode: n.data.loopMode,
@@ -628,6 +793,28 @@ function EditorContent() {
                 goalInteractiveStates: n.data.goalInteractiveStates,
                 goalSelectedOptions: n.data.goalSelectedOptions,
             } : {}
+        }));
+    };
+
+    const cleanEdgesForSave = (rawEdges) => {
+        return rawEdges.map((edge) => ({
+            id: edge.id,
+            source: edge.source,
+            target: edge.target,
+            sourceHandle: edge.sourceHandle,
+            targetHandle: edge.targetHandle,
+            type: edge.type,
+            animated: edge.animated,
+            style: edge.style,
+            data: edge.data ? {
+                edgeKind: edge.data.edgeKind,
+                loopEdgeRole: edge.data.loopEdgeRole,
+                loopEdgeIndex: edge.data.loopEdgeIndex,
+                loopNodeCount: edge.data.loopNodeCount,
+                loopDirection: edge.data.loopDirection,
+                loopGroupId: edge.data.loopGroupId,
+                projectScope: edge.data.projectScope,
+            } : {},
         }));
     };
 
@@ -645,25 +832,27 @@ function EditorContent() {
     const createSpaceFromSnapshot = useCallback(async (snapshot) => {
         const latestWorkspaceMeta = loadWorkspaceMeta();
         const project = latestWorkspaceMeta.projects.find((item) => item.id === snapshot.projectId) || null;
-        const sharedNodes = Array.isArray(project?.sharedSnapshot?.nodes) && project.sharedSnapshot.nodes.length > 0
-            ? project.sharedSnapshot.nodes
-            : null;
-        const sharedEdges = Array.isArray(project?.sharedSnapshot?.edges) && project.sharedSnapshot.edges.length > 0
-            ? project.sharedSnapshot.edges
-            : null;
         const snapshotGraph = Array.isArray(snapshot.nodes) && snapshot.nodes.length > 0
             ? prepareLoopGraph(snapshot.nodes, Array.isArray(snapshot.edges) ? snapshot.edges : [], direction)
             : null;
-        const sharedGraph = sharedNodes
-            ? prepareLoopGraph(sharedNodes, sharedEdges || [], direction)
-            : null;
-        const snapshotNodes = snapshotGraph ? cleanNodesForSave(snapshotGraph.nodes) : null;
-        const snapshotEdges = snapshotGraph?.edges || null;
+        const fallbackNodes = createInitialNodes().map((node) => applyNodeProjectScope(node, snapshot.projectId ? PROJECT_SCOPE_SHARED : PROJECT_SCOPE_LOCAL));
+        const fallbackEdges = createInitialEdges().map((edge) => applyEdgeProjectScope(edge, snapshot.projectId ? PROJECT_SCOPE_SHARED : PROJECT_SCOPE_LOCAL));
+        const baseNodes = snapshotGraph?.nodes || fallbackNodes;
+        const baseEdges = snapshotGraph?.edges || fallbackEdges;
+        const preparedNodes = snapshot.projectId && (!project?.sharedSnapshot?.nodes || project.sharedSnapshot.nodes.length === 0)
+            ? baseNodes.map((node) => applyNodeProjectScope(node, PROJECT_SCOPE_SHARED))
+            : baseNodes;
+        const preparedEdges = snapshot.projectId && (!project?.sharedSnapshot?.nodes || project.sharedSnapshot.nodes.length === 0)
+            ? baseEdges.map((edge) => applyEdgeProjectScope(edge, PROJECT_SCOPE_SHARED))
+            : baseEdges;
+        const splitGraph = snapshot.projectId
+            ? splitProjectSpaceGraph(preparedNodes, preparedEdges)
+            : { localNodes: preparedNodes, localEdges: preparedEdges, sharedNodes: [], sharedEdges: [] };
         const updates = {
             title: snapshot.title || t('editor.untitled'),
-            nodes: snapshotNodes || (sharedGraph ? cleanNodesForSave(sharedGraph.nodes) : null) || cleanNodesForSave(createInitialNodes()),
-            edges: snapshotEdges || sharedGraph?.edges || createInitialEdges(),
-            map_state: snapshot.mapState,
+            nodes: cleanNodesForSave(splitGraph.localNodes),
+            edges: cleanEdgesForSave(splitGraph.localEdges),
+            map_state: normalizeMapState(snapshot.mapState),
             project_id: snapshot.projectId || null,
             updated_at: new Date().toISOString(),
         };
@@ -690,13 +879,32 @@ function EditorContent() {
 
                     const { data, error } = insertResult;
                     if (!error && data?.id) {
+                        const resolvedTitle = resolveSpaceTitle(data.id, updates.title, t('editor.untitled'));
                         const persistedUpdates = {
                             ...updates,
-                            title: data.title || updates.title,
+                            title: resolvedTitle,
                             updated_at: data.updated_at || updates.updated_at,
                         };
+                        if (resolvedTitle !== data.title) {
+                            try {
+                                await supabase.from('spaces').update({ title: resolvedTitle }).eq('id', data.id);
+                            } catch {
+                                // Keep local title even if remote title correction fails.
+                            }
+                        }
                         localStorage.setItem(`blueprint_space_${data.id}`, JSON.stringify(persistedUpdates));
-                        syncWorkspaceProjectFromSpace(data.id, persistedUpdates, snapshot.projectId || null);
+                        if (snapshot.projectId) {
+                            saveProjectSharedSnapshot(snapshot.projectId, {
+                                nodes: cleanNodesForSave(splitGraph.sharedNodes),
+                                edges: cleanEdgesForSave(splitGraph.sharedEdges),
+                                mapState: normalizeMapState(snapshot.mapState),
+                                updatedAt: persistedUpdates.updated_at,
+                            });
+                        }
+                        syncWorkspaceProjectFromSpace(data.id, {
+                            title: persistedUpdates.title,
+                            updated_at: persistedUpdates.updated_at,
+                        }, snapshot.projectId || null);
                         window.dispatchEvent(new CustomEvent('spaceTitleUpdated'));
                         return data.id;
                     }
@@ -707,8 +915,21 @@ function EditorContent() {
         }
 
         const newId = crypto.randomUUID();
-        localStorage.setItem(`blueprint_space_${newId}`, JSON.stringify(updates));
-        syncWorkspaceProjectFromSpace(newId, updates, snapshot.projectId || null);
+        const resolvedLocalTitle = resolveSpaceTitle(newId, updates.title, t('editor.untitled'));
+        const localUpdates = { ...updates, title: resolvedLocalTitle };
+        localStorage.setItem(`blueprint_space_${newId}`, JSON.stringify(localUpdates));
+        if (snapshot.projectId) {
+            saveProjectSharedSnapshot(snapshot.projectId, {
+                nodes: cleanNodesForSave(splitGraph.sharedNodes),
+                edges: cleanEdgesForSave(splitGraph.sharedEdges),
+                mapState: normalizeMapState(snapshot.mapState),
+                updatedAt: localUpdates.updated_at,
+            });
+        }
+        syncWorkspaceProjectFromSpace(newId, {
+            title: localUpdates.title,
+            updated_at: localUpdates.updated_at,
+        }, snapshot.projectId || null);
         window.dispatchEvent(new CustomEvent('spaceTitleUpdated'));
         return newId;
     }, [direction, supabase, t]);
@@ -718,6 +939,29 @@ function EditorContent() {
             setDraftDirty(true);
         }
     }, [isDraft]);
+
+    const beginGraphEditMode = useCallback(() => {
+        if (!currentProject || currentMode !== 'graph' || isGraphEditMode) return;
+        graphEditSnapshotRef.current = {
+            nodes: cloneSerializable(nodes),
+            edges: cloneSerializable(edges),
+            mapState: cloneSerializable(mapState),
+            activeChatNodeId,
+        };
+        setIsGraphEditMode(true);
+    }, [activeChatNodeId, currentMode, currentProject, edges, isGraphEditMode, mapState, nodes]);
+
+    const cancelGraphEditMode = useCallback(() => {
+        const snapshot = graphEditSnapshotRef.current;
+        if (snapshot) {
+            setNodes(snapshot.nodes || []);
+            setEdges(snapshot.edges || []);
+            setMapState(normalizeMapState(snapshot.mapState));
+            setActiveChatNodeId(snapshot.activeChatNodeId || '1');
+        }
+        graphEditSnapshotRef.current = null;
+        setIsGraphEditMode(false);
+    }, [setEdges, setNodes]);
 
     useEffect(() => {
         if (!isDraft || !draftDirty || promoteDraftPromiseRef.current) return;
@@ -736,17 +980,23 @@ function EditorContent() {
     const persistCurrentSpace = useCallback(async (titleOverride = spaceTitle) => {
         if (!spaceId || nodes.length === 0 || !isHydrated) return;
         const preparedGraph = prepareLoopGraph(nodes, edges, direction);
+        const resolvedTitle = resolveSpaceTitle(spaceId, titleOverride, t('editor.untitled'));
+        const splitGraph = currentProjectId
+            ? splitProjectSpaceGraph(preparedGraph.nodes, preparedGraph.edges)
+            : { localNodes: preparedGraph.nodes, localEdges: preparedGraph.edges, sharedNodes: [], sharedEdges: [] };
+        const normalizedMapState = normalizeMapState(mapState);
 
         const updates = {
-            title: titleOverride,
-            nodes: cleanNodesForSave(preparedGraph.nodes),
-            edges: preparedGraph.edges,
-            map_state: mapState,
+            title: resolvedTitle,
+            nodes: cleanNodesForSave(splitGraph.localNodes),
+            edges: cleanEdgesForSave(splitGraph.localEdges),
+            map_state: normalizedMapState,
             project_id: currentProjectId,
             updated_at: new Date().toISOString(),
         };
 
         localStorage.setItem(`blueprint_space_${spaceId}`, JSON.stringify(updates));
+        renameWorkspaceSpace(spaceId, resolvedTitle);
         await updateRemoteSpace({
             title: updates.title,
             nodes: updates.nodes,
@@ -754,11 +1004,39 @@ function EditorContent() {
             map_state: updates.map_state,
             updated_at: updates.updated_at,
         });
-        syncWorkspaceProjectFromSpace(spaceId, updates, currentProjectId);
-    }, [currentProjectId, direction, edges, isHydrated, mapState, nodes, spaceId, spaceTitle, updateRemoteSpace]);
+        if (currentProjectId) {
+            saveProjectSharedSnapshot(currentProjectId, {
+                nodes: cleanNodesForSave(splitGraph.sharedNodes),
+                edges: cleanEdgesForSave(splitGraph.sharedEdges),
+                mapState: normalizedMapState,
+                updatedAt: updates.updated_at,
+            });
+        }
+        syncWorkspaceProjectFromSpace(spaceId, {
+            title: updates.title,
+            updated_at: updates.updated_at,
+        }, currentProjectId);
+    }, [currentProjectId, direction, edges, isHydrated, mapState, nodes, spaceId, spaceTitle, t, updateRemoteSpace]);
+
+    const completeGraphEditMode = useCallback(async () => {
+        if (!currentProjectId || !spaceId) {
+            setIsGraphEditMode(false);
+            graphEditSnapshotRef.current = null;
+            return;
+        }
+
+        try {
+            await persistCurrentSpace();
+            graphEditSnapshotRef.current = null;
+            setIsGraphEditMode(false);
+        } catch (error) {
+            console.error('Graph edit save failed:', error);
+            alert(t('editor.saveError'));
+        }
+    }, [currentProjectId, persistCurrentSpace, spaceId, t]);
 
     const saveTitle = async () => {
-        const cleanedTitle = tempTitle.trim() || t('editor.untitled');
+        const cleanedTitle = resolveSpaceTitle(spaceId, tempTitle, t('editor.untitled'));
         setSpaceTitle(cleanedTitle);
         setIsEditingTitle(false);
         if (isDraft) {
@@ -769,6 +1047,9 @@ function EditorContent() {
         }
         if (supabase && spaceId) {
             await supabase.from('spaces').update({ title: cleanedTitle }).eq('id', spaceId);
+        }
+        if (spaceId) {
+            renameWorkspaceSpace(spaceId, cleanedTitle);
             window.dispatchEvent(new CustomEvent('spaceTitleUpdated'));
             try {
                 await persistCurrentSpace(cleanedTitle);
@@ -782,7 +1063,7 @@ function EditorContent() {
     // Auto-save
     const saveTimerRef = useRef(null);
     useEffect(() => {
-        if (!spaceId || nodes.length === 0 || !isHydrated) return;
+        if (!spaceId || nodes.length === 0 || !isHydrated || isGraphEditMode) return;
         if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
         saveTimerRef.current = setTimeout(async () => {
             try {
@@ -792,28 +1073,56 @@ function EditorContent() {
             }
         }, 1500);
         return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
-    }, [currentProjectId, edges, isHydrated, mapState, nodes, persistCurrentSpace, spaceId, spaceTitle]);
+    }, [currentProjectId, edges, isGraphEditMode, isHydrated, mapState, nodes, persistCurrentSpace, spaceId, spaceTitle]);
 
     const onNodesChange = useCallback((changes) => {
-        baseOnNodesChange(changes);
-        if (changes.some((change) => change.type === 'position')) {
+        const nodesById = new Map(nodes.map((node) => [node.id, node]));
+        const filteredChanges = changes.filter((change) => {
+            if (!change?.id || change.type === 'select' || change.type === 'dimensions') return true;
+            const targetNode = nodesById.get(change.id);
+            if (!targetNode) return true;
+            const isSharedNode = getNodeProjectScope(targetNode) === PROJECT_SCOPE_SHARED;
+
+            if (change.type === 'position' || change.type === 'remove' || change.type === 'replace') {
+                return isGraphEditMode ? isSharedNode : !isSharedNode;
+            }
+
+            return true;
+        });
+
+        baseOnNodesChange(filteredChanges);
+        if (filteredChanges.some((change) => change.type === 'position')) {
             setNodes((currentNodes) => {
                 const preparedGraph = prepareLoopGraph(currentNodes, edges, direction);
                 setEdges(preparedGraph.edges);
                 return alignGoalNode(preparedGraph.nodes, direction);
             });
         }
-        if (changes.some((change) => change.type !== 'select')) {
+        if (filteredChanges.some((change) => change.type !== 'select')) {
             markDraftDirty();
         }
-    }, [baseOnNodesChange, direction, edges, markDraftDirty, setEdges, setNodes]);
+    }, [baseOnNodesChange, direction, edges, isGraphEditMode, markDraftDirty, nodes, setEdges, setNodes]);
 
     const onEdgesChange = useCallback((changes) => {
-        baseOnEdgesChange(changes);
-        if (changes.some((change) => change.type !== 'select')) {
+        const edgesById = new Map(edges.map((edge) => [edge.id, edge]));
+        const filteredChanges = changes.filter((change) => {
+            if (!change?.id || change.type === 'select') return true;
+            const targetEdge = edgesById.get(change.id);
+            if (!targetEdge) return true;
+            const isSharedEdge = getEdgeProjectScope(targetEdge) === PROJECT_SCOPE_SHARED;
+
+            if (change.type === 'remove' || change.type === 'replace') {
+                return isGraphEditMode ? isSharedEdge : !isSharedEdge;
+            }
+
+            return true;
+        });
+
+        baseOnEdgesChange(filteredChanges);
+        if (filteredChanges.some((change) => change.type !== 'select')) {
             markDraftDirty();
         }
-    }, [baseOnEdgesChange, markDraftDirty]);
+    }, [baseOnEdgesChange, edges, isGraphEditMode, markDraftDirty]);
 
     useEffect(() => {
         setNodes((currentNodes) => alignGoalNode(currentNodes, direction));
@@ -846,6 +1155,12 @@ function EditorContent() {
         setNodes((nds) => {
             const sourceNode = nds.find((node) => node.id === sourceId);
             if (!sourceNode) return nds;
+            const sourceScope = getNodeProjectScope(sourceNode);
+            const isSharedNode = sourceScope === PROJECT_SCOPE_SHARED;
+
+            if ((isSharedNode && !isGraphEditMode) || (!isSharedNode && isGraphEditMode)) {
+                return nds;
+            }
 
             const groups = extractLoopGroups(nds).map((group) => [...group]);
             const groupIndex = groups.findIndex((group) => group.includes(sourceId));
@@ -859,6 +1174,7 @@ function EditorContent() {
                     type: 'loopNode',
                     position: { ...sourceNode.position },
                     data: {
+                        projectScope: sourceScope,
                         dir: direction,
                         prompt: '',
                         loopMode: sourceNode.data?.loopMode || 'perspective',
@@ -885,6 +1201,7 @@ function EditorContent() {
                         type: 'loopNode',
                         position: { ...sourceNode.position },
                         data: {
+                            projectScope: sourceScope,
                             dir: direction,
                             prompt: '',
                             loopMode: sourceNode.data?.loopMode || 'perspective',
@@ -921,7 +1238,7 @@ function EditorContent() {
             return preparedGraph.nodes;
         });
         markDraftDirty();
-    }, [activeChatNodeId, direction, edges, markDraftDirty, setEdges, setNodes]);
+    }, [activeChatNodeId, direction, edges, isGraphEditMode, markDraftDirty, setEdges, setNodes]);
 
     const onQuickAdd = useCallback((sourceId, type) => {
         const outgoingEdges = edges.filter(e => e.source === sourceId);
@@ -929,16 +1246,34 @@ function EditorContent() {
         setNodes((nds) => {
             const sourceNode = nds.find(n => n.id === sourceId);
             if (!sourceNode) return nds;
+            const sourceScope = getNodeProjectScope(sourceNode);
+            const nextScope = sourceScope === PROJECT_SCOPE_SHARED && isGraphEditMode
+                ? PROJECT_SCOPE_SHARED
+                : PROJECT_SCOPE_LOCAL;
+            if (isGraphEditMode && sourceScope !== PROJECT_SCOPE_SHARED) return nds;
             const newId = `node-${crypto.randomUUID()}`;
             const num = outgoingEdges.length;
             let px = direction === 'LR' ? 350 : (num * 240 - 120);
             let py = direction === 'TB' ? 350 : (num * 200 - 100);
-            const newNode = { id: newId, type, position: { x: sourceNode.position.x + px, y: sourceNode.position.y + py }, data: { dir: direction, prompt: '' } };
-            setTimeout(() => { setEdges(eds => addEdge({ id: `e-${sourceId}-${newId}`, source: sourceId, target: newId, type: 'deleteEdge' }, eds)); }, 50);
+            const newNode = {
+                id: newId,
+                type,
+                position: { x: sourceNode.position.x + px, y: sourceNode.position.y + py },
+                data: { dir: direction, prompt: '', projectScope: nextScope },
+            };
+            setTimeout(() => {
+                setEdges(eds => addEdge({
+                    id: `e-${sourceId}-${newId}`,
+                    source: sourceId,
+                    target: newId,
+                    type: 'deleteEdge',
+                    data: { projectScope: nextScope },
+                }, eds));
+            }, 50);
             return [...nds, newNode];
         });
         markDraftDirty();
-    }, [direction, edges, markDraftDirty, setNodes, setEdges, t]);
+    }, [direction, edges, isGraphEditMode, markDraftDirty, setNodes, setEdges, t]);
 
     const onBranchFromChat = useCallback((sourceNodeId, chatHistory) => {
         const outgoingEdges = edges.filter(e => e.source === sourceNodeId);
@@ -954,13 +1289,21 @@ function EditorContent() {
                 id: newId, type: 'sequenceNode',
                 position: { x: sourceNode.position.x + px, y: sourceNode.position.y + py },
                 data: {
-                    dir: direction, prompt: '',
+                    dir: direction, prompt: '', projectScope: PROJECT_SCOPE_LOCAL,
                     chatHistory: chatHistory ? [...chatHistory] : [],
                     systemPrompt: sourceNode.data?.systemPrompt || '',
                     selectedApiKey: sourceNode.data?.selectedApiKey || 0
                 }
             };
-            setTimeout(() => { setEdges(eds => addEdge({ id: `e-${sourceNodeId}-${newId}`, source: sourceNodeId, target: newId, type: 'deleteEdge' }, eds)); }, 50);
+            setTimeout(() => {
+                setEdges(eds => addEdge({
+                    id: `e-${sourceNodeId}-${newId}`,
+                    source: sourceNodeId,
+                    target: newId,
+                    type: 'deleteEdge',
+                    data: { projectScope: PROJECT_SCOPE_LOCAL },
+                }, eds));
+            }, 50);
             return [...nds, newNode];
         });
         markDraftDirty();
@@ -978,6 +1321,12 @@ function EditorContent() {
 
     const onDeleteNode = useCallback((nodeId) => {
         setNodes((nds) => {
+            const targetNode = nds.find((node) => node.id === nodeId);
+            if (!targetNode) return nds;
+            const isSharedNode = getNodeProjectScope(targetNode) === PROJECT_SCOPE_SHARED;
+            if ((isSharedNode && !isGraphEditMode) || (!isSharedNode && isGraphEditMode)) {
+                return nds;
+            }
             const groups = extractLoopGroups(nds).map((group) => [...group]);
             const groupIndex = groups.findIndex((group) => group.includes(nodeId));
             const removedNodeIds = new Set([nodeId]);
@@ -1017,12 +1366,25 @@ function EditorContent() {
             return preparedGraph.nodes;
         });
         markDraftDirty();
-    }, [activeChatNodeId, direction, edges, markDraftDirty, setEdges, setNodes]);
+    }, [activeChatNodeId, direction, edges, isGraphEditMode, markDraftDirty, setEdges, setNodes]);
 
     const onConnect = useCallback((params) => {
         // Prevent self-loops
         if (params.source === params.target) return;
         const sourceNode = nodes.find((node) => node.id === params.source);
+        const targetNode = nodes.find((node) => node.id === params.target);
+        const sourceScope = sourceNode ? getNodeProjectScope(sourceNode) : PROJECT_SCOPE_LOCAL;
+        const targetScope = targetNode ? getNodeProjectScope(targetNode) : PROJECT_SCOPE_LOCAL;
+
+        if (currentProjectId) {
+            if (isGraphEditMode) {
+                if (sourceScope !== PROJECT_SCOPE_SHARED || targetScope !== PROJECT_SCOPE_SHARED) return;
+            } else if (sourceScope === PROJECT_SCOPE_SHARED || targetScope === PROJECT_SCOPE_SHARED) {
+                return;
+            }
+        }
+
+        const edgeScope = currentProjectId && isGraphEditMode ? PROJECT_SCOPE_SHARED : PROJECT_SCOPE_LOCAL;
         setEdges((eds) => {
             const baseEdges = sourceNode?.type === 'goalNode'
                 ? eds.filter((edge) => edge.source !== params.source)
@@ -1031,6 +1393,7 @@ function EditorContent() {
                 ...params,
                 sourceHandle: params.sourceHandle || (sourceNode?.type === 'goalNode' ? 'goal' : params.sourceHandle),
                 type: 'deleteEdge',
+                data: { projectScope: edgeScope },
             }, baseEdges);
         });
         window.requestAnimationFrame(() => {
@@ -1038,18 +1401,20 @@ function EditorContent() {
             if (params.target) updateNodeInternals(params.target);
         });
         markDraftDirty();
-    }, [markDraftDirty, nodes, setEdges, updateNodeInternals]);
+    }, [currentProjectId, isGraphEditMode, markDraftDirty, nodes, setEdges, updateNodeInternals]);
 
     const onDeleteEdge = useCallback((edgeId) => {
         const edgeToDelete = edges.find((edge) => edge.id === edgeId);
         if (edgeToDelete?.data?.edgeKind === 'loop') return;
+        const isSharedEdge = getEdgeProjectScope(edgeToDelete) === PROJECT_SCOPE_SHARED;
+        if ((isSharedEdge && !isGraphEditMode) || (!isSharedEdge && isGraphEditMode)) return;
         setEdges(eds => eds.filter(e => e.id !== edgeId));
         window.requestAnimationFrame(() => {
             if (edgeToDelete?.source) updateNodeInternals(edgeToDelete.source);
             if (edgeToDelete?.target) updateNodeInternals(edgeToDelete.target);
         });
         markDraftDirty();
-    }, [edges, markDraftDirty, setEdges, updateNodeInternals]);
+    }, [edges, isGraphEditMode, markDraftDirty, setEdges, updateNodeInternals]);
 
     const onEdgeClick = useCallback((event, edge) => {
         event.stopPropagation();
@@ -1057,11 +1422,18 @@ function EditorContent() {
     }, [onDeleteEdge]);
 
     const edgesWithData = useMemo(() => {
-        return edges.map(e => ({
-            ...e,
-            data: { ...e.data, onDelete: onDeleteEdge }
-        }));
-    }, [edges, onDeleteEdge]);
+        return edges.map((edge) => {
+            const isSharedEdge = getEdgeProjectScope(edge) === PROJECT_SCOPE_SHARED;
+            const canDelete = !currentProjectId
+                ? true
+                : (isGraphEditMode ? isSharedEdge : !isSharedEdge);
+
+            return {
+                ...edge,
+                data: { ...edge.data, onDelete: onDeleteEdge, canDelete },
+            };
+        });
+    }, [currentProjectId, edges, isGraphEditMode, onDeleteEdge]);
 
     const nodesWithData = useMemo(() => {
         // Get goal/systemPrompt from starter node
@@ -1069,9 +1441,29 @@ function EditorContent() {
         const sharedGoal = starterNode?.data?.systemPrompt || currentProject?.sharedGoal || '';
         return nodes.map(n => ({
             ...n,
-            draggable: n.type === 'goalNode' ? false : n.draggable,
+            draggable: n.type === 'goalNode'
+                ? false
+                : (
+                    !currentProjectId
+                        ? (n.draggable ?? true)
+                        : (
+                            isGraphEditMode
+                                ? getNodeProjectScope(n) === PROJECT_SCOPE_SHARED
+                                : getNodeProjectScope(n) !== PROJECT_SCOPE_SHARED
+                        )
+                ),
             data: {
                 ...n.data, dir: direction,
+                isProjectShared: getNodeProjectScope(n) === PROJECT_SCOPE_SHARED,
+                isGraphEditMode,
+                showSharedHighlight: Boolean(currentProjectId && isGraphEditMode && getNodeProjectScope(n) === PROJECT_SCOPE_SHARED),
+                canQuickAdd: !currentProjectId || isGraphEditMode || getNodeProjectScope(n) !== PROJECT_SCOPE_SHARED,
+                canDeleteNode: !currentProjectId
+                    ? !n.data?.isStarter
+                    : (isGraphEditMode ? getNodeProjectScope(n) === PROJECT_SCOPE_SHARED : getNodeProjectScope(n) !== PROJECT_SCOPE_SHARED) && !n.data?.isStarter,
+                canToggleLoop: !currentProjectId
+                    ? true
+                    : (isGraphEditMode ? getNodeProjectScope(n) === PROJECT_SCOPE_SHARED : getNodeProjectScope(n) !== PROJECT_SCOPE_SHARED),
                 systemPrompt: n.data?.isStarter ? (n.data?.systemPrompt || currentProject?.sharedGoal || '') : (n.data?.systemPrompt || sharedGoal),
                 projectContextPrompt,
                 onChange: updateNodeData,
@@ -1099,7 +1491,7 @@ function EditorContent() {
                 apiKeys
             }
         }));
-    }, [nodes, edges, direction, currentProject, projectContextPrompt, updateNodeData, toggleLoopForNode, onAddBranch, onQuickAdd, onDeleteNode, apiKeys, navigate, spaceId, isDraft]);
+    }, [nodes, edges, direction, currentProject, currentProjectId, projectContextPrompt, updateNodeData, toggleLoopForNode, onAddBranch, onQuickAdd, onDeleteNode, apiKeys, navigate, spaceId, isDraft, isGraphEditMode]);
 
     useEffect(() => {
         const timer = setTimeout(() => {
@@ -1134,7 +1526,19 @@ function EditorContent() {
     ];
 
     return (
-        <div className="editor-layout" style={{ display: 'flex', flexDirection: 'row', height: '100dvh', width: '100vw', overflow: 'hidden' }}>
+        <div
+            className="editor-layout"
+            style={{
+                display: 'flex',
+                flexDirection: 'row',
+                height: '100dvh',
+                width: '100vw',
+                overflow: 'hidden',
+                boxShadow: isGraphEditMode
+                    ? 'inset 0 0 0 2px rgba(248, 113, 113, 0.58), 0 0 0 4px rgba(248, 113, 113, 0.12)'
+                    : 'none',
+            }}
+        >
             <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} onOpenSettings={() => setShowSettings(true)} />
 
             {/* Left icon bar (always visible) */}
@@ -1145,10 +1549,23 @@ function EditorContent() {
                 paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 0.75rem)',
                 gap: '0.5rem', zIndex: 200, flexShrink: 0, position: 'relative'
             }}>
-                <button onClick={() => setIsSidebarOpen(true)} className="btn-icon" style={{ width: '36px', height: '36px' }} title={t('sidebar.title')}>
+                <button
+                    onClick={() => !isGraphEditMode && setIsSidebarOpen(true)}
+                    disabled={isGraphEditMode}
+                    className="btn-icon"
+                    style={{ width: '36px', height: '36px', opacity: isGraphEditMode ? 0.45 : 1, cursor: isGraphEditMode ? 'default' : 'pointer' }}
+                    title={t('sidebar.title')}
+                >
                     <Menu size={18} />
                 </button>
-                <button onClick={() => setShowSettings(true)} className="btn-icon" style={{ width: '36px', height: '36px', marginTop: 'auto' }} title={t('settings.title')} aria-label={t('settings.title')}>
+                <button
+                    onClick={() => !isGraphEditMode && setShowSettings(true)}
+                    disabled={isGraphEditMode}
+                    className="btn-icon"
+                    style={{ width: '36px', height: '36px', marginTop: 'auto', opacity: isGraphEditMode ? 0.45 : 1, cursor: isGraphEditMode ? 'default' : 'pointer' }}
+                    title={t('settings.title')}
+                    aria-label={t('settings.title')}
+                >
                     <Settings size={17} />
                 </button>
             </div>
@@ -1205,7 +1622,9 @@ function EditorContent() {
                                 return (
                                     <button
                                         key={tab.id}
+                                        disabled={isGraphEditMode}
                                         onClick={() => {
+                                            if (isGraphEditMode) return;
                                             if (isDraft) {
                                                 setDraftMode(tab.id);
                                                 return;
@@ -1218,7 +1637,6 @@ function EditorContent() {
                                             padding: '0.38rem 0.78rem',
                                             background: isActive ? 'linear-gradient(135deg, rgba(108,140,255,0.92), rgba(96,165,250,0.92))' : 'transparent',
                                             color: isActive ? 'white' : 'var(--text-muted)',
-                                            cursor: 'pointer',
                                             display: 'flex',
                                             alignItems: 'center',
                                             gap: '0.35rem',
@@ -1227,6 +1645,8 @@ function EditorContent() {
                                             fontFamily: 'inherit',
                                             boxShadow: isActive ? '0 8px 24px rgba(108, 140, 255, 0.25)' : 'none',
                                             transition: 'all 0.2s',
+                                            opacity: isGraphEditMode ? 0.45 : 1,
+                                            cursor: isGraphEditMode ? 'default' : 'pointer',
                                         }}
                                     >
                                         <Icon size={13} />
@@ -1235,6 +1655,67 @@ function EditorContent() {
                                 );
                             })}
                         </div>
+
+                        {currentProject && currentMode === 'graph' && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                                {!isGraphEditMode ? (
+                                    <button
+                                        type="button"
+                                        onClick={beginGraphEditMode}
+                                        style={{
+                                            border: '1px solid rgba(248, 113, 113, 0.24)',
+                                            borderRadius: '999px',
+                                            background: 'rgba(248, 113, 113, 0.08)',
+                                            color: '#fecaca',
+                                            padding: '0.38rem 0.82rem',
+                                            fontSize: '0.76rem',
+                                            fontWeight: 600,
+                                            cursor: 'pointer',
+                                            fontFamily: 'inherit',
+                                        }}
+                                    >
+                                        編集モード
+                                    </button>
+                                ) : (
+                                    <>
+                                        <button
+                                            type="button"
+                                            onClick={cancelGraphEditMode}
+                                            style={{
+                                                border: '1px solid rgba(255,255,255,0.08)',
+                                                borderRadius: '999px',
+                                                background: 'rgba(255,255,255,0.04)',
+                                                color: 'var(--text-main)',
+                                                padding: '0.38rem 0.82rem',
+                                                fontSize: '0.76rem',
+                                                fontWeight: 600,
+                                                cursor: 'pointer',
+                                                fontFamily: 'inherit',
+                                            }}
+                                        >
+                                            閉じる
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={completeGraphEditMode}
+                                            style={{
+                                                border: '1px solid rgba(248, 113, 113, 0.24)',
+                                                borderRadius: '999px',
+                                                background: 'rgba(248, 113, 113, 0.12)',
+                                                color: '#fee2e2',
+                                                padding: '0.38rem 0.82rem',
+                                                fontSize: '0.76rem',
+                                                fontWeight: 700,
+                                                cursor: 'pointer',
+                                                fontFamily: 'inherit',
+                                            }}
+                                        >
+                                            完了
+                                        </button>
+                                    </>
+                                )}
+                            </div>
+                        )}
 
                     </div>
                 </div>
