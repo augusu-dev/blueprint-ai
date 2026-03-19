@@ -169,7 +169,7 @@ function clampNumber(value, min, max) {
 }
 
 function buildInlineOverlayPlacement(container, range, estimatedHeight) {
-    const root = container?.parentElement;
+    const root = container?.closest?.('[data-chat-column-shell="true"]');
     if (!root || typeof range?.getBoundingClientRect !== 'function') return null;
 
     const rootRect = root.getBoundingClientRect();
@@ -185,8 +185,9 @@ function buildInlineOverlayPlacement(container, range, estimatedHeight) {
         ? selectionRect.bottom - rootRect.top + gap
         : selectionRect.top - rootRect.top - estimatedHeight - gap;
     const left = clampNumber(selectionRect.left - rootRect.left, 8, Math.max(8, rootRect.width - width - 8));
+    const maxTop = Math.max(8, rootRect.height - estimatedHeight - 8);
 
-    return { top, left, width, placement };
+    return { top: clampNumber(top, 8, maxTop), left, width, placement };
 }
 
 function analyzeChatHistory(history) {
@@ -856,17 +857,6 @@ export default function ChatView({
         setActiveExplanation(null);
     };
 
-    const handleBranch = (idx) => {
-        if (!node || !onBranchFromChat) return;
-        const currentBranchCount = node.data?.branchCount || 0;
-        if (currentBranchCount >= 10) return;
-
-        const success = onBranchFromChat(node.id, chatHistory.slice(0, idx + 1));
-        if (success) {
-            onUpdateNodeData(node.id, 'branchCount', currentBranchCount + 1);
-        }
-    };
-
     const handleActionApprove = (idx) => {
         const message = normalizeAiMessage(chatHistory[idx]);
         const activeVariant = getActiveResponseVariant(message);
@@ -1342,7 +1332,7 @@ export default function ChatView({
         };
 
         return (
-            <div key={treeNode.id} style={columnShellStyle}>
+            <div key={treeNode.id} data-chat-column-shell="true" style={columnShellStyle}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.45rem', paddingLeft: '0.1rem' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
                         <div style={{ width: '8px', height: '8px', borderRadius: '999px', background: 'rgba(116, 129, 255, 0.82)' }} />
@@ -1408,6 +1398,8 @@ export default function ChatView({
                                     ...userBubbleStyle,
                                     ...bubbleWidthStyle,
                                     minWidth: 0,
+                                    maxHeight: 'calc(1.72em * 30 + 2rem)',
+                                    overflowY: 'auto',
                                 }}
                             >
                                 {userMessage.content}
@@ -1563,6 +1555,8 @@ export default function ChatView({
                                         ...assistantBubbleStyle,
                                         ...bubbleWidthStyle,
                                         minWidth: 0,
+                                        maxHeight: 'calc(1.78em * 30 + 2rem)',
+                                        overflowY: 'auto',
                                         opacity: isSelectionOverlayVisible || isExplanationOverlayVisible ? 0.68 : 1,
                                         filter: 'none',
                                         userSelect: isSelectionOverlayVisible || isExplanationOverlayVisible ? 'none' : 'text',
@@ -1774,10 +1768,6 @@ export default function ChatView({
                                 <RefreshCw size={14} />
                             </button>
 
-                            <button style={iconActionStyle} onClick={() => handleBranch(treeNode.replyIndex)} disabled={branchCount >= 10} title={branchCount >= 10 ? t('chat.branchMax') : t('chat.branch')} aria-label={branchCount >= 10 ? t('chat.branchMax') : t('chat.branch')}>
-                                <GitBranch size={14} />
-                            </button>
-
                             {branchCount > 0 && (
                                 <div style={{ ...actionStripStyle, paddingLeft: '0.28rem', marginLeft: '0.08rem', borderLeft: '1px solid rgba(68, 76, 95, 0.12)' }}>
                                     <button
@@ -1820,14 +1810,14 @@ export default function ChatView({
     };
 
     const renderChatNodeTree = (treeNode) => (
-        <div key={treeNode.id} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem', minWidth: 0, width: 'fit-content' }}>
-            {renderConversationColumn(treeNode)}
+        <div key={treeNode.id} style={{ display: 'flex', flexDirection: 'row', alignItems: 'flex-start', gap: '1rem', minWidth: 0, width: 'fit-content' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 0 }}>
+                {renderConversationColumn(treeNode)}
+            </div>
             {treeNode.children.length > 0 && (
-                <div style={{ position: 'relative', width: 'fit-content', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem', paddingTop: '1rem' }}>
-                    <div style={{ position: 'absolute', top: 0, left: '50%', transform: 'translateX(-50%)', width: '2px', height: '1rem', background: 'linear-gradient(180deg, rgba(125,161,255,0.46) 0%, rgba(125,161,255,0.06) 100%)' }} />
-                    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'flex-start', gap: '1rem', flexWrap: 'wrap', width: 'fit-content' }}>
-                        {treeNode.children.map((child) => renderChatNodeTree(child))}
-                    </div>
+                <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '1rem', paddingLeft: '1.1rem', minWidth: 0 }}>
+                    <div style={{ position: 'absolute', left: 0, top: '1.25rem', bottom: '1.25rem', width: '2px', borderRadius: '999px', background: 'linear-gradient(180deg, rgba(125,161,255,0.46) 0%, rgba(125,161,255,0.06) 100%)' }} />
+                    {treeNode.children.map((child) => renderChatNodeTree(child))}
                 </div>
             )}
         </div>

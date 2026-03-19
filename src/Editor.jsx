@@ -550,6 +550,11 @@ function EditorContent() {
         localStorage.setItem('blueprint_api_keys', JSON.stringify(apiKeys));
     }, [apiKeys]);
 
+    const handleSaveSettings = useCallback(() => {
+        localStorage.setItem('blueprint_api_keys', JSON.stringify(apiKeys));
+        setShowSettings(false);
+    }, [apiKeys]);
+
     useEffect(() => {
         const handleWorkspaceMetaUpdate = () => setWorkspaceMetaVersion((current) => current + 1);
         window.addEventListener('workspaceMetaUpdated', handleWorkspaceMetaUpdate);
@@ -1861,7 +1866,10 @@ function EditorContent() {
                         </div>
                         <div className="settings-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <button className="btn-text-danger" style={{ fontSize: '0.82rem' }} onClick={() => { setShowSettings(false); supabase.auth.signOut(); }}><LogOut size={14} style={{ display: 'inline', verticalAlign: 'text-bottom', marginRight: '4px' }} /> {t('settings.logout')}</button>
-                            <button className="btn btn-secondary" onClick={() => setShowSettings(false)}>{t('settings.cancel')}</button>
+                            <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                <button className="btn btn-secondary" onClick={() => setShowSettings(false)}>{t('settings.cancel')}</button>
+                                <button className="btn btn-primary" onClick={handleSaveSettings}>{t('settings.save')}</button>
+                            </div>
                         </div>
                     </div>
                 </div>
