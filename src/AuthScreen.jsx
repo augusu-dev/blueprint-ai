@@ -5,6 +5,7 @@ import { Mail, Lock, ArrowRight, Sparkles, UserPlus } from 'lucide-react';
 
 export default function AuthScreen() {
     const { t } = useLanguage();
+    const openAiOidcProvider = import.meta.env.VITE_OPENAI_OIDC_PROVIDER || 'custom:openai';
     const [isSignUp, setIsSignUp] = useState(false);
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
@@ -44,6 +45,38 @@ export default function AuthScreen() {
             }
         } catch (err) {
             setMessage(t('auth.unexpectedError'));
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleOpenAiAuth = async () => {
+        if (!supabase) {
+            setMessage(t('auth.noSupabase'));
+            return;
+        }
+
+        setLoading(true);
+        setMessage('');
+
+        try {
+            const { error } = await supabase.auth.signInWithOAuth({
+                provider: openAiOidcProvider,
+                options: {
+                    redirectTo: window.location.origin,
+                    scopes: 'openid profile email',
+                },
+            });
+
+            if (error) {
+                if (error.code === 'oauth_provider_not_supported' || error.code === 'provider_disabled') {
+                    setMessage('OpenAI login requires a custom OIDC provider to be configured in Supabase.');
+                } else {
+                    setMessage(error.message);
+                }
+            }
+        } catch (err) {
+            setMessage('OpenAI login could not be started.');
         } finally {
             setLoading(false);
         }
@@ -102,6 +135,34 @@ export default function AuthScreen() {
                 </div>
 
                 <form onSubmit={handleAuth} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                    <button
+                        type="button"
+                        disabled={loading}
+                        onClick={handleOpenAiAuth}
+                        style={{
+                            width: '100%', padding: '0.85rem',
+                            background: 'rgba(255,255,255,0.04)',
+                            color: 'var(--text-main)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '12px',
+                            fontSize: '0.95rem', fontWeight: 600, cursor: loading ? 'wait' : 'pointer',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem',
+                            transition: 'all 0.2s',
+                        }}
+                        onMouseEnter={(e) => { if (!loading) e.currentTarget.style.borderColor = 'rgba(92, 124, 250, 0.45)'; }}
+                        onMouseLeave={(e) => { if (!loading) e.currentTarget.style.borderColor = 'rgba(255,255,255,0.12)'; }}
+                    >
+                        <Sparkles size={18} />
+                        Continue with OpenAI
+                    </button>
+
+                    <div style={{
+                        marginTop: '-0.45rem',
+                        fontSize: '0.75rem',
+                        color: 'var(--text-muted)',
+                        lineHeight: 1.5,
+                    }}>
+                        This signs into Blueprint with an OpenAI account when a Supabase custom OIDC provider is configured.
+                    </div>
+
                     <div>
                         <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 500, color: 'var(--text-main)', marginBottom: '0.5rem' }}>
                             {t('auth.email')}
