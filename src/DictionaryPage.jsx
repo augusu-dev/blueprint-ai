@@ -5,12 +5,14 @@ import {
     ChevronDown,
     ChevronLeft,
     ChevronRight,
+    Menu,
     RefreshCw,
     Search,
     Sparkles,
     Settings,
     Trash2,
 } from 'lucide-react';
+import Sidebar from './Sidebar';
 import { getSpacePath } from './lib/routes';
 import { resolveSpaceTitle } from './lib/space';
 import {
@@ -148,6 +150,7 @@ export default function DictionaryPage() {
     const [apiKeys, setApiKeys] = useState(() => loadApiKeys());
     const [isGenerating, setIsGenerating] = useState({});
     const [statusMessage, setStatusMessage] = useState('');
+    const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
     useEffect(() => {
         if (currentSpaceId) {
@@ -420,6 +423,11 @@ export default function DictionaryPage() {
                 color: 'var(--text-main)',
             }}
         >
+            <Sidebar
+                isOpen={isSidebarOpen}
+                onClose={() => setIsSidebarOpen(false)}
+                onOpenSettings={openSettingsFromDictionary}
+            />
             <div
                 style={{
                     width: '52px',
@@ -432,8 +440,20 @@ export default function DictionaryPage() {
                     paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 0.75rem)',
                     gap: '0.5rem',
                     flexShrink: 0,
+                    position: 'relative',
+                    zIndex: 200,
                 }}
             >
+                <button
+                    type="button"
+                    className="btn-icon"
+                    onClick={() => setIsSidebarOpen(true)}
+                    style={{ width: '36px', height: '36px' }}
+                    title="ワークスペース"
+                    aria-label="ワークスペース"
+                >
+                    <Menu size={18} />
+                </button>
                 <div
                     style={{
                         marginTop: 'auto',

@@ -106,6 +106,23 @@ function getOpenAICompatibleHeaders(provider, key) {
     return headers;
 }
 
+function isModelSelectionError(message = '') {
+    const normalized = String(message || '').toLowerCase();
+    if (!normalized) return false;
+    return (
+        normalized.includes('model')
+        && (
+            normalized.includes('not found')
+            || normalized.includes('unknown')
+            || normalized.includes('unsupported')
+            || normalized.includes('invalid')
+            || normalized.includes('does not exist')
+            || normalized.includes('no such')
+            || normalized.includes('unavailable')
+        )
+    );
+}
+
 function isRetryableStatus(status) {
     return status === 408 || status === 409 || status === 425 || status === 429 || status >= 500;
 }
@@ -185,6 +202,7 @@ export async function requestChatText({
     timeoutMs = 30000,
 }) {
     const { provider, key, model } = resolveModelSelection(apiKeyEntry);
+    const defaultModel = getDefaultModel(provider);
 
     if (!key) {
         throw new Error(`Missing credential for ${provider}`);
@@ -193,84 +211,123 @@ export async function requestChatText({
     const normalizedHistory = normalizeHistory(history);
 
     if (provider === 'gemini') {
+        let activeModel = model || defaultModel;
         return requestWithRetry(async () => {
-            const { response, data } = await fetchJsonWithTimeout(
-                `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
-                {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        systemInstruction: systemPrompt ? { parts: [{ text: systemPrompt }] } : undefined,
-                        contents: normalizedHistory.map((message) => ({
-                            role: message.role === 'user' ? 'user' : 'model',
-                            parts: [{ text: message.content }],
-                        })),
-                        tools: enableGeminiSearch ? [{ googleSearch: {} }] : undefined,
-                        generationConfig: maxTokens ? { maxOutputTokens: maxTokens } : undefined,
-                    }),
-                },
-                timeoutMs,
-            );
+            const runRequest = async () => {
+                const { response, data } = await fetchJsonWithTimeout(
+                    `https://generativelanguage.googleapis.com/v1beta/models/${activeModel}:generateContent?key=${key}`,
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            systemInstruction: systemPrompt ? { parts: [{ text: systemPrompt }] } : undefined,
+                            contents: normalizedHistory.map((message) => ({
+                                role: message.role === 'user' ? 'user' : 'model',
+                                parts: [{ text: message.content }],
+                            })),
+                            tools: enableGeminiSearch ? [{ googleSearch: {} }] : undefined,
+                            generationConfig: maxTokens ? { maxOutputTokens: maxTokens } : undefined,
+                        }),
+                    },
+                    timeoutMs,
+                );
 
-            if (!response.ok) {
-                const error = new Error(data?.error?.message || 'Gemini Error');
-                error.retryable = isRetryableStatus(response.status);
+                if (!response.ok) {
+                    const error = new Error(data?.error?.message || 'Gemini Error');
+                    error.retryable = isRetryableStatus(response.status);
+                    throw error;
+                }
+
+                return extractGeminiText(data) || 'No response.';
+            };
+
+            try {
+                return await runRequest();
+            } catch (error) {
+                if (activeModel !== defaultModel && isModelSelectionError(error?.message)) {
+                    activeModel = defaultModel;
+                    return runRequest();
+                }
                 throw error;
             }
-
-            return extractGeminiText(data) || 'No response.';
         }, { attempts });
     }
 
     if (provider === 'anthropic') {
+        let activeModel = model || defaultModel;
         return requestWithRetry(async () => {
-            const { response, data } = await fetchJsonWithTimeout('https://api.anthropic.com/v1/messages', {
+            const runRequest = async () => {
+                const { response, data } = await fetchJsonWithTimeout('https://api.anthropic.com/v1/messages', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'x-api-key': key,
+                        'anthropic-version': '2023-06-01',
+                        'anthropic-dangerously-allow-browser': 'true',
+                    },
+                    body: JSON.stringify({
+                        model: activeModel,
+                        max_tokens: maxTokens,
+                        system: systemPrompt || undefined,
+                        messages: normalizedHistory,
+                    }),
+                }, timeoutMs);
+
+                if (!response.ok) {
+                    const error = new Error(data?.error?.message || 'Anthropic Error');
+                    error.retryable = isRetryableStatus(response.status);
+                    throw error;
+                }
+
+                return extractAnthropicText(data) || 'No response.';
+            };
+
+            try {
+                return await runRequest();
+            } catch (error) {
+                if (activeModel !== defaultModel && isModelSelectionError(error?.message)) {
+                    activeModel = defaultModel;
+                    return runRequest();
+                }
+                throw error;
+            }
+        }, { attempts });
+    }
+
+    let activeModel = model || defaultModel;
+    return requestWithRetry(async () => {
+        const runRequest = async () => {
+            const { response, data } = await fetchJsonWithTimeout(getOpenAICompatibleEndpoint(provider), {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'x-api-key': key,
-                    'anthropic-version': '2023-06-01',
-                    'anthropic-dangerously-allow-browser': 'true',
-                },
+                headers: getOpenAICompatibleHeaders(provider, key),
                 body: JSON.stringify({
-                    model,
+                    model: activeModel,
+                    messages: [
+                        ...(systemPrompt ? [{ role: 'system', content: systemPrompt }] : []),
+                        ...normalizedHistory,
+                    ],
                     max_tokens: maxTokens,
-                    system: systemPrompt || undefined,
-                    messages: normalizedHistory,
                 }),
             }, timeoutMs);
 
             if (!response.ok) {
-                const error = new Error(data?.error?.message || 'Anthropic Error');
+                const error = new Error(data?.error?.message || 'LLM Error');
                 error.retryable = isRetryableStatus(response.status);
                 throw error;
             }
 
-            return extractAnthropicText(data) || 'No response.';
-        }, { attempts });
-    }
+            return extractOpenAICompatibleText(data) || 'No response.';
+        };
 
-    return requestWithRetry(async () => {
-        const { response, data } = await fetchJsonWithTimeout(getOpenAICompatibleEndpoint(provider), {
-            method: 'POST',
-            headers: getOpenAICompatibleHeaders(provider, key),
-            body: JSON.stringify({
-                model,
-                messages: [
-                    ...(systemPrompt ? [{ role: 'system', content: systemPrompt }] : []),
-                    ...normalizedHistory,
-                ],
-                max_tokens: maxTokens,
-            }),
-        }, timeoutMs);
-
-        if (!response.ok) {
-            const error = new Error(data?.error?.message || 'LLM Error');
-            error.retryable = isRetryableStatus(response.status);
+        try {
+            return await runRequest();
+        } catch (error) {
+            if (activeModel !== defaultModel && isModelSelectionError(error?.message)) {
+                activeModel = defaultModel;
+                return runRequest();
+            }
             throw error;
         }
-
-        return extractOpenAICompatibleText(data) || 'No response.';
     }, { attempts });
 }
 
